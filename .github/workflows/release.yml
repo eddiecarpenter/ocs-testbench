@@ -1,0 +1,125 @@
+name: Release Notes
+
+# Triggered when any GitHub release is published — by GoReleaser, by the
+# local publish-release workflow, or by any other means.
+#
+# This workflow generates AI release notes from git history and updates
+# the release body. It does not create releases or build artefacts.
+#
+# How the release is created is entirely the local project's concern:
+#   - GoReleaser projects: GoReleaser creates the release on tag push
+#   - Framework/docs repos: publish-release.yml creates a stub release on tag push
+#   - Any other tool: works the same way
+#
+# In all cases, when the release is published this workflow fires and
+# replaces the release body with AI-generated notes.
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  release-notes:
+    name: Generate Release Notes
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0  # full history required to find previous tag and commits
+          token: ${{ secrets.GOOSE_AGENT_PAT }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
+        with:
+          node-version: 'lts/*'
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y bzip2 libgomp1
+          mkdir -p ~/.local/bin
+          GH_VERSION=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
+          curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" -o /tmp/gh.tar.gz
+          tar -xz -C /tmp -f /tmp/gh.tar.gz
+          mv /tmp/gh_${GH_VERSION}_linux_amd64/bin/gh ~/.local/bin/gh
+          GOOSE_VERSION=$(curl -fsSL https://api.github.com/repos/block/goose/releases/latest | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
+          curl -fsSL "https://github.com/block/goose/releases/download/v${GOOSE_VERSION}/goose-x86_64-unknown-linux-gnu.tar.bz2" -o /tmp/goose.tar.bz2
+          tar -xj -C ~/.local/bin -f /tmp/goose.tar.bz2
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          npm install -g @anthropic-ai/claude-code
+
+      - name: Restore Claude Code auth
+        run: |
+          mkdir -p ~/.claude
+          echo "${{ secrets.CLAUDE_CREDENTIALS_JSON }}" | base64 -d > ~/.claude/.credentials.json
+          chmod 0600 ~/.claude/.credentials.json
+
+      - name: Validate and refresh Claude Code credentials
+        env:
+          GH_TOKEN: ${{ secrets.GOOSE_AGENT_PAT }}
+        run: |
+          if [ ! -s ~/.claude/.credentials.json ]; then
+            echo "ERROR: ~/.claude/.credentials.json is empty or missing."
+            echo "Regenerate: run the refresh-credentials skill locally, then re-run this job."
+            exit 1
+          fi
+          CREDS_BEFORE=$(sha256sum ~/.claude/.credentials.json | cut -d' ' -f1)
+          claude -p "hi" > /dev/null || {
+            echo "ERROR: Claude Code authentication failed — session may be revoked."
+            echo "Run the refresh-credentials skill locally to restore the secret."
+            exit 1
+          }
+          echo "Claude Code credentials valid."
+          CREDS_AFTER=$(sha256sum ~/.claude/.credentials.json | cut -d' ' -f1)
+          if [ "$CREDS_BEFORE" != "$CREDS_AFTER" ]; then
+            echo "Credentials rotated — updating CLAUDE_CREDENTIALS_JSON secret"
+            gh secret set CLAUDE_CREDENTIALS_JSON \
+              --repo "${GITHUB_REPOSITORY}" \
+              --body "$(cat ~/.claude/.credentials.json | base64 | tr -d '\n')"
+          else
+            echo "Credentials unchanged — no update needed"
+          fi
+
+      - name: Configure environment
+        run: |
+          git config user.name "${{ vars.AGENT_USER || 'github-actions[bot]' }}"
+          git config user.email "${{ vars.AGENT_USER || 'github-actions[bot]' }}@users.noreply.github.com"
+
+      - name: Configure Goose
+        run: |
+          mkdir -p ~/.config/goose
+          cat > ~/.config/goose/config.yaml <<GOOSEEOF
+          GOOSE_PROVIDER: ${{ vars.GOOSE_PROVIDER || 'claude-code' }}
+          GOOSE_MODEL: ${{ vars.GOOSE_MODEL || 'default' }}
+          GOOSEEOF
+
+      - name: Run release recipe
+        run: |
+          goose run \
+            --recipe .goose/recipes/release.yaml \
+            --params tag=${{ github.event.release.tag_name }} \
+            --params repo=${{ github.repository }}
+        env:
+          GOOSE_PATH_ROOT: ${{ github.workspace }}/.goose
+          GOOSE_PROVIDER: ${{ vars.GOOSE_PROVIDER || 'claude-code' }}
+          GOOSE_MODEL: ${{ vars.GOOSE_MODEL || 'default' }}
+          GOOSE_MODE: auto
+          GOOSE_DISABLE_SESSION_NAMING: "true"
+          GH_TOKEN: ${{ secrets.GOOSE_AGENT_PAT }}
+
+      - name: Verify release notes were updated
+        run: |
+          BODY=$(curl -sf \
+            -H "Authorization: token ${{ secrets.GOOSE_AGENT_PAT }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.event.release.tag_name }}" \
+            | jq -r '.body')
+          if echo "$BODY" | grep -q "Generating release notes"; then
+            echo "ERROR: Release body was not updated — Goose session produced no output."
+            echo "Check that CLAUDE_CREDENTIALS_JSON is set in this repo's secrets and is valid."
+            exit 1
+          fi
+          echo "Release notes updated successfully."

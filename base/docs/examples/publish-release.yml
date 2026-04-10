@@ -1,0 +1,121 @@
+# publish-release.yml — Example release workflows
+#
+# Copy the relevant example to .github/workflows/publish-release.yml in your
+# repo and adapt it. You own this file — it is not managed or synced by the
+# ai-native-delivery framework.
+#
+# How the release chain works:
+#
+#   tag push
+#     ↓
+#   Your workflow (this file) — creates the GitHub release
+#     ↓
+#   on: release: types: [published]
+#     ↓
+#   Framework release.yml — generates AI notes, updates the release body
+#
+# The framework only updates release notes. It does not create releases,
+# build artefacts, or publish to registries — that is entirely your concern.
+
+# ============================================================================
+# EXAMPLE A — No build artefacts (framework repos, docs repos, etc.)
+# ============================================================================
+# Triggered by tag push. Creates a stub GitHub release, which triggers the
+# framework to generate and update the AI release notes.
+
+name: Publish Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Create GitHub release
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "Release ${{ github.ref_name }}" \
+            --notes "Generating release notes…"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+
+# ============================================================================
+# EXAMPLE B — Go project using GoReleaser
+# ============================================================================
+# GoReleaser triggers on tag push, builds all platform targets, and creates
+# the GitHub release with artefacts. The framework then triggers on
+# release: published and updates the release body with AI notes.
+# No changes to .goreleaser.yml required.
+
+# name: Publish Release
+#
+# on:
+#   push:
+#     tags:
+#       - 'v*'
+#
+# jobs:
+#   goreleaser:
+#     runs-on: ubuntu-latest
+#     permissions:
+#       contents: write
+#     steps:
+#       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+#         with:
+#           fetch-depth: 0
+#
+#       - uses: actions/setup-go@v5
+#         with:
+#           go-version: stable
+#
+#       - name: Run GoReleaser
+#         uses: goreleaser/goreleaser-action@v6
+#         with:
+#           args: release --clean
+#         env:
+#           GITHUB_TOKEN: ${{ github.token }}
+
+
+# ============================================================================
+# EXAMPLE C — Generic build with artefact upload
+# ============================================================================
+# Build your artefacts, create the release, upload. The framework then
+# updates the release body with AI notes.
+
+# name: Publish Release
+#
+# on:
+#   push:
+#     tags:
+#       - 'v*'
+#
+# jobs:
+#   publish:
+#     runs-on: ubuntu-latest
+#     permissions:
+#       contents: write
+#     steps:
+#       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+#
+#       - name: Build
+#         run: |
+#           mkdir -p dist
+#           # your build command here
+#
+#       - name: Create release and upload artefacts
+#         run: |
+#           gh release create "${{ github.ref_name }}" \
+#             --title "Release ${{ github.ref_name }}" \
+#             --notes "Generating release notes…" \
+#             dist/*
+#         env:
+#           GH_TOKEN: ${{ github.token }}

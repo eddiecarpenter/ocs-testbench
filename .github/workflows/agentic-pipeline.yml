@@ -1,0 +1,829 @@
+name: Agentic Pipeline
+
+on:
+  issues:
+    types: [labeled, assigned]
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+  pull_request_review:
+    types: [submitted]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to process review comments for'
+        required: true
+        type: string
+      branch_name:
+        description: 'Feature branch the PR is open on'
+        required: true
+        type: string
+
+jobs:
+
+  # ---------------------------------------------------------------------------
+  # Stage 3 — Feature Design
+  # Trigger: feature issue labelled 'in-design'
+  # ---------------------------------------------------------------------------
+  feature-design:
+    name: Feature Design (Stage 3)
+    if: |
+      github.event_name == 'issues' &&
+      github.event.action == 'labeled' &&
+      contains(github.event.issue.labels.*.name, 'feature') &&
+      github.event.label.name == 'in-design'
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    permissions:
+      contents: write
+      issues: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GOOSE_AGENT_PAT }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
+        with:
+          node-version: 'lts/*'
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y bzip2 libgomp1
+          mkdir -p ~/.local/bin
+          GH_VERSION=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
+          curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" -o /tmp/gh.tar.gz
+          tar -xz -C /tmp -f /tmp/gh.tar.gz
+          mv /tmp/gh_${GH_VERSION}_linux_amd64/bin/gh ~/.local/bin/gh
+          GOOSE_VERSION=$(curl -fsSL https://api.github.com/repos/block/goose/releases/latest | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
+          curl -fsSL "https://github.com/block/goose/releases/download/v${GOOSE_VERSION}/goose-x86_64-unknown-linux-gnu.tar.bz2" -o /tmp/goose.tar.bz2
+          tar -xj -C ~/.local/bin -f /tmp/goose.tar.bz2
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          npm install -g @anthropic-ai/claude-code
+
+      - name: Restore Claude Code auth
+        run: |
+          mkdir -p ~/.claude
+          echo "${{ secrets.CLAUDE_CREDENTIALS_JSON }}" | base64 -d > ~/.claude/.credentials.json
+          chmod 0600 ~/.claude/.credentials.json
+
+
+      - name: Validate and refresh Claude Code credentials
+        env:
+          GH_TOKEN: ${{ secrets.GOOSE_AGENT_PAT }}
+        run: |
+          if [ ! -s ~/.claude/.credentials.json ]; then
+            echo "ERROR: ~/.claude/.credentials.json is empty or missing."
+            echo "Regenerate: run the refresh-credentials skill locally, then re-run this job."
+            exit 1
+          fi
+          CREDS_BEFORE=$(sha256sum ~/.claude/.credentials.json | cut -d' ' -f1)
+          claude -p "hi" > /dev/null || {
+            echo "ERROR: Claude Code authentication failed — session may be revoked."
+            echo "Run the refresh-credentials skill locally to restore the secret."
+            exit 1
+          }
+          echo "Claude Code credentials valid."
+          CREDS_AFTER=$(sha256sum ~/.claude/.credentials.json | cut -d' ' -f1)
+          if [ "$CREDS_BEFORE" != "$CREDS_AFTER" ]; then
+            echo "Credentials rotated — updating CLAUDE_CREDENTIALS_JSON secret"
+            gh secret set CLAUDE_CREDENTIALS_JSON \
+              --repo "${GITHUB_REPOSITORY}" \
+              --body "$(cat ~/.claude/.credentials.json | base64 | tr -d '\n')"
+          else
+            echo "Credentials unchanged — no update needed"
+          fi
+
+      - name: Configure environment
+        run: |
+          git config user.name "${{ vars.AGENT_USER }}"
+          git config user.email "${{ vars.AGENT_USER }}@users.noreply.github.com"
+
+      - name: Configure Goose
+        run: |
+          mkdir -p ~/.config/goose
+          cat > ~/.config/goose/config.yaml <<GOOSEEOF
+          GOOSE_PROVIDER: ${{ vars.GOOSE_PROVIDER || 'claude-code' }}
+          GOOSE_MODEL: ${{ vars.GOOSE_MODEL || 'default' }}
+          GOOSEEOF
+
+      - name: Run feature-design recipe
+        run: |
+          goose run \
+            --recipe .goose/recipes/feature-design.yaml \
+            --params feature_issue=${{ github.event.issue.number }} \
+            --params repo=${{ github.repository }}
+        env:
+          GOOSE_PATH_ROOT: ${{ github.workspace }}/.goose
+          GOOSE_PROVIDER: ${{ vars.GOOSE_PROVIDER || 'claude-code' }}
+          GOOSE_MODEL: ${{ vars.GOOSE_MODEL || 'default' }}
+          GOOSE_MODE: auto
+          GOOSE_DISABLE_SESSION_NAMING: "true"
+          GH_TOKEN: ${{ secrets.GOOSE_AGENT_PAT }}
+
+  # ---------------------------------------------------------------------------
+  # Stage 4 — Dev Session
+  # Trigger: feature issue labelled 'in-development'
+  # ---------------------------------------------------------------------------
+  dev-session:
+    name: Dev Session (Stage 4)
+    if: |
+      github.event_name == 'issues' &&
+      github.event.action == 'labeled' &&
+      contains(github.event.issue.labels.*.name, 'feature') &&
+      github.event.label.name == 'in-development'
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Install gh CLI
+        run: |
+          mkdir -p ~/.local/bin
+          GH_VERSION=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
+          curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" -o /tmp/gh.tar.gz
+          tar -xz -C /tmp -f /tmp/gh.tar.gz
+          mv /tmp/gh_${GH_VERSION}_linux_amd64/bin/gh ~/.local/bin/gh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Resolve feature branch
+        id: branch
+        env:
+          GH_TOKEN: ${{ secrets.GOOSE_AGENT_PAT }}
+        run: |
+          ISSUE=${{ github.event.issue.number }}
+          BRANCH=$(gh api repos/${{ github.repository }}/branches \
+            --jq ".[] | .name | select(startswith(\"feature/${ISSUE}-\"))" \
+            | head -1)
+          if [ -z "$BRANCH" ]; then
+            echo "No branch found matching feature/${ISSUE}-*"
+            exit 1
+          fi
+          echo "name=$BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          ref: ${{ steps.branch.outputs.name }}
+          fetch-depth: 0
+          token: ${{ secrets.GOOSE_AGENT_PAT }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
+        with:
+          node-version: 'lts/*'
+
+      - name: Install Goose and Claude Code CLI
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y bzip2 libgomp1
+          GOOSE_VERSION=$(curl -fsSL https://api.github.com/repos/block/goose/releases/latest | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
+          curl -fsSL "https://github.com/block/goose/releases/download/v${GOOSE_VERSION}/goose-x86_64-unknown-linux-gnu.tar.bz2" -o /tmp/goose.tar.bz2
+          tar -xj -C ~/.local/bin -f /tmp/goose.tar.bz2
+          npm install -g @anthropic-ai/claude-code
+
+      - name: Restore Claude Code auth
+        run: |
+          mkdir -p ~/.claude
+          echo "${{ secrets.CLAUDE_CREDENTIALS_JSON }}" | base64 -d > ~/.claude/.credentials.json
+          chmod 0600 ~/.claude/.credentials.json
+
+
+      - name: Validate and refresh Claude Code credentials
+        env:
+          GH_TOKEN: ${{ secrets.GOOSE_AGENT_PAT }}
+        run: |
+          if [ ! -s ~/.claude/.credentials.json ]; then
+            echo "ERROR: ~/.claude/.credentials.json is empty or missing."
+            echo "Regenerate: run the refresh-credentials skill locally, then re-run this job."
+            exit 1
+          fi
+          CREDS_BEFORE=$(sha256sum ~/.claude/.credentials.json | cut -d' ' -f1)
+          claude -p "hi" > /dev/null || {
+            echo "ERROR: Claude Code authentication failed — session may be revoked."
+            echo "Run the refresh-credentials skill locally to restore the secret."
+            exit 1
+          }
+          echo "Claude Code credentials valid."
+          CREDS_AFTER=$(sha256sum ~/.claude/.credentials.json | cut -d' ' -f1)
+          if [ "$CREDS_BEFORE" != "$CREDS_AFTER" ]; then
+            echo "Credentials rotated — updating CLAUDE_CREDENTIALS_JSON secret"
+            gh secret set CLAUDE_CREDENTIALS_JSON \
+              --repo "${GITHUB_REPOSITORY}" \
+              --body "$(cat ~/.claude/.credentials.json | base64 | tr -d '\n')"
+          else
+            echo "Credentials unchanged — no update needed"
+          fi
+
+      - name: Configure environment
+        run: |
+          git config user.name "${{ vars.AGENT_USER }}"
+          git config user.email "${{ vars.AGENT_USER }}@users.noreply.github.com"
+
+      - name: Rebase feature branch onto main
+        run: |
+          git fetch origin main
+          git rebase origin/main || {
+            echo "::error::Rebase failed — conflicts require manual resolution."
+            echo "Files in conflict:"
+            git diff --name-only --diff-filter=U
+            git rebase --abort
+            exit 1
+          }
+          git push origin HEAD:${{ steps.branch.outputs.name }} --force-with-lease
+
+      - name: Configure Goose
+        run: |
+          mkdir -p ~/.config/goose
+          cat > ~/.config/goose/config.yaml <<GOOSEEOF
+          GOOSE_PROVIDER: ${{ vars.GOOSE_PROVIDER || 'claude-code' }}
+          GOOSE_MODEL: ${{ vars.GOOSE_MODEL || 'default' }}
+          GOOSEEOF
+
+      - name: Run dev-session recipe
+        id: goose
+        run: |
+          BRANCH="${{ steps.branch.outputs.name }}"
+          # Retry up to 3 times to handle transient Claude Code rate-limit errors.
+          # Each retry picks up from the last committed task.
+          for attempt in 1 2 3; do
+            echo "--- Dev session attempt ${attempt} ---"
+            goose run \
+              --recipe .goose/recipes/dev-session.yaml \
+              --params feature_issue=${{ github.event.issue.number }} \
+              --params branch_name=${BRANCH} \
+              --params repo=${{ github.repository }} && break
+            EXIT_CODE=$?
+            if [ $attempt -lt 3 ]; then
+              echo "Attempt ${attempt} failed (exit ${EXIT_CODE}). Waiting 60s before retry..."
+              sleep 60
+            else
+              echo "All ${attempt} attempts failed."
+              exit $EXIT_CODE
+            fi
+          done
+        env:
+          GOOSE_PATH_ROOT: ${{ github.workspace }}/.goose
+          GOOSE_PROVIDER: ${{ vars.GOOSE_PROVIDER || 'claude-code' }}
+          GOOSE_MODEL: ${{ vars.GOOSE_MODEL || 'default' }}
+          GOOSE_MODE: auto
+          GOOSE_DISABLE_SESSION_NAMING: "true"
+          GH_TOKEN: ${{ secrets.GOOSE_AGENT_PAT }}
+
+      - name: Push branch
+        if: success()
+        run: git push origin ${{ steps.branch.outputs.name }}
+        env:
+          GH_TOKEN: ${{ secrets.GOOSE_AGENT_PAT }}
+
+      - name: Open PR
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GOOSE_AGENT_PAT }}
+        run: |
+          BRANCH="${{ steps.branch.outputs.name }}"
+          COMMITS=$(git rev-list --count origin/main..HEAD)
+          if [ "${COMMITS}" -eq 0 ]; then
+            echo "No commits on ${BRANCH} beyond main — nothing to PR. Skipping."
+            exit 0
+          fi
+          gh pr create \
+            --title "feat: ${{ github.event.issue.title }}" \
+            --body "Closes #${{ github.event.issue.number }}" \
+            --base main \
+            --head ${BRANCH}
+
+      - name: Apply in-review label and set project status
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GOOSE_AGENT_PAT }}
+          AGENTIC_PROJECT_ID: ${{ vars.AGENTIC_PROJECT_ID }}
+        run: |
+          COMMITS=$(git rev-list --count origin/main..HEAD)
+          if [ "${COMMITS}" -eq 0 ]; then
+            echo "No commits — PR was not opened. Leaving issue in-development."
+            exit 0
+          fi
+          gh issue edit ${{ github.event.issue.number }} \
+            --remove-label "in-development" \
+            --add-label "in-review"
+
+          # Inline status update — set project status to "In Review"
+          if [ -z "${AGENTIC_PROJECT_ID}" ]; then
+            echo "ERROR: AGENTIC_PROJECT_ID is not configured. Set this repo variable to the ProjectV2 node ID."
+            echo "Command: gh variable set AGENTIC_PROJECT_ID --repo ${{ github.repository }} --body \"{project_node_id}\""
+            exit 1
+          fi
+          ISSUE_NODE_ID=$(gh api repos/${{ github.repository }}/issues/${{ github.event.issue.number }} --jq '.node_id')
+          RESULT=$(gh api graphql -f query='
+            query($issueId: ID!) {
+              node(id: $issueId) {
+                ... on Issue {
+                  projectItems(first: 100) {
+                    nodes { id project { id } }
+                  }
+                }
+              }
+            }
+          ' -f issueId="${ISSUE_NODE_ID}")
+          ITEM_ID=$(echo "${RESULT}" | jq -r --arg pid "${AGENTIC_PROJECT_ID}" \
+            '.data.node.projectItems.nodes[] | select(.project.id == $pid) | .id')
+          if [ -z "${ITEM_ID}" ]; then
+            ADD_RESULT=$(gh api graphql -f query='
+              mutation($projectId: ID!, $contentId: ID!) {
+                addProjectV2ItemById(input: {projectId: $projectId, contentId: $contentId}) {
+                  item { id }
+                }
+              }
+            ' -f projectId="${AGENTIC_PROJECT_ID}" -f contentId="${ISSUE_NODE_ID}")
+            ITEM_ID=$(echo "${ADD_RESULT}" | jq -r '.data.addProjectV2ItemById.item.id')
+          fi
+          FIELDS=$(gh api graphql -f query='
+            query($projectId: ID!) {
+              node(id: $projectId) {
+                ... on ProjectV2 {
+                  fields(first: 50) {
+                    nodes {
+                      ... on ProjectV2SingleSelectField {
+                        id name options { id name }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ' -f projectId="${AGENTIC_PROJECT_ID}")
+          FIELD_ID=$(echo "${FIELDS}" | jq -r '.data.node.fields.nodes[] | select(.name == "Status") | .id')
+          OPTION_ID=$(echo "${FIELDS}" | jq -r '.data.node.fields.nodes[] | select(.name == "Status") | .options[] | select(.name == "In Review") | .id')
+          gh api graphql -f query='
+            mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+              updateProjectV2ItemFieldValue(input: {
+                projectId: $projectId, itemId: $itemId, fieldId: $fieldId,
+                value: { singleSelectOptionId: $optionId }
+              }) { projectV2Item { id } }
+            }
+          ' -f projectId="${AGENTIC_PROJECT_ID}" -f itemId="${ITEM_ID}" -f fieldId="${FIELD_ID}" -f optionId="${OPTION_ID}"
+
+  # ---------------------------------------------------------------------------
+  # Stage 4b — PR Review Session
+  # Trigger: PR review submitted (comments or changes requested)
+  # ---------------------------------------------------------------------------
+  pr-review-session:
+    name: PR Review Session (Stage 4b)
+    if: |
+      github.event_name == 'workflow_dispatch' || (
+        github.event_name == 'pull_request_review' &&
+        github.event.review.user.login != vars.AGENT_USER &&
+        startsWith(github.event.pull_request.head.ref, 'feature/') &&
+        (github.event.review.state == 'commented' || github.event.review.state == 'changes_requested')
+      )
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    permissions:
+      contents: write
+      pull-requests: write
+    concurrency:
+      group: pr-review-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          ref: ${{ github.event.inputs.branch_name || github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GOOSE_AGENT_PAT }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
+        with:
+          node-version: 'lts/*'
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y bzip2 libgomp1
+          mkdir -p ~/.local/bin
+          GH_VERSION=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
+          curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" -o /tmp/gh.tar.gz
+          tar -xz -C /tmp -f /tmp/gh.tar.gz
+          mv /tmp/gh_${GH_VERSION}_linux_amd64/bin/gh ~/.local/bin/gh
+          GOOSE_VERSION=$(curl -fsSL https://api.github.com/repos/block/goose/releases/latest | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
+          curl -fsSL "https://github.com/block/goose/releases/download/v${GOOSE_VERSION}/goose-x86_64-unknown-linux-gnu.tar.bz2" -o /tmp/goose.tar.bz2
+          tar -xj -C ~/.local/bin -f /tmp/goose.tar.bz2
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          npm install -g @anthropic-ai/claude-code
+
+      - name: Restore Claude Code auth
+        run: |
+          mkdir -p ~/.claude
+          echo "${{ secrets.CLAUDE_CREDENTIALS_JSON }}" | base64 -d > ~/.claude/.credentials.json
+          chmod 0600 ~/.claude/.credentials.json
+
+
+      - name: Validate and refresh Claude Code credentials
+        env:
+          GH_TOKEN: ${{ secrets.GOOSE_AGENT_PAT }}
+        run: |
+          if [ ! -s ~/.claude/.credentials.json ]; then
+            echo "ERROR: ~/.claude/.credentials.json is empty or missing."
+            echo "Regenerate: run the refresh-credentials skill locally, then re-run this job."
+            exit 1
+          fi
+          CREDS_BEFORE=$(sha256sum ~/.claude/.credentials.json | cut -d' ' -f1)
+          claude -p "hi" > /dev/null || {
+            echo "ERROR: Claude Code authentication failed — session may be revoked."
+            echo "Run the refresh-credentials skill locally to restore the secret."
+            exit 1
+          }
+          echo "Claude Code credentials valid."
+          CREDS_AFTER=$(sha256sum ~/.claude/.credentials.json | cut -d' ' -f1)
+          if [ "$CREDS_BEFORE" != "$CREDS_AFTER" ]; then
+            echo "Credentials rotated — updating CLAUDE_CREDENTIALS_JSON secret"
+            gh secret set CLAUDE_CREDENTIALS_JSON \
+              --repo "${GITHUB_REPOSITORY}" \
+              --body "$(cat ~/.claude/.credentials.json | base64 | tr -d '\n')"
+          else
+            echo "Credentials unchanged — no update needed"
+          fi
+
+      - name: Configure environment
+        run: |
+          git config user.name "${{ vars.AGENT_USER }}"
+          git config user.email "${{ vars.AGENT_USER }}@users.noreply.github.com"
+
+      - name: Configure Goose
+        run: |
+          mkdir -p ~/.config/goose
+          cat > ~/.config/goose/config.yaml <<GOOSEEOF
+          GOOSE_PROVIDER: ${{ vars.GOOSE_PROVIDER || 'claude-code' }}
+          GOOSE_MODEL: ${{ vars.GOOSE_MODEL || 'default' }}
+          GOOSEEOF
+
+      - name: Run PR review recipe
+        env:
+          PR_NUMBER: ${{ github.event.inputs.pr_number || github.event.pull_request.number }}
+          BRANCH: ${{ github.event.inputs.branch_name || github.event.pull_request.head.ref }}
+          GOOSE_PATH_ROOT: ${{ github.workspace }}/.goose
+          GOOSE_PROVIDER: ${{ vars.GOOSE_PROVIDER || 'claude-code' }}
+          GOOSE_MODEL: ${{ vars.GOOSE_MODEL || 'default' }}
+          GOOSE_MODE: auto
+          GOOSE_DISABLE_SESSION_NAMING: "true"
+          GH_TOKEN: ${{ secrets.GOOSE_AGENT_PAT }}
+        run: |
+          goose run \
+            --recipe .goose/recipes/pr-review-session.yaml \
+            --params pr_number=${PR_NUMBER} \
+            --params branch_name=${BRANCH} \
+            --params repo=${{ github.repository }}
+
+      - name: Push fixes
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GOOSE_AGENT_PAT }}
+          BRANCH: ${{ github.event.inputs.branch_name || github.event.pull_request.head.ref }}
+        run: |
+          LOCAL=$(git rev-parse HEAD)
+          REMOTE=$(git rev-parse origin/${BRANCH})
+          if [ "$LOCAL" != "$REMOTE" ]; then
+            git push origin ${BRANCH}
+          else
+            echo "No code changes — only review replies posted, no push needed"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Stage 4c — Issue Session
+  # Trigger: issue assigned to the agent user
+  # ---------------------------------------------------------------------------
+  issue-session:
+    name: Issue Session (Stage 4c)
+    if: |
+      github.event_name == 'issues' &&
+      github.event.action == 'assigned' &&
+      github.event.assignee.login == vars.AGENT_USER
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    concurrency:
+      group: issue-${{ github.event.issue.number }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GOOSE_AGENT_PAT }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
+        with:
+          node-version: 'lts/*'
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y bzip2 libgomp1
+          mkdir -p ~/.local/bin
+          GH_VERSION=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
+          curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" -o /tmp/gh.tar.gz
+          tar -xz -C /tmp -f /tmp/gh.tar.gz
+          mv /tmp/gh_${GH_VERSION}_linux_amd64/bin/gh ~/.local/bin/gh
+          GOOSE_VERSION=$(curl -fsSL https://api.github.com/repos/block/goose/releases/latest | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
+          curl -fsSL "https://github.com/block/goose/releases/download/v${GOOSE_VERSION}/goose-x86_64-unknown-linux-gnu.tar.bz2" -o /tmp/goose.tar.bz2
+          tar -xj -C ~/.local/bin -f /tmp/goose.tar.bz2
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          npm install -g @anthropic-ai/claude-code
+
+      - name: Restore Claude Code auth
+        run: |
+          mkdir -p ~/.claude
+          echo "${{ secrets.CLAUDE_CREDENTIALS_JSON }}" | base64 -d > ~/.claude/.credentials.json
+          chmod 0600 ~/.claude/.credentials.json
+
+
+      - name: Validate and refresh Claude Code credentials
+        env:
+          GH_TOKEN: ${{ secrets.GOOSE_AGENT_PAT }}
+        run: |
+          if [ ! -s ~/.claude/.credentials.json ]; then
+            echo "ERROR: ~/.claude/.credentials.json is empty or missing."
+            echo "Regenerate: run the refresh-credentials skill locally, then re-run this job."
+            exit 1
+          fi
+          CREDS_BEFORE=$(sha256sum ~/.claude/.credentials.json | cut -d' ' -f1)
+          claude -p "hi" > /dev/null || {
+            echo "ERROR: Claude Code authentication failed — session may be revoked."
+            echo "Run the refresh-credentials skill locally to restore the secret."
+            exit 1
+          }
+          echo "Claude Code credentials valid."
+          CREDS_AFTER=$(sha256sum ~/.claude/.credentials.json | cut -d' ' -f1)
+          if [ "$CREDS_BEFORE" != "$CREDS_AFTER" ]; then
+            echo "Credentials rotated — updating CLAUDE_CREDENTIALS_JSON secret"
+            gh secret set CLAUDE_CREDENTIALS_JSON \
+              --repo "${GITHUB_REPOSITORY}" \
+              --body "$(cat ~/.claude/.credentials.json | base64 | tr -d '\n')"
+          else
+            echo "Credentials unchanged — no update needed"
+          fi
+
+      - name: Configure environment
+        run: |
+          git config user.name "${{ vars.AGENT_USER }}"
+          git config user.email "${{ vars.AGENT_USER }}@users.noreply.github.com"
+
+      - name: Configure Goose
+        run: |
+          mkdir -p ~/.config/goose
+          cat > ~/.config/goose/config.yaml <<GOOSEEOF
+          GOOSE_PROVIDER: ${{ vars.GOOSE_PROVIDER || 'claude-code' }}
+          GOOSE_MODEL: ${{ vars.GOOSE_MODEL || 'default' }}
+          GOOSEEOF
+
+      - name: Run issue session recipe
+        run: |
+          goose run \
+            --recipe .goose/recipes/issue-session.yaml \
+            --params issue_number=${{ github.event.issue.number }} \
+            --params repo=${{ github.repository }}
+        env:
+          GOOSE_PATH_ROOT: ${{ github.workspace }}/.goose
+          GOOSE_PROVIDER: ${{ vars.GOOSE_PROVIDER || 'claude-code' }}
+          GOOSE_MODEL: ${{ vars.GOOSE_MODEL || 'default' }}
+          GOOSE_MODE: auto
+          GOOSE_DISABLE_SESSION_NAMING: "true"
+          GH_TOKEN: ${{ secrets.GOOSE_AGENT_PAT }}
+
+      - name: Push fix branch
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GOOSE_AGENT_PAT }}
+        run: |
+          BRANCH=$(git branch --show-current)
+          if [[ "${BRANCH}" == fix/issue-* ]]; then
+            git push origin ${BRANCH}
+          else
+            echo "No fix branch — question answered or issue skipped"
+          fi
+
+      - name: Open PR
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GOOSE_AGENT_PAT }}
+        run: |
+          BRANCH=$(git branch --show-current)
+          if [[ "${BRANCH}" == fix/issue-* ]]; then
+            ISSUE_TITLE=$(gh issue view ${{ github.event.issue.number }} \
+              --repo ${{ github.repository }} --json title --jq '.title')
+            gh pr create \
+              --title "fix: ${ISSUE_TITLE}" \
+              --body "Fixes #${{ github.event.issue.number }}" \
+              --base main \
+              --head ${BRANCH}
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Stage 5 — Feature Complete
+  # Trigger: feature branch PR merged to main
+  #
+  # Federated topology: set the AGENTIC_REPO repo variable to the full
+  # "owner/repo" of the agentic (control plane) repo. If not set, defaults
+  # to the current repo (single-repo topology).
+  # ---------------------------------------------------------------------------
+  feature-complete:
+    name: Feature Complete (Stage 5)
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'feature/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+
+    steps:
+      - name: Extract feature issue number
+        id: feature
+        run: |
+          BRANCH="${{ github.event.pull_request.head.ref }}"
+          ISSUE_NUMBER=$(echo "${BRANCH}" | sed 's|feature/\([0-9]*\)-.*|\1|')
+          echo "issue_number=${ISSUE_NUMBER}" >> $GITHUB_OUTPUT
+
+      - name: Apply done label, set project status, and close feature issue
+        env:
+          GH_TOKEN: ${{ secrets.GOOSE_AGENT_PAT }}
+          AGENTIC_PROJECT_ID: ${{ vars.AGENTIC_PROJECT_ID }}
+        run: |
+          ISSUE="${{ steps.feature.outputs.issue_number }}"
+          if [ -z "${ISSUE}" ]; then
+            echo "Could not extract issue number from branch — skipping"
+            exit 0
+          fi
+          gh issue edit ${ISSUE} \
+            --repo ${{ github.repository }} \
+            --remove-label "in-review" \
+            --add-label "done"
+
+          # Inline status update — set project status to "Done"
+          if [ -z "${AGENTIC_PROJECT_ID}" ]; then
+            echo "ERROR: AGENTIC_PROJECT_ID is not configured. Set this repo variable to the ProjectV2 node ID."
+            echo "Command: gh variable set AGENTIC_PROJECT_ID --repo ${{ github.repository }} --body \"{project_node_id}\""
+            exit 1
+          fi
+          ISSUE_NODE_ID=$(gh api repos/${{ github.repository }}/issues/${ISSUE} --jq '.node_id')
+          RESULT=$(gh api graphql -f query='
+            query($issueId: ID!) {
+              node(id: $issueId) {
+                ... on Issue {
+                  projectItems(first: 100) {
+                    nodes { id project { id } }
+                  }
+                }
+              }
+            }
+          ' -f issueId="${ISSUE_NODE_ID}")
+          ITEM_ID=$(echo "${RESULT}" | jq -r --arg pid "${AGENTIC_PROJECT_ID}" \
+            '.data.node.projectItems.nodes[] | select(.project.id == $pid) | .id')
+          if [ -z "${ITEM_ID}" ]; then
+            ADD_RESULT=$(gh api graphql -f query='
+              mutation($projectId: ID!, $contentId: ID!) {
+                addProjectV2ItemById(input: {projectId: $projectId, contentId: $contentId}) {
+                  item { id }
+                }
+              }
+            ' -f projectId="${AGENTIC_PROJECT_ID}" -f contentId="${ISSUE_NODE_ID}")
+            ITEM_ID=$(echo "${ADD_RESULT}" | jq -r '.data.addProjectV2ItemById.item.id')
+          fi
+          FIELDS=$(gh api graphql -f query='
+            query($projectId: ID!) {
+              node(id: $projectId) {
+                ... on ProjectV2 {
+                  fields(first: 50) {
+                    nodes {
+                      ... on ProjectV2SingleSelectField {
+                        id name options { id name }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ' -f projectId="${AGENTIC_PROJECT_ID}")
+          FIELD_ID=$(echo "${FIELDS}" | jq -r '.data.node.fields.nodes[] | select(.name == "Status") | .id')
+          OPTION_ID=$(echo "${FIELDS}" | jq -r '.data.node.fields.nodes[] | select(.name == "Status") | .options[] | select(.name == "Done") | .id')
+          gh api graphql -f query='
+            mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+              updateProjectV2ItemFieldValue(input: {
+                projectId: $projectId, itemId: $itemId, fieldId: $fieldId,
+                value: { singleSelectOptionId: $optionId }
+              }) { projectV2Item { id } }
+            }
+          ' -f projectId="${AGENTIC_PROJECT_ID}" -f itemId="${ITEM_ID}" -f fieldId="${FIELD_ID}" -f optionId="${OPTION_ID}"
+
+          gh issue close ${ISSUE} \
+            --repo ${{ github.repository }} \
+            --comment "Feature implemented and merged via PR #${{ github.event.pull_request.number }}."
+
+      - name: Parse parent requirement
+        id: parent
+        env:
+          GH_TOKEN: ${{ secrets.GOOSE_AGENT_PAT }}
+        run: |
+          ISSUE="${{ steps.feature.outputs.issue_number }}"
+          if [ -z "${ISSUE}" ]; then
+            echo "No feature issue number — skipping parent requirement check"
+            exit 0
+          fi
+
+          # Resolve the agentic repo — AGENTIC_REPO variable for federated topology,
+          # falls back to current repo for single-repo topology.
+          AGENTIC_REPO="${{ vars.AGENTIC_REPO || github.repository }}"
+
+          # Read the feature issue body
+          BODY=$(gh issue view ${ISSUE} --repo ${{ github.repository }} --json body --jq '.body')
+
+          # Extract parent requirement number.
+          # Matches: "Closes #N", "Closes part of #N",
+          #          "Closes owner/repo#N", "Closes part of owner/repo#N"
+          PARENT=$(echo "${BODY}" | \
+            grep -oP '(?:Closes(?:\s+part\s+of)?\s+(?:[a-zA-Z0-9_.\-]+/[a-zA-Z0-9_.\-]+#|#))(\d+)' | \
+            grep -oP '\d+$' | head -1)
+
+          if [ -z "${PARENT}" ]; then
+            echo "No parent requirement reference found in feature issue body — skipping"
+            exit 0
+          fi
+
+          # Verify the referenced issue has the 'requirement' label in the agentic repo
+          HAS_LABEL=$(gh issue view ${PARENT} --repo ${AGENTIC_REPO} --json labels \
+            --jq '.labels[].name' | grep -c '^requirement$' || true)
+
+          if [ "${HAS_LABEL}" -eq 0 ]; then
+            echo "Issue #${PARENT} in ${AGENTIC_REPO} is not labelled 'requirement' — skipping"
+            exit 0
+          fi
+
+          echo "Parent requirement: ${AGENTIC_REPO}#${PARENT}"
+          echo "requirement_number=${PARENT}" >> $GITHUB_OUTPUT
+          echo "agentic_repo=${AGENTIC_REPO}" >> $GITHUB_OUTPUT
+
+      - name: Auto-close parent requirement if all sub-issues complete
+        env:
+          GH_TOKEN: ${{ secrets.GOOSE_AGENT_PAT }}
+        run: |
+          PARENT="${{ steps.parent.outputs.requirement_number }}"
+          AGENTIC_REPO="${{ steps.parent.outputs.agentic_repo }}"
+          if [ -z "${PARENT}" ]; then
+            echo "No parent requirement number — skipping"
+            exit 0
+          fi
+
+          # Get the requirement's node ID for the sub-issues GraphQL query.
+          # Sub-issues are the authoritative cross-repo child list —
+          # more reliable than text search and works in federated topology.
+          REQ_NODE_ID=$(gh api repos/${AGENTIC_REPO}/issues/${PARENT} --jq '.node_id')
+
+          if [ -z "${REQ_NODE_ID}" ]; then
+            echo "Could not resolve node ID for ${AGENTIC_REPO}#${PARENT} — skipping"
+            exit 0
+          fi
+
+          # Count open sub-issues on the requirement
+          OPEN_COUNT=$(gh api graphql -f query='
+            query($issueId: ID!) {
+              node(id: $issueId) {
+                ... on Issue {
+                  subIssues(first: 100) {
+                    nodes { state }
+                  }
+                }
+              }
+            }
+          ' -f issueId="${REQ_NODE_ID}" \
+            --jq '[.data.node.subIssues.nodes[] | select(.state == "OPEN")] | length')
+
+          if [ "${OPEN_COUNT}" -gt 0 ]; then
+            echo "${OPEN_COUNT} sub-issue(s) still open — leaving requirement #${PARENT} open"
+            exit 0
+          fi
+
+          echo "All sub-issues closed — closing requirement ${AGENTIC_REPO}#${PARENT}"
+          gh issue edit ${PARENT} \
+            --repo ${AGENTIC_REPO} \
+            --add-label "done"
+          gh issue close ${PARENT} \
+            --repo ${AGENTIC_REPO} \
+            --comment "All child feature issues are now complete. Auto-closing requirement."
+
+      - name: Delete feature branch
+        env:
+          GH_TOKEN: ${{ secrets.GOOSE_AGENT_PAT }}
+        run: |
+          gh api repos/${{ github.repository }}/git/refs/heads/${{ github.head_ref }} --method DELETE
+          echo "Deleted branch ${{ github.head_ref }}"

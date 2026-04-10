@@ -1,0 +1,127 @@
+version: "1.0.0"
+title: "Dev Session (Stage 4)"
+description: "Stage 4 — Development. Triggered automatically when a Feature issue is labelled in-development. Processes Task sub-issues to completion on the feature branch."
+
+parameters:
+  - key: feature_issue
+    input_type: string
+    requirement: required
+    description: "Feature issue number to implement (e.g. 12)"
+
+  - key: branch_name
+    input_type: string
+    requirement: required
+    description: "Feature branch to implement (e.g. feature/12-charging-trace)"
+
+  - key: repo
+    input_type: string
+    requirement: required
+    description: "Domain repo in owner/name format (e.g. NewOpenBSS/charging-domain)"
+
+extensions:
+  - type: builtin
+    name: developer
+    display_name: Developer
+    timeout: 600
+    bundled: true
+
+settings:
+  max_turns: 200
+
+instructions: |
+  You are running a Dev Session — Stage 4 of the agentic software delivery pipeline.
+  You process open Task sub-issues on the feature branch, implementing each in order.
+  You commit after each task and close the task issue.
+  You do NOT push or open a PR — the GitHub Actions workflow handles those steps
+  after you exit cleanly.
+
+  ## Step 1 — Verify Branch
+
+  Check current branch:
+    git branch --show-current
+
+  If not on {{ branch_name }}:
+    git checkout {{ branch_name }} 2>/dev/null || \
+    git checkout -b {{ branch_name }} origin/{{ branch_name }}
+
+  Confirm you are NOT on main before touching any code.
+
+  ## Step 2 — Read Context
+
+  Complete Session Initialisation as defined in AGENTS.md. Then:
+  1. Read the Feature issue in full:
+     gh issue view {{ feature_issue }} --repo {{ repo }}
+  2. Extract the `## Acceptance Criteria` section from the feature issue.
+     List each criterion explicitly — these will be verified at the end.
+     If no acceptance criteria are found, note this and proceed (older issues
+     may predate the user story format).
+  3. Query open Task sub-issues ordered by issue number:
+     gh issue list --repo {{ repo }} --label task --state open \
+       --json number,title,body --jq 'sort_by(.number)'
+  4. Verify there are open tasks — if none, report and exit cleanly.
+
+  ## Step 3 — Process the Task Queue
+
+  Process tasks in ascending issue number order. Do not change the order.
+
+  For EACH open task:
+
+  ### 3a — Read the Task
+  Read the task issue in full:
+    gh issue view <task-number> --repo {{ repo }}
+  Understand what must be built before touching any code.
+
+  ### 3b — Implement
+  Implement the task against its acceptance criteria.
+  Stage new files immediately after creating them: git add <file>
+  Do not make changes outside the task scope.
+
+  ### 3c — Build and Test
+  Read base/standards/<stack>.md for the exact build and test commands.
+  Run the full build and test suite.
+  If build fails — diagnose and fix. Do not move to the next task.
+  If tests fail — diagnose and fix. Do not move to the next task.
+  If you cannot fix the failure — stop and exit with a clear error message.
+  The workflow will turn red. A human will investigate via Foreground Recovery.
+
+  ### 3d — Commit the Task
+  Count total tasks (open at start) and current position:
+    git add -A
+    git commit -m "feat: <task description> — task N of N (#{{ feature_issue }})"
+
+  Append significant decisions to DECISIONS.md in ADR format (if applicable).
+
+  ### 3e — Close the Task Issue
+    gh issue close <task-number> --repo {{ repo }}
+
+  Proceed to the next task.
+
+  ## Step 4 — Verify Acceptance Criteria Coverage
+
+  When all task issues are closed, verify acceptance criteria before declaring complete:
+  1. Review each acceptance criterion extracted in Step 2
+  2. For each criterion, verify that at least one test exists that covers it
+  3. If any criterion lacks test coverage, stop and report which criteria are uncovered
+     — do NOT exit cleanly until all criteria are covered by passing tests
+  4. A feature is not complete until all acceptance criteria are covered by passing tests
+
+  If the feature issue had no acceptance criteria section (older format), skip this step.
+
+  ## Step 5 — All Tasks Complete
+
+  When all task issues are closed and acceptance criteria are verified:
+  1. Exit cleanly with a success message listing what was built
+  2. Do NOT push — the workflow pushes after this recipe exits
+  3. Do NOT open a PR — the workflow opens the PR with "Closes #{{ feature_issue }}"
+
+  ## Rules
+
+  - Never commit or make changes on main — unconditional
+  - If build or tests cannot be fixed — stop and exit with a clear error
+  - Never skip a failing test — fix it before moving to the next task
+  - Never claim a task complete without running build and tests
+  - Report exact command output on any failure
+
+prompt: |
+  Dev session starting for feature #{{ feature_issue }} on {{ branch_name }} in {{ repo }}.
+  Verifying branch, reading context, then processing open task sub-issues in order.
