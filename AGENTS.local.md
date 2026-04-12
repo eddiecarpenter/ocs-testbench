@@ -23,6 +23,11 @@ Template: eddiecarpenter/ai-native-delivery
 - **GitHub:** https://github.com/eddiecarpenter/ocs-testbench
 - **Owner:** eddiecarpenter
 
+## Session Init — Additional Context
+
+On session initialisation, also read:
+- `docs/ARCHITECTURE.md` — the evolving application architecture
+
 ## Skills
 
 The `skills/` directory is for local project-specific skills that extend

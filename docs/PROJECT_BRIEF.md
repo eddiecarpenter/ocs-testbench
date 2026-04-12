@@ -1,42 +1,112 @@
-# Project Brief — ai-native-delivery
+# Project Brief — OCS Testbench
 
 ## What this is
 
-The `ai-native-delivery` framework is a template and protocol layer for AI-assisted
-software delivery. It defines the rules, skills, workflows, and tooling conventions
-that AI agents follow when working on any project that uses the framework.
+The OCS Testbench is a Diameter Gy traffic generator and verifier for testing
+Online Charging Systems (OCS). It acts as a Charging Trigger Function (CTF),
+sending Credit-Control-Request (CCR) messages to an OCS endpoint and processing
+Credit-Control-Answer (CCA) responses.
 
-The framework covers the full Continuous Delivery pipeline from requirements capture
-through to a versioned, tagged release. Continuous Deployment (loading to production)
-is out of scope and remains the responsibility of individual projects.
+It is a testing tool — it does not implement OCS or charging logic.
 
-## Topology
+## Problem statement
 
-This repo is the **Organisation control plane** for the ai-native-delivery ecosystem:
+Testing an OCS requires generating realistic Diameter Gy traffic: session-based
+charging (Initial → Update → Terminate), event-based charging, multiple service
+types, multiple rating groups, and varied subscriber scenarios. Existing tools
+are either proprietary, inflexible, or require complex scripting to drive.
 
-| Repo | Type | Role |
-|---|---|---|
-| `eddiecarpenter/ai-native-delivery` | Template / control plane | Defines global agent protocol, standards, and CI workflows |
-| `eddiecarpenter/gh-agentic` | Tool | GitHub CLI extension — bootstraps and manages agentic environments |
+The OCS Testbench provides a lightweight, configurable, API-first application
+that enables both manual step-through testing and automated continuous runs
+against any Diameter Gy endpoint.
 
-## What is built here
+## Who it is for
 
-- `base/AGENTS.md` — the global agent rulebook, consumed by all downstream projects
-- `base/skills/` — playbooks for each pipeline session type
-- `base/standards/` — language-specific build, test, and coding standards
-- `base/.github/workflows/` — the agentic pipeline workflow definitions
-- `base/concepts/` — architectural concepts and delivery philosophy
-- `base/docs/examples/` — annotated examples for downstream projects
+- **OCS developers and testers** — verifying charging logic, grant behaviour,
+  and result code handling
+- **Integration engineers** — validating Diameter connectivity and AVP compliance
+- **Operations teams** — smoke-testing OCS deployments and configuration changes
 
-## How changes flow
+## Key capabilities
 
-Changes to the framework are developed here using the same SDLC pipeline the
-framework defines. Once merged and tagged, downstream projects pull the changes
-via `gh agentic sync`.
+### Traffic generation
+- Session-based charging (CCR-I / CCR-U / CCR-T)
+- Event-based charging (CCR-E)
+- Service-type agnostic via AVP templates (SMS, USSD, VOICE, DATA, custom)
+- Multiple rating groups and service identifiers per session (multi-MSCC)
+- Multiple concurrent sessions per subscriber (multi-session)
 
-## Key conventions
+### Execution modes
+- **Interactive (step mode)** — manual control of every request with ability to
+  modify values between steps; optionally pre-populate from a saved scenario
+- **Continuous** — automated loop with configurable stop conditions (user stop,
+  funds exhausted, iteration limit)
 
-- `base/` is read-only for AI agents in downstream projects — changes must originate here
-- `AGENTS.local.md` in each downstream project holds project-specific overrides
-- Template version is tracked in `TEMPLATE_VERSION` and updated automatically on each release
-- Releases are triggered by `git tag vX.Y.Z && git push origin vX.Y.Z`
+### Response handling
+- Protocol-mandated behaviour built-in (Final-Unit-Indication, Validity-Time,
+  permanent failures)
+- Configurable result code handlers (retry, terminate, pause, continue)
+- Value extraction from CCA responses into scenario context variables
+- Guards and assertions evaluated against responses using expression evaluator
+- Derived values fed back into subsequent requests via template placeholders
+
+### Configuration
+- Runtime-configurable Diameter peer endpoints (no restart required)
+- AVP templates with placeholder substitution (user input, predefined, generated)
+- Subscriber management (MSISDN, ICCID, optional IMEI)
+- Scenario definitions as ordered step lists (the intermediate representation)
+
+## Technology stack
+
+| Component | Technology |
+|---|---|
+| Backend | Go |
+| Diameter | `fiorix/go-diameter` (Gy/credit-control layer built on top) |
+| Expression evaluator | `github.com/eddiecarpenter/ruleevaluator` |
+| Frontend | React / TypeScript SPA |
+| Persistence | SQLite + sqlc |
+| Packaging | Single binary (Go backend + embedded UI via `go:embed`) |
+
+## Architecture
+
+The application follows an API-first design:
+
+- **REST API** — configuration CRUD, template management, scenario control
+- **WebSocket** — real-time streaming of responses, session state, connection status
+- **Core library** — Diameter stack, session manager, template engine (no HTTP dependency)
+
+See `docs/ARCHITECTURE.md` for the full architectural design.
+
+## Deployment
+
+| Mode | Description |
+|---|---|
+| Local | Single binary, auto-opens browser |
+| Docker | Container image |
+| Kubernetes | Standard deployment + service |
+| Headless | REST/WS API only, no browser |
+
+## MVP scope
+
+- Single Diameter peer connection (architecture supports N)
+- TCP transport, plaintext default (TLS configurable)
+- Interactive step mode and continuous mode
+- AVP template system with placeholder substitution
+- Scenario step lists with extraction, guards, assertions
+- Subscriber table (MSISDN, ICCID, IMEI)
+- SQLite persistence
+- React/TS web UI
+- REST + WebSocket API
+
+## Future considerations
+
+- **Load testing** — subscriber pool, concurrent session scaling, metrics
+- **MCP server** — expose API as MCP tools for AI-driven test composition
+- **Multi-peer management** — N independent peers with UI dashboard
+- **SCTP transport** — if required by specific OCS deployments
+
+## Repository
+
+- **GitHub:** https://github.com/eddiecarpenter/ocs-testbench
+- **Stack:** Go + React/TypeScript
+- **Topology:** Single (embedded)
