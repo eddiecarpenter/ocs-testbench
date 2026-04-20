@@ -1,4 +1,4 @@
-# AGENTS.local.md — Local Overrides
+5# AGENTS.local.md — Local Overrides
 
 This file contains project-specific rules and overrides that extend or
 supersede the global protocol defined in `base/AGENTS.md`.
@@ -17,11 +17,6 @@ Template: eddiecarpenter/ai-native-delivery
 - **Topology:** Single
 - **Stack:** Go
 - **Description:** OCS Testbench
-
-## Repo
-
-- **GitHub:** https://github.com/eddiecarpenter/ocs-testbench
-- **Owner:** eddiecarpenter
 
 ## Session Init — Additional Context
 
