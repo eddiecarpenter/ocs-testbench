@@ -30,6 +30,7 @@ against any Diameter Gy endpoint.
 ## Key capabilities
 
 ### Traffic generation
+
 - Session-based charging (CCR-I / CCR-U / CCR-T)
 - Event-based charging (CCR-E)
 - Service-type agnostic via AVP templates (SMS, USSD, VOICE, DATA, custom)
@@ -37,12 +38,14 @@ against any Diameter Gy endpoint.
 - Multiple concurrent sessions per subscriber (multi-session)
 
 ### Execution modes
+
 - **Interactive (step mode)** — manual control of every request with ability to
   modify values between steps; optionally pre-populate from a saved scenario
 - **Continuous** — automated loop with configurable stop conditions (user stop,
   funds exhausted, iteration limit)
 
 ### Response handling
+
 - Protocol-mandated behaviour built-in (Final-Unit-Indication, Validity-Time,
   permanent failures)
 - Configurable result code handlers (retry, terminate, pause, continue)
@@ -51,7 +54,9 @@ against any Diameter Gy endpoint.
 - Derived values fed back into subsequent requests via template placeholders
 
 ### Configuration
+
 - Runtime-configurable Diameter peer endpoints (no restart required)
+- Multiple concurrent peer connections with independent identities
 - AVP templates with placeholder substitution (user input, predefined, generated)
 - Subscriber management (MSISDN, ICCID, optional IMEI)
 - Scenario definitions as ordered step lists (the intermediate representation)
@@ -64,7 +69,8 @@ against any Diameter Gy endpoint.
 | Diameter | `fiorix/go-diameter` (Gy/credit-control layer built on top) |
 | Expression evaluator | `github.com/eddiecarpenter/ruleevaluator` |
 | Frontend | React / TypeScript SPA |
-| Persistence | SQLite + sqlc |
+| Persistence | PostgreSQL + sqlc |
+| Real-time streaming | Server-Sent Events (SSE) |
 | Packaging | Single binary (Go backend + embedded UI via `go:embed`) |
 
 ## Architecture
@@ -72,8 +78,8 @@ against any Diameter Gy endpoint.
 The application follows an API-first design:
 
 - **REST API** — configuration CRUD, template management, scenario control
-- **WebSocket** — real-time streaming of responses, session state, connection status
-- **Core library** — Diameter stack, session manager, template engine (no HTTP dependency)
+- **SSE** — real-time streaming of responses, session state, connection status
+- **Core library** — Diameter stack, execution engine, template engine (no HTTP dependency)
 
 See `docs/ARCHITECTURE.md` for the full architectural design.
 
@@ -84,25 +90,25 @@ See `docs/ARCHITECTURE.md` for the full architectural design.
 | Local | Single binary, auto-opens browser |
 | Docker | Container image |
 | Kubernetes | Standard deployment + service |
-| Headless | REST/WS API only, no browser |
+| Headless | REST/SSE API only, no browser |
 
 ## MVP scope
 
-- Single Diameter peer connection (architecture supports N)
+- Multiple concurrent Diameter peer connections (N independent peers)
 - TCP transport, plaintext default (TLS configurable)
 - Interactive step mode and continuous mode
 - AVP template system with placeholder substitution
 - Scenario step lists with extraction, guards, assertions
 - Subscriber table (MSISDN, ICCID, IMEI)
-- SQLite persistence
-- React/TS web UI
-- REST + WebSocket API
+- PostgreSQL persistence
+- React/TS web UI with dark mode
+- REST + SSE API
+- Per-step response metrics (round-trip time, message sizes, result codes)
 
 ## Future considerations
 
 - **Load testing** — subscriber pool, concurrent session scaling, metrics
 - **MCP server** — expose API as MCP tools for AI-driven test composition
-- **Multi-peer management** — N independent peers with UI dashboard
 - **SCTP transport** — if required by specific OCS deployments
 
 ## Repository
