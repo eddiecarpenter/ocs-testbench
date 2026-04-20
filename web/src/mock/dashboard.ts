@@ -6,11 +6,36 @@ import type {
 } from '../types/dashboard';
 
 export const mockKpis: KpiStat[] = [
-  { label: 'Peers', value: '3 / 5', subtitle: 'connected / total' },
-  { label: 'Subscribers', value: '142', subtitle: 'registered subscribers' },
-  { label: 'Templates', value: '8', subtitle: 'AVP templates' },
-  { label: 'Scenarios', value: '24', subtitle: 'defined scenarios' },
-  { label: 'Active runs', value: '2', subtitle: 'in progress' },
+  {
+    label: 'Peers',
+    value: '3 / 5',
+    subtitle: 'connected / total',
+    to: '/peers',
+  },
+  {
+    label: 'Subscribers',
+    value: '142',
+    subtitle: 'registered subscribers',
+    to: '/subscribers',
+  },
+  {
+    label: 'Templates',
+    value: '8',
+    subtitle: 'AVP templates',
+    to: '/templates',
+  },
+  {
+    label: 'Scenarios',
+    value: '24',
+    subtitle: 'defined scenarios',
+    to: '/scenarios',
+  },
+  {
+    label: 'Active runs',
+    value: '2',
+    subtitle: 'in progress',
+    to: '/execution',
+  },
 ];
 
 export const mockPeers: PeerSummary[] = [

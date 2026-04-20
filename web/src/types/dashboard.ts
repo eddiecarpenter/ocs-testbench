@@ -5,6 +5,8 @@ export interface KpiStat {
   label: string;
   value: string;
   subtitle?: string;
+  /** Optional route the tile navigates to when clicked. */
+  to?: string;
 }
 
 export interface PeerSummary {

@@ -1,0 +1,21 @@
+.clickable {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease,
+    border-color 120ms ease;
+}
+
+.clickable:hover {
+  transform: translateY(-1px);
+  border-color: var(--mantine-color-brand-4);
+  box-shadow: var(--mantine-shadow-sm);
+}
+
+.clickable:focus-visible {
+  outline: 2px solid var(--mantine-color-brand-5);
+  outline-offset: 2px;
+}

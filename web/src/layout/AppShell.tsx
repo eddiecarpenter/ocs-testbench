@@ -9,6 +9,7 @@ import {
   Stack,
   TextInput,
   Title,
+  UnstyledButton,
   useMantineColorScheme,
 } from '@mantine/core';
 import {
@@ -65,21 +66,31 @@ export function AppShell() {
       navbar={{ width: 240, breakpoint: 'sm' }}
       padding="md"
     >
-      <MantineAppShell.Header>
+      <MantineAppShell.Header
+        style={{
+          borderBottom: '1px solid var(--mantine-color-gray-3)',
+        }}
+      >
         <Group h="100%" px="md" justify="space-between" wrap="nowrap">
-          <Group gap="sm">
-            <Box
-              w={28}
-              h={28}
-              style={{
-                borderRadius: 6,
-                background: 'var(--mantine-color-brand-5)',
-              }}
-            />
-            <Title order={4} fw={600}>
-              OCS Testbench
-            </Title>
-          </Group>
+          <UnstyledButton
+            component={RouterLink}
+            to="/"
+            aria-label="Go to Dashboard"
+          >
+            <Group gap="sm" wrap="nowrap">
+              <Box
+                w={28}
+                h={28}
+                style={{
+                  borderRadius: 6,
+                  background: 'var(--mantine-color-brand-5)',
+                }}
+              />
+              <Title order={4} fw={600} c="var(--mantine-color-text)">
+                OCS Testbench
+              </Title>
+            </Group>
+          </UnstyledButton>
 
           <Group gap="sm" wrap="nowrap">
             <TextInput
@@ -103,7 +114,13 @@ export function AppShell() {
         </Group>
       </MantineAppShell.Header>
 
-      <MantineAppShell.Navbar p="sm">
+      <MantineAppShell.Navbar
+        p="sm"
+        bg="var(--mantine-color-body)"
+        style={{
+          borderRight: '1px solid var(--mantine-color-gray-3)',
+        }}
+      >
         <Stack gap={2} h="100%">
           {primaryNav.map((entry) => {
             const Icon = entry.icon;
@@ -119,8 +136,20 @@ export function AppShell() {
                 label={entry.label}
                 leftSection={<Icon size={18} stroke={1.6} />}
                 active={isActive}
-                variant="filled"
+                variant="light"
                 color="brand"
+                styles={{
+                  root: {
+                    borderRadius: 'var(--mantine-radius-sm)',
+                    borderLeft: isActive
+                      ? '3px solid var(--mantine-color-brand-6)'
+                      : '3px solid transparent',
+                    paddingLeft: 'calc(var(--mantine-spacing-sm) - 3px)',
+                  },
+                  label: {
+                    fontWeight: isActive ? 600 : 500,
+                  },
+                }}
               />
             );
           })}
@@ -133,8 +162,20 @@ export function AppShell() {
               label="Settings"
               leftSection={<IconSettings size={18} stroke={1.6} />}
               active={pathname.startsWith('/settings')}
-              variant="filled"
+              variant="light"
               color="brand"
+              styles={{
+                root: {
+                  borderRadius: 'var(--mantine-radius-sm)',
+                  borderLeft: pathname.startsWith('/settings')
+                    ? '3px solid var(--mantine-color-brand-6)'
+                    : '3px solid transparent',
+                  paddingLeft: 'calc(var(--mantine-spacing-sm) - 3px)',
+                },
+                label: {
+                  fontWeight: pathname.startsWith('/settings') ? 600 : 500,
+                },
+              }}
             />
           </Box>
         </Stack>
