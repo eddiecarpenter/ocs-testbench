@@ -6,7 +6,7 @@ This document captures the evolving architectural design of the OCS Testbench
 application. Sections are added incrementally as decisions are discussed and
 locked in during architecture sessions.
 
-**Status:** In progress — architecture discovery phase.
+**Status:** Scoping complete — entering design and implementation phase.
 
 ---
 
@@ -89,6 +89,35 @@ A template specifies:
 Standard templates (SMS, USSD, VOICE, DATA) may ship as defaults, but users can
 create, modify, and add templates freely.
 
+### Template Engine Architecture
+
+The template system is split into two layers with clean separation of concerns:
+
+**Template loader** — reads template definitions from the store, assembles the
+value map from three sources (static, variable, generated), applies step-level
+overrides, and produces a well-defined input struct for the engine. The loader
+defines the contract.
+
+**Template engine** — a pure, stateless processor that accepts the loader's
+output struct (or an equivalent struct from any caller). It validates AVP names
+against the dictionary, resolves placeholders, handles vendor ID inheritance,
+encodes values into correct Diameter data types, and produces the final AVP
+tree. No store or HTTP dependency.
+
+This split enables a future inline-template API endpoint that bypasses the
+loader and calls the engine directly.
+
+### Placeholder resolution order
+
+1. **Variable** (runtime — user input, scenario context) overrides static
+2. **Static** (defined in template) provides defaults
+3. **Generated** (Session-Id, Charging-Id, etc.) fills in if no explicit value
+
+### Vendor ID inheritance
+
+A grouped AVP's Vendor-Id propagates to all its children unless a child
+explicitly overrides it.
+
 ---
 
 ## 6. Session Composition
@@ -125,6 +154,7 @@ Rating-Group 200 (streaming) in the same CCR.
 ## 8. Peer Model
 
 A **peer** is an independent Diameter connection with its own:
+
 - Origin-Host / Origin-Realm
 - Remote endpoint (host, port)
 - Connection state (CER/CEA exchange)
@@ -133,8 +163,10 @@ A **peer** is an independent Diameter connection with its own:
 **Scenarios are bound to a peer.** A peer can run multiple concurrent scenarios.
 A scenario cannot span peers.
 
-**MVP:** Single peer. The architecture supports N independent peers for:
+**MVP supports N independent concurrent peers** for:
+
 - Simulating different CTF identities (different Origin-Host values)
+- Testing against multiple OCS/DRA endpoints simultaneously
 - Scaled load testing (multiple peers to the same OCS/DRA)
 
 ---
@@ -143,16 +175,25 @@ A scenario cannot span peers.
 
 ### API-first design
 
-The application is a **Go HTTP server** exposing a REST and WebSocket API:
+The application is a **Go HTTP server** exposing a REST API with SSE streaming:
 
-- **REST** — configuration CRUD, template management, scenario control
-- **WebSocket** — real-time streaming of CCA responses, session state changes,
-  connection status events
+- **REST** — configuration CRUD, template management, scenario execution control
+- **SSE (Server-Sent Events)** — real-time server-to-client streaming of CCA
+  responses, session state changes, connection status events, and per-step metrics
+
+SSE was chosen over WebSocket because all real-time updates flow server → client.
+Client-to-server actions (start, stop, proceed, modify) are discrete REST calls.
+SSE is simpler (standard HTTP, auto-reconnect, no protocol upgrade), works
+through all proxies/load balancers, and keeps the application to a single
+protocol layer.
 
 ### Frontend
 
 **React/TypeScript SPA** built as static assets and embedded in the Go binary
 via `go:embed`. The frontend consumes the same API as any other client.
+
+Dark mode / theme switching is included in the MVP. Storybook is used for
+component prototyping and visual verification during development.
 
 ### Single binary
 
@@ -166,29 +207,35 @@ no separate frontend server.
 | **Local (desktop feel)** | Run binary, auto-opens browser to `localhost:<port>` |
 | **Docker** | `docker run -p <port>:<port> ocs-testbench` |
 | **Kubernetes** | Standard deployment + service, exposed via ingress |
-| **Headless / CI** | Drive the REST/WS API directly, no browser needed |
+| **Headless / CI** | Drive the REST/SSE API directly, no browser needed |
 
 ### Core separation
 
 The system is layered:
 
 ```
-┌─────────────────────────────────────────────┐
-│  React/TS UI  (embedded via go:embed)       │
-├─────────────────────────────────────────────┤
-│  REST + WebSocket API                       │
-├─────────────────────────────────────────────┤
-│  Core library                               │
-│  ┌───────────┐ ┌──────────┐ ┌─────────────┐ │
-│  │ Diameter  │ │ Session  │ │  Template   │ │
-│  │  Stack    │ │ Manager  │ │  Engine     │ │
-│  └───────────┘ └──────────┘ └─────────────┘ │
-└─────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│  React/TS UI  (embedded via go:embed)               │
+├─────────────────────────────────────────────────────┤
+│  REST API + SSE Streaming                           │
+├─────────────────────────────────────────────────────┤
+│  Core library                                       │
+│  ┌──────────┐ ┌───────────┐ ┌─────────────────────┐│
+│  │ Diameter  │ │ Template  │ │    Execution        ││
+│  │  Stack    │ │  Engine   │ │    Engine            ││
+│  │          │ │           │ │ ┌─────────────────┐ ││
+│  │ Connection│ │  Loader   │ │ │ Session Context │ ││
+│  │ Manager  │ │     +     │ │ │ Step Executor   │ ││
+│  │ Dictionary│ │  Engine   │ │ │ Orchestrator    │ ││
+│  └──────────┘ └───────────┘ │ └─────────────────┘ ││
+│                             └─────────────────────┘│
+├─────────────────────────────────────────────────────┤
+│  Store (PostgreSQL + sqlc)                          │
+└─────────────────────────────────────────────────────┘
 ```
 
-The core library (Diameter stack, session management, template engine) has **no
-dependency on the HTTP layer**. This enables headless use, CLI tooling, and
-alternative frontends.
+The core library has **no dependency on the HTTP layer**. This enables headless
+use, CLI tooling, and alternative frontends.
 
 ### Variable sources for template placeholders
 
@@ -213,18 +260,22 @@ top of it.
 
 ## 11. Persistence
 
-**SQLite** for local persistence, accessed via **sqlc** (type-safe Go generated
-from SQL queries).
+**PostgreSQL** for persistence, accessed via **sqlc** (type-safe Go generated
+from SQL queries) with **pgx/v5** as the driver. Schema managed by
+**golang-migrate**.
 
 Persisted data:
-- Peer configurations
-- AVP templates
-- Scenario definitions
-- Execution history/logs
 
-Using sqlc means the application code depends on generated Go interfaces, not
-a specific database driver. Migrating to PostgreSQL (e.g. for K8s with shared
-state) requires changing the SQL dialect and driver, not the application logic.
+- Peer configurations (JSONB body)
+- AVP templates (JSONB body)
+- Scenario definitions (JSONB step list)
+- Subscribers (normalised columns)
+- Custom dictionaries (XML content)
+- Execution history/logs (shape TBD)
+
+JSONB bodies store complex/variable structures; normalised columns store
+queryable fields. PostgreSQL-specific query features (JSONB containment, array
+types) are avoided to keep future SQLite migration feasible.
 
 ---
 
@@ -261,6 +312,7 @@ steps:
 ### Extensibility
 
 The step list is structured data (JSON/YAML), making it trivially composable by:
+
 - The UI (human builds steps via forms)
 - The API (external tools submit step lists)
 - AI agents (via MCP — generate step lists conversationally)
@@ -270,16 +322,69 @@ a separate concern.
 
 ---
 
-## 13. CCA Response Handling
+## 13. Execution Engine
+
+The execution engine is structured as three layers:
+
+### Session context
+
+Created when a scenario execution starts, bound to a specific peer. Holds:
+
+- The peer binding (which connection to send on)
+- The context variable map (extractions, derived values, carried across steps)
+- Session-level state (Session-Id, CC-Request-Number, execution mode)
+- A `Sender` interface for dispatching CCR messages and receiving CCA responses
+- A `MeasuredSender` decorator wrapping the `Sender` for metrics capture
+- A metrics accumulator storing per-step metrics with a query API
+
+### Step executor
+
+A stateless processor called with: session context, previous `SendResult`
+(nil for first step), and current step definition. It:
+
+1. Evaluates the guard expression → skip if false
+2. Runs extractions from previous CCA into context variables
+3. Resolves derived values and template placeholders
+4. Calls the template engine to construct the AVP tree
+5. Calls `MeasuredSender.Send(CCR)` → receives `SendResult{CCA, Metrics}`
+6. Runs assertions against the CCA
+7. Evaluates result code handlers
+8. Returns the step result
+
+### Scenario orchestrator
+
+Iterates the step list, feeding each step into the executor:
+
+- **Interactive mode** — yields control to the caller after each step with the
+  result and next step's pre-populated values. Caller can modify and signal proceed.
+- **Continuous mode** — loops automatically, checking stop conditions.
+
+### Sender interface and MeasuredSender
+
+The `Sender` interface is the key abstraction — a simple contract: takes a CCR,
+returns a CCA. The real implementation wraps the Diameter stack peer connection.
+Test implementations return canned CCA responses.
+
+The `MeasuredSender` is a decorator that wraps any `Sender` to capture per-request
+metrics (round-trip time, send/receive timestamps, message sizes, result code,
+transport errors) without modifying the Diameter stack's send method. It returns
+a `SendResult{CCA, Metrics}`.
+
+The session context accumulates all per-step metrics from the `MeasuredSender`
+and exposes a query API (all metrics, by step index, summary aggregates).
+
+---
+
+## 14. CCA Response Handling
 
 The execution engine processes CCA responses at two levels:
 
 ### Level 1: Protocol behavior (built-in, non-configurable)
 
-The engine automatically handles protocol-mandated responses:
+The Diameter stack automatically handles protocol-mandated responses:
 
-- **Final-Unit-Indication** with `TERMINATE` → engine sends CCR-T
-- **Validity-Time** → engine tracks grant expiry, re-authorises before timeout
+- **Final-Unit-Indication** with `TERMINATE` → sends CCR-T
+- **Validity-Time** → tracks grant expiry, re-authorises before timeout
 - **Result code 5xxx** (permanent failures) → session terminates
 - **FUI with REDIRECT / RESTRICT_ACCESS** → handled per specification
 
@@ -364,7 +469,7 @@ Available actions:
 
 ---
 
-## 14. Expression Evaluator
+## 15. Expression Evaluator
 
 CCA response evaluation uses **`github.com/eddiecarpenter/ruleevaluator`** —
 a general-purpose Go expression evaluator.
@@ -384,7 +489,7 @@ for cross-step references.
 
 ---
 
-## 15. AVP Dictionary
+## 16. AVP Dictionary
 
 The testbench uses **go-diameter's built-in XML dictionary** for AVP metadata:
 
@@ -394,9 +499,10 @@ The testbench uses **go-diameter's built-in XML dictionary** for AVP metadata:
   and all 3GPP charging AVPs
 
 For vendor-specific or proprietary AVPs, additional XML dictionary files can be
-loaded at runtime.
+loaded at runtime from the `custom_dictionary` table.
 
 The **template engine** uses dictionary lookups to:
+
 - Resolve AVP names to codes, vendor IDs, and data types
 - Validate templates at load time (reject unknown AVP names)
 - Encode placeholder values into the correct Diameter data type
@@ -404,7 +510,7 @@ The **template engine** uses dictionary lookups to:
 
 ---
 
-## 16. Subscriber Table
+## 17. Subscriber Table
 
 Subscribers are a first-class entity. Every scenario requires a subscriber identity.
 
@@ -414,13 +520,56 @@ Subscribers are a first-class entity. Every scenario requires a subscriber ident
 | ICCID | string | Yes | SIM identifier |
 | IMEI | string | No | Device identifier |
 
-Subscribers are persisted in SQLite and managed via the UI/API. In interactive
+Subscribers are persisted in PostgreSQL and managed via the UI/API. In interactive
 mode, the user selects a subscriber before starting. In continuous mode, the
 subscriber is specified in the scenario configuration.
 
 ---
 
-## 17. Future Considerations (not in MVP)
+## 18. Monorepo Layout
+
+```
+ocs-testbench/
+├── cmd/
+│   └── ocs-testbench/          # Application entry point + config
+├── internal/                    # Go backend
+│   ├── appl/                   # App lifecycle (metrics, signals)
+│   ├── baseconfig/             # Config loading, base structs
+│   ├── logging/                # Structured logging (slog)
+│   ├── store/                  # Database layer (sqlc)
+│   ├── diameter/               # Diameter stack
+│   ├── template/               # Template loader + engine
+│   ├── engine/                 # Execution engine
+│   └── api/                    # REST API + SSE handlers
+├── db/
+│   └── migrations/             # golang-migrate files
+├── web/                        # React/TypeScript frontend
+│   ├── src/                    # Source code
+│   ├── .storybook/             # Storybook config
+│   └── dist/                   # Build output (go:embed target, gitignored)
+├── docs/                       # Project documentation
+├── go.mod
+├── sqlc.yaml
+└── .gitignore
+```
+
+---
+
+## 19. Bootstrap and Infrastructure
+
+Application bootstrap adapts proven patterns from the charging-domain project:
+
+- **`internal/baseconfig`** — YAML config loading, base config struct
+- **`internal/logging`** — slog-based structured logging, Bootstrap/Configure lifecycle
+- **`internal/appl`** — Prometheus metrics server, signal handling, graceful shutdown
+
+The `cmd/ocs-testbench/main.go` entry point wires all components: config → logging
+→ store → Diameter stack → API router → embedded frontend → HTTP server → signal
+handler → graceful shutdown.
+
+---
+
+## 20. Future Considerations (not in MVP)
 
 - **Load testing** — a subscriber pool (bulk MSISDNs) combined with a load profile
   (target concurrency, ramp-up rate). The engine picks subscribers from the pool
@@ -429,8 +578,3 @@ subscriber is specified in the scenario configuration.
 - **MCP server frontend** — expose the testbench API as MCP tools, enabling AI
   agents to compose and execute Diameter test scenarios conversationally
 - **SCTP transport** — if required by specific OCS deployments
-- **Multi-peer management UI** — dashboard for managing N concurrent peers
-
----
-
-<!-- Further architectural decisions will be recorded below -->
