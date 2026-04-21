@@ -51,15 +51,15 @@ import { PeerForm } from './PeerForm';
 type StatusFilter = 'all' | PeerStatus;
 
 /**
- * Modal prompt state. Only the `created` kind still uses the modal —
- * updates raise a non-blocking toast instead. Kept as a discriminated
- * union so re-introducing other modal flows later is a one-variant
- * change.
+ * Input to the post-mutation lifecycle toast. Three variants:
+ *   - `created`       — brand-new peer; offer Connect.
+ *   - `updated-idle`  — edited peer currently disconnected; offer Connect.
+ *   - `updated-live`  — edited peer currently live; offer Restart so the
+ *                       new config takes effect.
+ * All three use the same non-blocking toast — no modals.
  */
-type PeerPrompt = { kind: 'created'; peer: Peer };
-
-/** Richer variant used by the update toast — separate from modal state. */
-type UpdateToastInput =
+type LifecycleToastInput =
+  | { kind: 'created'; peer: Peer }
   | { kind: 'updated-idle'; peer: Peer }
   | { kind: 'updated-live'; peer: Peer };
 
@@ -78,6 +78,13 @@ function isLivePeer(p: Peer): boolean {
  * Drawer body has its own `overflow: auto`, which fights the form's own
  * scroll region and pushes the footer off-screen when the body grows.
  */
+/**
+ * Mantine's default Drawer transition is 150 ms; we wait slightly longer
+ * before firing any follow-up toast/modal so the notification doesn't
+ * land behind the still-closing drawer in the top-right corner.
+ */
+const DRAWER_CLOSE_TRANSITION_MS = 250;
+
 const DRAWER_STYLES = {
   content: {
     display: 'flex',
@@ -121,11 +128,9 @@ export function PeersPage() {
   //                         connected. Connect now?" → Connect
   //   - updated-live     → "Peer 'x' was updated. Currently connected.
   //                         Restart?" → Disconnect + Connect
-  // Only the `created` variant uses this state now — the modal is the
-  // right fit for a "you've just created a new thing, want to start it?"
-  // decision point. The `updated-*` variants fire a non-blocking toast
-  // with inline Connect/Restart actions instead (see showUpdateToast).
-  const [prompt, setPrompt] = useState<PeerPrompt | undefined>();
+  // All three post-mutation flows (created / updated-idle / updated-live)
+  // surface as a non-blocking toast with inline Connect/Restart actions.
+  // See `showLifecycleToast`.
   const connect = useConnectPeer();
   const restart = useRestartPeer();
 
@@ -304,7 +309,9 @@ export function PeersPage() {
       <CreatePeerDrawer
         open={drawer.kind === 'create'}
         onClose={() => setDrawer({ kind: 'closed' })}
-        onCreated={(p) => setPrompt({ kind: 'created', peer: p })}
+        onCreated={(p) =>
+          showLifecycleToast({ kind: 'created', peer: p }, { connect, restart })
+        }
       />
       <EditPeerDrawer
         peer={drawer.kind === 'edit' ? drawer.peer : undefined}
@@ -314,7 +321,7 @@ export function PeersPage() {
           setDeleteTarget(p);
         }}
         onUpdated={(p) =>
-          showUpdateToast(
+          showLifecycleToast(
             {
               kind: isLivePeer(p) ? 'updated-live' : 'updated-idle',
               peer: p,
@@ -326,10 +333,6 @@ export function PeersPage() {
       <DeletePeerModal
         peer={deleteTarget}
         onClose={() => setDeleteTarget(undefined)}
-      />
-      <PeerLifecyclePrompt
-        prompt={prompt}
-        onClose={() => setPrompt(undefined)}
       />
     </Stack>
   );
@@ -478,7 +481,12 @@ function CreatePeerDrawer({
       onClose();
       // Defer so the drawer close transition runs before the modal opens —
       // avoids the modal overlay stacking under the drawer's fade-out.
-      setTimeout(() => onCreated(peer), 0);
+      // Wait for the Drawer's close transition to finish before firing
+      // the follow-up prompt — otherwise the Drawer still briefly covers
+      // the top-right corner where the toast/modal lands, and the
+      // notification flashes *behind* it. Mantine's default Drawer
+      // transition is 150 ms; 250 ms gives a safe margin.
+      setTimeout(() => onCreated(peer), DRAWER_CLOSE_TRANSITION_MS);
       return peer;
     } catch (err) {
       if (err instanceof ApiError && err.status === 422) throw err;
@@ -571,7 +579,7 @@ function EditPeerForm({
       // success toast here would just stack two notifications for the
       // same event.
       onClose();
-      setTimeout(() => onUpdated(next), 0);
+      setTimeout(() => onUpdated(next), DRAWER_CLOSE_TRANSITION_MS);
       return next;
     } catch (err) {
       if (err instanceof ApiError && err.status === 422) throw err;
@@ -659,102 +667,21 @@ function DeletePeerModal({
 }
 
 /**
- * Unified post-mutation lifecycle prompt. Three variants:
- *
- *   - `created`       — new peer; offer immediate connect.
- *   - `updated-idle`  — edited peer that is not live; offer connect.
- *   - `updated-live`  — edited peer that is live; offer restart so the
- *                       new config takes effect on the running session.
- *
- * autoConnect is intentionally **not** mentioned in any variant — it
- * governs server-startup behaviour only (documented in the form helper
- * text) and has no bearing on the decision here.
+ * Unified post-mutation toast with inline Connect/Restart action. Used
+ * for all three flows (create, update-idle, update-live). Non-blocking:
+ * the user can keep working and the reminder sits in the corner until
+ * they act, dismiss, or it auto-closes after 10 s. autoConnect is
+ * intentionally not mentioned — it governs server-startup only.
  */
-function PeerLifecyclePrompt({
-  prompt,
-  onClose,
-}: {
-  prompt: PeerPrompt | undefined;
-  onClose: () => void;
-}) {
-  const connect = useConnectPeer();
-
-  // Close the dialog the moment the user confirms, then let the mutation
-  // settle in the background. The optimistic status patch already gives
-  // live feedback in the row; holding the modal open for 10+ seconds
-  // while the transport handshakes blocks the user for no reason.
-  const handleConfirm = () => {
-    if (!prompt) return;
-    onClose();
-    // Success toast is handled globally by `usePeerStatusToasts`, which
-    // fires on any status transition. We only need to surface thrown
-    // errors here — a rollback leaves the cache unchanged, so no global
-    // toast would fire for a failed request.
-    connect.mutateAsync(prompt.peer.id).catch((err: unknown) => {
-      notifications.show({
-        color: 'red',
-        title: 'Connect failed',
-        message: err instanceof Error ? err.message : 'Unexpected error',
-      });
-    });
-  };
-
-  const copy = prompt ? promptCopy(prompt) : undefined;
-
-  return (
-    <Modal
-      opened={Boolean(prompt)}
-      onClose={onClose}
-      title={copy?.title ?? ''}
-      centered
-    >
-      <Stack gap="md">
-        <Text size="sm">{copy?.body}</Text>
-        <Group justify="flex-end">
-          <Button variant="subtle" onClick={onClose}>
-            {copy?.cancelLabel ?? 'Cancel'}
-          </Button>
-          <Button onClick={handleConfirm}>
-            {copy?.confirmLabel ?? 'Confirm'}
-          </Button>
-        </Group>
-      </Stack>
-    </Modal>
-  );
-}
-
-function promptCopy(p: PeerPrompt): {
-  title: string;
-  body: React.ReactNode;
-  cancelLabel: string;
-  confirmLabel: string;
-} {
-  const name = <strong>&apos;{p.peer.name}&apos;</strong>;
-  return {
-    title: 'Connect peer now?',
-    body: <>A new peer {name} was created. Would you like to connect it now?</>,
-    cancelLabel: 'Not now',
-    confirmLabel: 'Connect',
-  };
-}
-
-/**
- * Non-blocking alternative to `PeerLifecyclePrompt` for the update path:
- * a toast with an inline action button. Lives in the same global toast
- * channel as status changes, so after editing you can keep working and
- * the reminder sits unobtrusively in the corner until you act or
- * dismiss. The `created` path still uses the modal — a new peer is a
- * bigger decision point and a transient toast is too easy to miss.
- */
-function showUpdateToast(
-  p: UpdateToastInput,
+function showLifecycleToast(
+  p: LifecycleToastInput,
   mutations: {
     connect: ReturnType<typeof useConnectPeer>;
     restart: ReturnType<typeof useRestartPeer>;
   },
 ) {
   const isRestart = p.kind === 'updated-live';
-  const id = `peer-update-${p.peer.id}-${Date.now()}`;
+  const id = `peer-lifecycle-${p.peer.id}-${Date.now()}`;
 
   const run = () => {
     notifications.hide(id);
@@ -770,6 +697,26 @@ function showUpdateToast(
     });
   };
 
+  const title =
+    p.kind === 'created'
+      ? `Peer '${p.peer.name}' created`
+      : `Peer '${p.peer.name}' updated`;
+
+  const body =
+    p.kind === 'created' ? (
+      <>Would you like to connect it now?</>
+    ) : isRestart ? (
+      <>
+        Currently <strong>connected</strong>. Restart to apply the new
+        configuration.
+      </>
+    ) : (
+      <>
+        Not currently <strong>connected</strong>. Connect now to start the
+        peer.
+      </>
+    );
+
   notifications.show({
     id,
     withCloseButton: true,
@@ -777,23 +724,13 @@ function showUpdateToast(
     color: isRestart ? 'yellow' : 'blue',
     title: (
       <Text size="sm" fw={600}>
-        Peer &apos;{p.peer.name}&apos; updated
+        {title}
       </Text>
     ),
     message: (
       <Stack gap={8} mt={4}>
         <Text size="sm" c="dimmed">
-          {isRestart ? (
-            <>
-              Currently <strong>connected</strong>. Restart to apply the new
-              configuration.
-            </>
-          ) : (
-            <>
-              Not currently <strong>connected</strong>. Connect now to start
-              the peer.
-            </>
-          )}
+          {body}
         </Text>
         <Group gap="xs">
           <Button size="xs" variant="light" onClick={run}>
