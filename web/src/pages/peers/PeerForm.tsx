@@ -84,9 +84,11 @@ export function PeerForm({
   onDelete,
   onCancel,
 }: PeerFormProps) {
+  // Controlled mode (default) — we rely on reactive re-render of
+  // `form.isValid()` to enable/disable the Test button as the user types.
   const form = useForm<PeerInput>({
-    mode: 'uncontrolled',
     initialValues: initial ? fromPeer(initial) : EMPTY,
+    validateInputOnChange: true,
     validate: {
       name: (v) => (v.trim() ? null : 'Name is required'),
       host: (v) => (v.trim() ? null : 'Host is required'),
@@ -125,17 +127,21 @@ export function PeerForm({
     }
   });
 
+  const canTest = form.isValid();
   const handleTest = () => {
-    if (!onTest) return;
-    const validation = form.validate();
-    if (validation.hasErrors) return;
+    if (!onTest || !canTest) return;
     onTest(form.getValues());
   };
 
   return (
     <form
       onSubmit={handleSubmit}
-      style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        flex: 1,
+        minHeight: 0,
+      }}
     >
       {/* Header */}
       <Stack gap={4} pb="md">
@@ -278,7 +284,7 @@ export function PeerForm({
               variant="default"
               onClick={handleTest}
               loading={testing}
-              disabled={submitting || deleting}
+              disabled={!canTest || submitting || deleting}
             >
               Test
             </Button>

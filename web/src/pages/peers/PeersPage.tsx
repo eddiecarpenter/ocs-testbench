@@ -39,13 +39,33 @@ import {
   useCreatePeer,
   useDeletePeer,
   usePeers,
-  useTestPeer,
+  useTestPeerConfig,
   useUpdatePeer,
 } from '../../api/resources/peers';
 import { PeerStatusLabel } from '../../components/peer/PeerStatusLabel';
 import { PeerForm } from './PeerForm';
 
 type StatusFilter = 'all' | PeerStatus;
+
+/**
+ * Make the Drawer a vertical flex container so the form inside can have
+ * its own flex:1 scrollable middle and a sticky footer. Without this the
+ * Drawer body has its own `overflow: auto`, which fights the form's own
+ * scroll region and pushes the footer off-screen when the body grows.
+ */
+const DRAWER_STYLES = {
+  content: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+  },
+  body: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    flex: 1,
+    minHeight: 0,
+    overflow: 'hidden',
+  },
+};
 
 const STATUS_FILTER_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: 'all', label: 'All' },
@@ -324,6 +344,31 @@ function RowMenu({
 }
 
 /** Drawer wrapping PeerForm in create mode. */
+/**
+ * Run a stateless CER/CEA probe for the given candidate config and
+ * surface the outcome as a toast. Shared by Create and Edit drawers.
+ */
+function useProbeConfig() {
+  const testConfig = useTestPeerConfig();
+  const run = async (values: PeerInput) => {
+    try {
+      const result: PeerTestResult = await testConfig.mutateAsync(values);
+      notifications.show({
+        color: result.ok ? 'teal' : 'red',
+        title: result.ok ? 'Probe succeeded' : 'Probe failed',
+        message: `${result.detail ?? (result.ok ? 'OK' : 'No response')} (${result.durationMs} ms)`,
+      });
+    } catch (err) {
+      notifications.show({
+        color: 'red',
+        title: 'Probe failed',
+        message: err instanceof Error ? err.message : 'Unexpected error',
+      });
+    }
+  };
+  return { run, pending: testConfig.isPending };
+}
+
 function CreatePeerDrawer({
   open,
   onClose,
@@ -332,6 +377,7 @@ function CreatePeerDrawer({
   onClose: () => void;
 }) {
   const createPeer = useCreatePeer();
+  const probe = useProbeConfig();
 
   const handleSubmit = async (values: PeerInput) => {
     try {
@@ -364,15 +410,16 @@ function CreatePeerDrawer({
       withCloseButton
       closeOnClickOutside={!createPeer.isPending}
       closeOnEscape={!createPeer.isPending}
+      styles={DRAWER_STYLES}
     >
-      <div style={{ height: 'calc(100dvh - 32px)' }}>
-        <PeerForm
-          mode="create"
-          submitting={createPeer.isPending}
-          onSubmit={handleSubmit}
-          onCancel={onClose}
-        />
-      </div>
+      <PeerForm
+        mode="create"
+        submitting={createPeer.isPending}
+        testing={probe.pending}
+        onSubmit={handleSubmit}
+        onTest={probe.run}
+        onCancel={onClose}
+      />
     </Drawer>
   );
 }
@@ -395,16 +442,15 @@ function EditPeerDrawer({
       size={480}
       padding="lg"
       withCloseButton
+      styles={DRAWER_STYLES}
     >
-      <div style={{ height: 'calc(100dvh - 32px)' }}>
-        {peer && (
-          <EditPeerForm
-            peer={peer}
-            onClose={onClose}
-            onRequestDelete={() => onRequestDelete(peer)}
-          />
-        )}
-      </div>
+      {peer && (
+        <EditPeerForm
+          peer={peer}
+          onClose={onClose}
+          onRequestDelete={() => onRequestDelete(peer)}
+        />
+      )}
     </Drawer>
   );
 }
@@ -419,7 +465,7 @@ function EditPeerForm({
   onRequestDelete: () => void;
 }) {
   const updatePeer = useUpdatePeer(peer.id);
-  const testPeer = useTestPeer(peer.id);
+  const probe = useProbeConfig();
 
   const handleSubmit = async (values: PeerInput) => {
     try {
@@ -442,31 +488,14 @@ function EditPeerForm({
     }
   };
 
-  const handleTest = async () => {
-    try {
-      const result: PeerTestResult = await testPeer.mutateAsync();
-      notifications.show({
-        color: result.ok ? 'teal' : 'red',
-        title: result.ok ? 'Probe succeeded' : 'Probe failed',
-        message: `${result.detail ?? (result.ok ? 'OK' : 'No response')} (${result.durationMs} ms)`,
-      });
-    } catch (err) {
-      notifications.show({
-        color: 'red',
-        title: 'Probe failed',
-        message: err instanceof Error ? err.message : 'Unexpected error',
-      });
-    }
-  };
-
   return (
     <PeerForm
       mode="edit"
       initial={peer}
       submitting={updatePeer.isPending}
-      testing={testPeer.isPending}
+      testing={probe.pending}
       onSubmit={handleSubmit}
-      onTest={handleTest}
+      onTest={probe.run}
       onDelete={onRequestDelete}
       onCancel={onClose}
     />

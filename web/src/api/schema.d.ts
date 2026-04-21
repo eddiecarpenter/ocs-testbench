@@ -129,26 +129,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/peers/{id}/test": {
+    "/peers/test": {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                /** @description Resource identifier */
-                id: components["parameters"]["IdPath"];
-            };
+            path?: never;
             cookie?: never;
         };
         get?: never;
         put?: never;
         /**
-         * Dry-run a CER/CEA probe against a peer
-         * @description Performs a synchronous capability exchange probe using the peer's
-         *     configured identity/transport. Does not alter the peer's persistent
-         *     connection state — purely a diagnostic action intended to validate
-         *     configuration changes before they are saved.
+         * Dry-run a CER/CEA probe against a candidate peer config
+         * @description Performs a synchronous capability exchange probe using the
+         *     `PeerInput` in the request body. The probe does **not** read from
+         *     or write to persistent state — it is intentionally stateless so
+         *     the UI can validate configuration changes before they are saved
+         *     (including for brand-new peers that have no id yet).
          */
-        post: operations["testPeer"];
+        post: operations["testPeerConfig"];
         delete?: never;
         options?: never;
         head?: never;
@@ -834,17 +832,18 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
-    testPeer: {
+    testPeerConfig: {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                /** @description Resource identifier */
-                id: components["parameters"]["IdPath"];
-            };
+            path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PeerInput"];
+            };
+        };
         responses: {
             /** @description Probe completed (inspect `ok` for outcome) */
             200: {
@@ -855,7 +854,7 @@ export interface operations {
                     "application/json": components["schemas"]["PeerTestResult"];
                 };
             };
-            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationProblem"];
             default: components["responses"]["Problem"];
         };
     };

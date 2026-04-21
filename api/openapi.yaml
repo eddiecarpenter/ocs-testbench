@@ -204,18 +204,23 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
-  /peers/{id}/test:
-    parameters:
-      - $ref: '#/components/parameters/IdPath'
+  /peers/test:
     post:
       tags: [Peers]
-      operationId: testPeer
-      summary: Dry-run a CER/CEA probe against a peer
+      operationId: testPeerConfig
+      summary: Dry-run a CER/CEA probe against a candidate peer config
       description: |
-        Performs a synchronous capability exchange probe using the peer's
-        configured identity/transport. Does not alter the peer's persistent
-        connection state — purely a diagnostic action intended to validate
-        configuration changes before they are saved.
+        Performs a synchronous capability exchange probe using the
+        `PeerInput` in the request body. The probe does **not** read from
+        or write to persistent state — it is intentionally stateless so
+        the UI can validate configuration changes before they are saved
+        (including for brand-new peers that have no id yet).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PeerInput'
       responses:
         '200':
           description: Probe completed (inspect `ok` for outcome)
@@ -223,8 +228,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PeerTestResult'
-        '404':
-          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationProblem'
         default:
           $ref: '#/components/responses/Problem'
 

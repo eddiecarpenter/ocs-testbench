@@ -131,42 +131,35 @@ mock
     return [201, created];
   });
 
-// Test — CER/CEA dry-run
+// Test — CER/CEA dry-run against an arbitrary candidate config.
+// Intentionally stateless: does not look at `peers[]`, only the body.
 mock
-  .onPost(/\/peers\/[^/]+\/test$/)
+  .onPost(/\/peers\/test$/)
   .withDelayInMs(600)
   .reply((config): [number, PeerTestResult | Record<string, unknown>] => {
-    const m = /\/peers\/([^/]+)\/test$/.exec(config.url ?? '');
-    const id = m ? decodeURIComponent(m[1]) : '';
-    const peer = peers.find((p) => p.id === id);
-    if (!peer) {
-      return [
-        404,
-        {
-          type: 'about:blank',
-          title: 'Peer not found',
-          status: 404,
-          detail: `No peer with id "${id}"`,
-        },
-      ];
-    }
-    // Mock outcome: peers in "error" fail, everyone else succeeds.
-    if (peer.status === 'error') {
+    const input = safeParse<PeerInput>(config.data);
+    const errors = validate(input);
+    if (errors) return validationProblem(errors);
+
+    // Contrived demo rule: hosts in 10.0.99.x simulate a CER/CEA timeout
+    // so the failure path is exercisable.
+    if (input!.host.startsWith('10.0.99.')) {
       return [
         200,
         {
           ok: false,
           durationMs: 1_500,
-          detail: peer.statusDetail ?? 'CER/CEA timeout',
+          detail: `CER/CEA timeout (no response from ${input!.host}:${input!.port})`,
         },
       ];
     }
+
     return [
       200,
       {
         ok: true,
         durationMs: 42 + Math.floor(Math.random() * 30),
-        detail: 'Capability exchange OK',
+        detail: `Capability exchange OK (${input!.transport})`,
       },
     ];
   });

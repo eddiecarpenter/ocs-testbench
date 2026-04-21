@@ -45,8 +45,8 @@ export const updatePeer = (id: string, input: PeerInput) =>
 export const deletePeer = (id: string) =>
   ApiService.delete<void>(`/peers/${encodeURIComponent(id)}`);
 
-export const testPeer = (id: string) =>
-  ApiService.post<PeerTestResult>(`/peers/${encodeURIComponent(id)}/test`);
+export const testPeerConfig = (input: PeerInput) =>
+  ApiService.post<PeerTestResult, PeerInput>('/peers/test', input);
 
 /**
  * Create a new peer. On success, invalidates the list so the new row
@@ -86,12 +86,13 @@ export function useUpdatePeer(id: string) {
  * list cache synchronously — no refetch needed.
  */
 /**
- * Dry-run CER/CEA probe. Does not mutate persistent state — result is
- * returned to the caller for UI display only.
+ * Dry-run CER/CEA probe against a candidate `PeerInput`. Stateless —
+ * does not read from or write to any persisted peer. Used by both the
+ * Create and Edit drawers to validate unsaved configuration.
  */
-export function useTestPeer(id: string) {
+export function useTestPeerConfig() {
   return useMutation({
-    mutationFn: () => testPeer(id),
+    mutationFn: (input: PeerInput) => testPeerConfig(input),
   });
 }
 
