@@ -33,6 +33,8 @@ tags:
     description: Past and in-progress scenario executions
   - name: Metrics
     description: Time-series telemetry
+  - name: Events
+    description: Server-Sent Events stream for live updates
   - name: Docs
     description: Self-describing API — the spec and browsable docs
 
@@ -217,6 +219,72 @@ paths:
                 $ref: '#/components/schemas/ExecutionPage'
         default:
           $ref: '#/components/responses/Problem'
+
+  /executions/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Executions]
+      operationId: getExecution
+      summary: Get a single execution with its full step-by-step detail
+      description: |
+        Returns the full execution detail including every completed step so
+        far. For running executions this represents a point-in-time
+        snapshot; subsequent state is delivered via the SSE
+        `execution.progress` event which carries the same shape.
+      responses:
+        '200':
+          description: Execution detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Execution'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /events:
+    get:
+      tags: [Events]
+      operationId: subscribeEvents
+      summary: Server-Sent Events stream of live updates
+      description: |
+        Opens a long-lived SSE stream of server → client events. The
+        connection stays open; the server pushes `text/event-stream`
+        records as state changes.
+
+        ### Contract
+
+        Every event carries the **full current state** of the resource it
+        concerns. Clients can treat each event as a last-write-wins
+        replacement — missed events do not need to be replayed because the
+        next event for the same resource supersedes them. Reconnection is
+        automatic (the browser `EventSource` does this natively); on
+        reconnect the client should invalidate its caches so the next
+        paint reads truth from REST.
+
+        ### Event types
+
+        | `event:` field | Payload schema | Notes |
+        |---|---|---|
+        | `peer.updated` | `Peer` | Any status transition, rename, etc. |
+        | `execution.created` | `ExecutionSummary` | A new execution has started. |
+        | `execution.progress` | `Execution` | A running execution advanced. Includes *all* completed steps so far. Terminal events carry `result: success\|failure`. |
+        | `dashboard.kpi` | `DashboardKpis` | Aggregate counters changed. |
+
+        OpenAPI does not model SSE richly, so this operation documents the
+        connection point only; per-event payload shapes are the referenced
+        component schemas above.
+      responses:
+        '200':
+          description: Event stream opened
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  SSE stream. Each record is `event: <type>\ndata: <json>\n\n`.
 
   /metrics/response-time:
     get:
@@ -511,6 +579,63 @@ components:
             $ref: '#/components/schemas/ExecutionSummary'
         page:
           $ref: '#/components/schemas/PageMeta'
+
+    ExecutionStep:
+      type: object
+      description: One step of a scenario execution.
+      required: [n, name, result]
+      properties:
+        n:
+          type: integer
+          minimum: 1
+          description: 1-based sequence number of the step
+        name:
+          type: string
+          description: Short step name (e.g. 'CCR-I', 'CCR-U')
+        result:
+          $ref: '#/components/schemas/ExecutionResult'
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+          description: Present only when the step has completed
+        durationMs:
+          type: integer
+          minimum: 0
+          description: Wall-clock duration in milliseconds (present when finished)
+        errorDetail:
+          type: string
+          description: Human-readable error when `result=failure`
+
+    Execution:
+      description: |
+        Full execution detail. Extends `ExecutionSummary` with step-by-step
+        progress. This is the payload returned by `GET /executions/{id}`
+        and carried by every SSE `execution.progress` event.
+      allOf:
+        - $ref: '#/components/schemas/ExecutionSummary'
+        - type: object
+          required: [currentStep, totalSteps, steps]
+          properties:
+            currentStep:
+              type: integer
+              minimum: 0
+              description: |
+                0-based index of the step currently executing, or equal to
+                `totalSteps` when the execution has completed.
+            totalSteps:
+              type: integer
+              minimum: 0
+            steps:
+              type: array
+              description: |
+                All steps completed so far. For running executions this
+                grows as the scenario advances; terminal executions contain
+                every step in the scenario.
+              items:
+                $ref: '#/components/schemas/ExecutionStep'
 
     # ─────────────── Metrics ───────────────
 

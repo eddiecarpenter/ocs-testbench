@@ -189,6 +189,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/executions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a single execution with its full step-by-step detail
+         * @description Returns the full execution detail including every completed step so
+         *     far. For running executions this represents a point-in-time
+         *     snapshot; subsequent state is delivered via the SSE
+         *     `execution.progress` event which carries the same shape.
+         */
+        get: operations["getExecution"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Server-Sent Events stream of live updates
+         * @description Opens a long-lived SSE stream of server → client events. The
+         *     connection stays open; the server pushes `text/event-stream`
+         *     records as state changes.
+         *
+         *     ### Contract
+         *
+         *     Every event carries the **full current state** of the resource it
+         *     concerns. Clients can treat each event as a last-write-wins
+         *     replacement — missed events do not need to be replayed because the
+         *     next event for the same resource supersedes them. Reconnection is
+         *     automatic (the browser `EventSource` does this natively); on
+         *     reconnect the client should invalidate its caches so the next
+         *     paint reads truth from REST.
+         *
+         *     ### Event types
+         *
+         *     | `event:` field | Payload schema | Notes |
+         *     |---|---|---|
+         *     | `peer.updated` | `Peer` | Any status transition, rename, etc. |
+         *     | `execution.created` | `ExecutionSummary` | A new execution has started. |
+         *     | `execution.progress` | `Execution` | A running execution advanced. Includes *all* completed steps so far. Terminal events carry `result: success\|failure`. |
+         *     | `dashboard.kpi` | `DashboardKpis` | Aggregate counters changed. |
+         *
+         *     OpenAPI does not model SSE richly, so this operation documents the
+         *     connection point only; per-event payload shapes are the referenced
+         *     component schemas above.
+         */
+        get: operations["subscribeEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/metrics/response-time": {
         parameters: {
             query?: never;
@@ -328,6 +399,44 @@ export interface components {
         ExecutionPage: {
             items: components["schemas"]["ExecutionSummary"][];
             page: components["schemas"]["PageMeta"];
+        };
+        /** @description One step of a scenario execution. */
+        ExecutionStep: {
+            /** @description 1-based sequence number of the step */
+            n: number;
+            /** @description Short step name (e.g. 'CCR-I', 'CCR-U') */
+            name: string;
+            result: components["schemas"]["ExecutionResult"];
+            /** Format: date-time */
+            startedAt?: string;
+            /**
+             * Format: date-time
+             * @description Present only when the step has completed
+             */
+            finishedAt?: string;
+            /** @description Wall-clock duration in milliseconds (present when finished) */
+            durationMs?: number;
+            /** @description Human-readable error when `result=failure` */
+            errorDetail?: string;
+        };
+        /**
+         * @description Full execution detail. Extends `ExecutionSummary` with step-by-step
+         *     progress. This is the payload returned by `GET /executions/{id}`
+         *     and carried by every SSE `execution.progress` event.
+         */
+        Execution: components["schemas"]["ExecutionSummary"] & {
+            /**
+             * @description 0-based index of the step currently executing, or equal to
+             *     `totalSteps` when the execution has completed.
+             */
+            currentStep: number;
+            totalSteps: number;
+            /**
+             * @description All steps completed so far. For running executions this
+             *     grows as the scenario advances; terminal executions contain
+             *     every step in the scenario.
+             */
+            steps: components["schemas"]["ExecutionStep"][];
         };
         ResponseTimePoint: {
             /**
@@ -613,6 +722,51 @@ export interface operations {
                 };
             };
             default: components["responses"]["Problem"];
+        };
+    };
+    getExecution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Execution detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Execution"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    subscribeEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Event stream opened */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
         };
     };
     getResponseTimeSeries: {

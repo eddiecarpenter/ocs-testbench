@@ -4,6 +4,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { Route, Routes } from 'react-router';
 
 import { createQueryClient } from './api/query-client';
+import { SseProvider } from './api/sse/SseProvider';
 import { ErrorProvider } from './context/error/ErrorProvider';
 import { theme } from './theme/theme';
 import { AppShell } from './layout/AppShell';
@@ -17,8 +18,9 @@ export function App() {
     <ErrorProvider>
       <MantineProvider theme={theme} defaultColorScheme="auto">
         <QueryClientProvider client={queryClient}>
-          <Notifications position="top-right" />
-          <Routes>
+          <SseProvider>
+            <Notifications position="top-right" />
+            <Routes>
             <Route element={<AppShell />}>
               <Route index element={<DashboardPage />} />
               <Route path="peers" element={<PlaceholderPage title="Peers" />} />
@@ -44,6 +46,7 @@ export function App() {
               />
             </Route>
           </Routes>
+          </SseProvider>
         </QueryClientProvider>
       </MantineProvider>
     </ErrorProvider>

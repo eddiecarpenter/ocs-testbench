@@ -1,10 +1,13 @@
 import type {
+  Execution,
   ExecutionPage,
   ExecutionResult,
 } from '../../api/resources/executions';
+import { buildExecutionDetail } from '../data/executionDetails';
 import { executionFixtures } from '../data/executions';
 import { mock } from '../MockAdapter';
 
+// List endpoint — note regex anchors so /executions/:id doesn't match here.
 mock
   .onGet(/\/executions(\?|$)/)
   .withDelayInMs(250)
@@ -25,4 +28,24 @@ mock
         page: { total: filtered.length, limit, offset },
       },
     ];
+  });
+
+// Detail endpoint — /executions/{id}
+mock
+  .onGet(/\/executions\/[^/]+$/)
+  .withDelayInMs(200)
+  .reply((config): [number, Execution | { title: string; status: number }] => {
+    const url = config.url ?? '';
+    const id = decodeURIComponent(url.split('/').pop() ?? '');
+    const detail = buildExecutionDetail(id);
+    if (!detail) {
+      return [
+        404,
+        {
+          title: 'Execution not found',
+          status: 404,
+        },
+      ];
+    }
+    return [200, detail];
   });
