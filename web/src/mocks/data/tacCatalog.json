@@ -1,0 +1,209 @@
+{
+  "$schema": {
+    "description": "Curated TAC catalogue extracted from the Osmocom TAC database.",
+    "source": "http://tacdb.osmocom.org/export/tacdb.json",
+    "licence": "CC-BY-SA v3.0 — © Harald Welte 2016",
+    "extractedAt": "2026-04-21T11:54:12.301Z",
+    "extractor": "web/scripts/extract-tac-catalog.mjs"
+  },
+  "entries": [
+    {
+      "tac": "01334500",
+      "manufacturer": "Apple",
+      "model": "iPhone 5",
+      "year": 2012
+    },
+    {
+      "tac": "35539407",
+      "manufacturer": "Apple",
+      "model": "iPhone 6",
+      "year": 2014
+    },
+    {
+      "tac": "35380108",
+      "manufacturer": "Apple",
+      "model": "iPhone 6s",
+      "year": 2015
+    },
+    {
+      "tac": "35656108",
+      "manufacturer": "Apple",
+      "model": "iPhone 7",
+      "year": 2016
+    },
+    {
+      "tac": "35381208",
+      "manufacturer": "Apple",
+      "model": "iPhone 7 Plus",
+      "year": 2016
+    },
+    {
+      "tac": "35544207",
+      "manufacturer": "Apple",
+      "model": "iPhone SE",
+      "year": 2016
+    },
+    {
+      "tac": "35676300",
+      "manufacturer": "Apple",
+      "model": "iPhone 8",
+      "year": 2017
+    },
+    {
+      "tac": "35104463",
+      "manufacturer": "Apple",
+      "model": "iPhone 13",
+      "year": 2021
+    },
+    {
+      "tac": "35267708",
+      "manufacturer": "Google",
+      "model": "Pixel XL",
+      "year": 2016
+    },
+    {
+      "tac": "35753708",
+      "manufacturer": "Google",
+      "model": "Pixel 2",
+      "year": 2017
+    },
+    {
+      "tac": "35827609",
+      "manufacturer": "Google",
+      "model": "Pixel 3",
+      "year": 2018
+    },
+    {
+      "tac": "35293110",
+      "manufacturer": "Google",
+      "model": "Pixel 4",
+      "year": 2019
+    },
+    {
+      "tac": "35751110",
+      "manufacturer": "Google",
+      "model": "Pixel 4a",
+      "year": 2020
+    },
+    {
+      "tac": "86200503",
+      "manufacturer": "Huawei",
+      "model": "Mate 9",
+      "year": 2016
+    },
+    {
+      "tac": "86344104",
+      "manufacturer": "Huawei",
+      "model": "P20 lite",
+      "year": 2018
+    },
+    {
+      "tac": "86908403",
+      "manufacturer": "Huawei",
+      "model": "P20 Pro",
+      "year": 2018
+    },
+    {
+      "tac": "35333106",
+      "manufacturer": "Motorola",
+      "model": "Moto E",
+      "year": 2014
+    },
+    {
+      "tac": "35412407",
+      "manufacturer": "Motorola",
+      "model": "Moto G (4)",
+      "year": 2016
+    },
+    {
+      "tac": "35414507",
+      "manufacturer": "Motorola",
+      "model": "Moto G4 Play",
+      "year": 2016
+    },
+    {
+      "tac": "35411707",
+      "manufacturer": "Motorola",
+      "model": "Moto G4 Plus",
+      "year": 2016
+    },
+    {
+      "tac": "35187008",
+      "manufacturer": "Motorola",
+      "model": "Moto G5",
+      "year": 2017
+    },
+    {
+      "tac": "35372606",
+      "manufacturer": "Samsung",
+      "model": "Galaxy S5",
+      "year": 2014
+    },
+    {
+      "tac": "35815207",
+      "manufacturer": "Samsung",
+      "model": "Galaxy S7",
+      "year": 2016
+    },
+    {
+      "tac": "35200309",
+      "manufacturer": "Samsung",
+      "model": "Galaxy Note 8 LTE",
+      "year": 2017
+    },
+    {
+      "tac": "35345678",
+      "manufacturer": "Samsung",
+      "model": "Galaxy Note8",
+      "year": 2017
+    },
+    {
+      "tac": "35517906",
+      "manufacturer": "Sony",
+      "model": "Xperia Z3C",
+      "year": 2014
+    },
+    {
+      "tac": "35276509",
+      "manufacturer": "Sony",
+      "model": "Xperia XA2",
+      "year": 2018
+    },
+    {
+      "tac": "86763402",
+      "manufacturer": "Xiaomi",
+      "model": "Mi 4i",
+      "year": 2015
+    },
+    {
+      "tac": "86927102",
+      "manufacturer": "Xiaomi",
+      "model": "Redmi Note 3",
+      "year": 2016
+    },
+    {
+      "tac": "86861703",
+      "manufacturer": "Xiaomi",
+      "model": "Mi A1",
+      "year": 2017
+    },
+    {
+      "tac": "86326504",
+      "manufacturer": "Xiaomi",
+      "model": "Redmi 8A",
+      "year": 2019
+    },
+    {
+      "tac": "86247104",
+      "manufacturer": "Xiaomi",
+      "model": "Redmi Note 7",
+      "year": 2019
+    },
+    {
+      "tac": "86751306",
+      "manufacturer": "Xiaomi",
+      "model": "Redmi 9A",
+      "year": 2020
+    }
+  ]
+}

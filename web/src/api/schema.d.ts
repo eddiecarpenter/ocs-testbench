@@ -217,8 +217,71 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List subscribers (paginated) */
+        /**
+         * List subscribers
+         * @description Returns every configured subscriber. The testbench is expected to
+         *     hold at most a few thousand subscribers so the list is returned
+         *     unpaginated — the UI does client-side search/filter.
+         */
         get: operations["listSubscribers"];
+        put?: never;
+        /** Create a new subscriber */
+        post: operations["createSubscriber"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subscribers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** Get a single subscriber by id */
+        get: operations["getSubscriber"];
+        /** Replace a subscriber's configuration */
+        put: operations["updateSubscriber"];
+        post?: never;
+        /** Delete a subscriber */
+        delete: operations["deleteSubscriber"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tac-catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Curated TAC (Type Allocation Code) catalogue
+         * @description Returns the curated list of device manufacturer/model combinations
+         *     supported by this testbench, each with its 8-digit TAC prefix.
+         *     The catalogue covers roughly the last 10 years of popular handsets
+         *     across major OEMs — it is intentionally a small curated set rather
+         *     than the full GSMA TAC database.
+         *
+         *     The UI uses this to:
+         *     - populate cascading Manufacturer → Model selects on the
+         *       subscriber edit drawer
+         *     - derive the TAC prefix used when generating an IMEI
+         *     - display the canonical "Device" label on the subscribers list
+         *       (e.g. `iPhone 14 Pro` is reconstructed from the `tac` on a
+         *       `Subscriber` by looking it up here)
+         *
+         *     Returned items are immutable on the server side and may be cached
+         *     aggressively by clients (`ETag` / `Cache-Control: public`).
+         */
+        get: operations["listTacCatalog"];
         put?: never;
         post?: never;
         delete?: never;
@@ -547,17 +610,79 @@ export interface components {
             /** @description Human-readable detail (e.g. 'CER/CEA timeout', 'handshake OK') */
             detail?: string;
         };
+        /**
+         * @description A subscriber identity used by test scenarios. Carries the SIM
+         *     credentials (MSISDN + ICCID), an optional device binding
+         *     (Manufacturer + Model, expressed server-side as a TAC prefix), and
+         *     an optional IMEI (only meaningful when a device is bound).
+         */
         Subscriber: {
             id: string;
-            /** @description Subscriber MSISDN */
+            /**
+             * @description E.164-style MSISDN, digits only (no `+` prefix). The primary
+             *     identifier of a subscriber; unique across subscribers.
+             * @example 27821234567
+             */
             msisdn: string;
-            imsi?: string;
+            /**
+             * @description Integrated Circuit Card Identifier (SIM serial), 19 or 20
+             *     digits. Unique across subscribers.
+             * @example 89270100001234567890
+             */
+            iccid: string;
+            /**
+             * @description 8-digit Type Allocation Code identifying the device
+             *     manufacturer + model. When present, the server recognises it
+             *     as one of the catalogue entries at `GET /tac-catalog` and
+             *     the UI looks up Manufacturer/Model labels from there.
+             * @example 35398506
+             */
+            tac?: string;
+            /**
+             * @description 15-digit IMEI (TAC + 6 serial + Luhn check digit). Only
+             *     present when a device is bound (`tac` is set). Not unique —
+             *     the same physical device can legitimately be paired with
+             *     multiple test subscribers.
+             * @example 353985067894321
+             */
             imei?: string;
-            notes?: string;
         };
-        SubscriberPage: {
-            items: components["schemas"]["Subscriber"][];
-            page: components["schemas"]["PageMeta"];
+        /**
+         * @description Writable subset of `Subscriber`. Used for both create
+         *     (POST /subscribers) and replace (PUT /subscribers/{id}).
+         */
+        SubscriberInput: {
+            msisdn: string;
+            iccid: string;
+            /**
+             * @description Optional 8-digit TAC. When set, must match an entry in
+             *     `GET /tac-catalog` — the server will reject unknown TACs with
+             *     a 422.
+             */
+            tac?: string;
+            /**
+             * @description Optional 15-digit IMEI. Must be Luhn-valid and, when `tac`
+             *     is also set, must share the same 8-digit prefix as `tac`.
+             *     Rejected with 422 otherwise.
+             */
+            imei?: string;
+        };
+        /**
+         * @description One entry in the curated TAC catalogue. Identifies a single
+         *     manufacturer/model combination by its 8-digit TAC prefix.
+         */
+        TacEntry: {
+            /**
+             * @description 8-digit Type Allocation Code
+             * @example 35398506
+             */
+            tac: string;
+            /** @example Apple */
+            manufacturer: string;
+            /** @example iPhone 14 Pro */
+            model: string;
+            /** @description Release year (informational) */
+            year?: number;
         };
         TemplateSummary: {
             id: string;
@@ -999,25 +1124,145 @@ export interface operations {
     };
     listSubscribers: {
         parameters: {
-            query?: {
-                /** @description Maximum number of items to return */
-                limit?: components["parameters"]["LimitQuery"];
-                /** @description Number of items to skip */
-                offset?: components["parameters"]["OffsetQuery"];
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Paginated subscriber list */
+            /** @description Subscriber list */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SubscriberPage"];
+                    "application/json": components["schemas"]["Subscriber"][];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createSubscriber: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubscriberInput"];
+            };
+        };
+        responses: {
+            /** @description Subscriber created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Subscriber"];
+                };
+            };
+            422: components["responses"]["ValidationProblem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    getSubscriber: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Subscriber detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Subscriber"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    updateSubscriber: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubscriberInput"];
+            };
+        };
+        responses: {
+            /** @description Subscriber updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Subscriber"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationProblem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    deleteSubscriber: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Subscriber deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    listTacCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description TAC catalogue */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TacEntry"][];
                 };
             };
             default: components["responses"]["Problem"];

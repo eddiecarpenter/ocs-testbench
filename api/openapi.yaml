@@ -290,17 +290,128 @@ paths:
     get:
       tags: [Subscribers]
       operationId: listSubscribers
-      summary: List subscribers (paginated)
-      parameters:
-        - $ref: '#/components/parameters/LimitQuery'
-        - $ref: '#/components/parameters/OffsetQuery'
+      summary: List subscribers
+      description: |
+        Returns every configured subscriber. The testbench is expected to
+        hold at most a few thousand subscribers so the list is returned
+        unpaginated — the UI does client-side search/filter.
       responses:
         '200':
-          description: Paginated subscriber list
+          description: Subscriber list
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SubscriberPage'
+                type: array
+                items:
+                  $ref: '#/components/schemas/Subscriber'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      tags: [Subscribers]
+      operationId: createSubscriber
+      summary: Create a new subscriber
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubscriberInput'
+      responses:
+        '201':
+          description: Subscriber created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscriber'
+        '422':
+          $ref: '#/components/responses/ValidationProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /subscribers/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Subscribers]
+      operationId: getSubscriber
+      summary: Get a single subscriber by id
+      responses:
+        '200':
+          description: Subscriber detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscriber'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      tags: [Subscribers]
+      operationId: updateSubscriber
+      summary: Replace a subscriber's configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubscriberInput'
+      responses:
+        '200':
+          description: Subscriber updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscriber'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      tags: [Subscribers]
+      operationId: deleteSubscriber
+      summary: Delete a subscriber
+      responses:
+        '204':
+          description: Subscriber deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /tac-catalog:
+    get:
+      tags: [Subscribers]
+      operationId: listTacCatalog
+      summary: Curated TAC (Type Allocation Code) catalogue
+      description: |
+        Returns the curated list of device manufacturer/model combinations
+        supported by this testbench, each with its 8-digit TAC prefix.
+        The catalogue covers roughly the last 10 years of popular handsets
+        across major OEMs — it is intentionally a small curated set rather
+        than the full GSMA TAC database.
+
+        The UI uses this to:
+        - populate cascading Manufacturer → Model selects on the
+          subscriber edit drawer
+        - derive the TAC prefix used when generating an IMEI
+        - display the canonical "Device" label on the subscribers list
+          (e.g. `iPhone 14 Pro` is reconstructed from the `tac` on a
+          `Subscriber` by looking it up here)
+
+        Returned items are immutable on the server side and may be cached
+        aggressively by clients (`ETag` / `Cache-Control: public`).
+      responses:
+        '200':
+          description: TAC catalogue
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TacEntry'
         default:
           $ref: '#/components/responses/Problem'
 
@@ -757,30 +868,99 @@ components:
 
     Subscriber:
       type: object
-      required: [id, msisdn]
+      description: |
+        A subscriber identity used by test scenarios. Carries the SIM
+        credentials (MSISDN + ICCID), an optional device binding
+        (Manufacturer + Model, expressed server-side as a TAC prefix), and
+        an optional IMEI (only meaningful when a device is bound).
+      required: [id, msisdn, iccid]
       properties:
         id:
           type: string
         msisdn:
           type: string
-          description: Subscriber MSISDN
-        imsi:
+          description: |
+            E.164-style MSISDN, digits only (no `+` prefix). The primary
+            identifier of a subscriber; unique across subscribers.
+          pattern: '^[0-9]{8,15}$'
+          examples: ['27821234567']
+        iccid:
           type: string
+          description: |
+            Integrated Circuit Card Identifier (SIM serial), 19 or 20
+            digits. Unique across subscribers.
+          pattern: '^[0-9]{19,20}$'
+          examples: ['89270100001234567890']
+        tac:
+          type: string
+          description: |
+            8-digit Type Allocation Code identifying the device
+            manufacturer + model. When present, the server recognises it
+            as one of the catalogue entries at `GET /tac-catalog` and
+            the UI looks up Manufacturer/Model labels from there.
+          pattern: '^[0-9]{8}$'
+          examples: ['35398506']
         imei:
           type: string
-        notes:
-          type: string
+          description: |
+            15-digit IMEI (TAC + 6 serial + Luhn check digit). Only
+            present when a device is bound (`tac` is set). Not unique —
+            the same physical device can legitimately be paired with
+            multiple test subscribers.
+          pattern: '^[0-9]{15}$'
+          examples: ['353985067894321']
 
-    SubscriberPage:
+    SubscriberInput:
       type: object
-      required: [items, page]
+      description: |
+        Writable subset of `Subscriber`. Used for both create
+        (POST /subscribers) and replace (PUT /subscribers/{id}).
+      required: [msisdn, iccid]
       properties:
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/Subscriber'
-        page:
-          $ref: '#/components/schemas/PageMeta'
+        msisdn:
+          type: string
+          pattern: '^[0-9]{8,15}$'
+        iccid:
+          type: string
+          pattern: '^[0-9]{19,20}$'
+        tac:
+          type: string
+          description: |
+            Optional 8-digit TAC. When set, must match an entry in
+            `GET /tac-catalog` — the server will reject unknown TACs with
+            a 422.
+          pattern: '^[0-9]{8}$'
+        imei:
+          type: string
+          description: |
+            Optional 15-digit IMEI. Must be Luhn-valid and, when `tac`
+            is also set, must share the same 8-digit prefix as `tac`.
+            Rejected with 422 otherwise.
+          pattern: '^[0-9]{15}$'
+
+    TacEntry:
+      type: object
+      description: |
+        One entry in the curated TAC catalogue. Identifies a single
+        manufacturer/model combination by its 8-digit TAC prefix.
+      required: [tac, manufacturer, model]
+      properties:
+        tac:
+          type: string
+          description: 8-digit Type Allocation Code
+          pattern: '^[0-9]{8}$'
+          examples: ['35398506']
+        manufacturer:
+          type: string
+          examples: ['Apple']
+        model:
+          type: string
+          examples: ['iPhone 14 Pro']
+        year:
+          type: integer
+          description: Release year (informational)
+          minimum: 2000
+          maximum: 2099
 
     # ─────────────── Templates ───────────────
 
