@@ -25,7 +25,6 @@ import {
   IconPlugConnected,
   IconPlugConnectedX,
   IconSearch,
-  IconTrash,
 } from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
 
@@ -232,7 +231,6 @@ export function PeersPage() {
                       <RowMenu
                         peer={peer}
                         onEdit={() => setDrawer({ kind: 'edit', peer })}
-                        onDelete={() => setDeleteTarget(peer)}
                       />
                     </Table.Td>
                   </Table.Tr>
@@ -263,15 +261,19 @@ export function PeersPage() {
   );
 }
 
-/** Kebab menu on each row — Connect/Disconnect + Edit + Delete. */
+/**
+ * Kebab menu on each row — Connect/Disconnect + Edit only. Destructive
+ * actions (Delete) deliberately live inside the Edit drawer so the full
+ * peer identity is visible at the moment of confirmation — reduces the
+ * risk of deleting the wrong row from a dense table. This is the
+ * standard CRUD pattern for the app.
+ */
 function RowMenu({
   peer,
   onEdit,
-  onDelete,
 }: {
   peer: Peer;
   onEdit: () => void;
-  onDelete: () => void;
 }) {
   const isConnected = peer.status === 'connected' || peer.status === 'connecting';
   return (
@@ -315,14 +317,6 @@ function RowMenu({
         )}
         <Menu.Item leftSection={<IconPencil size={14} />} onClick={onEdit}>
           Edit
-        </Menu.Item>
-        <Menu.Divider />
-        <Menu.Item
-          color="red"
-          leftSection={<IconTrash size={14} />}
-          onClick={onDelete}
-        >
-          Delete
         </Menu.Item>
       </Menu.Dropdown>
     </Menu>
