@@ -13,11 +13,19 @@ import type { AxiosError } from 'axios';
  * payloads so the client is robust against off-contract responses (dev
  * tooling, proxies, third-party errors).
  */
+/**
+ * Field-level validation errors. Keys are JSON Pointer refs into the
+ * request body (e.g. `/name`), values are arrays of messages for that
+ * field. Present on 422 responses.
+ */
+export type FieldErrors = Record<string, string[]>;
+
 export class ApiError extends Error {
   readonly status?: number;
   readonly code?: string;
   readonly detail?: string;
   readonly data?: unknown;
+  readonly errors?: FieldErrors;
 
   constructor(
     message: string,
@@ -26,6 +34,7 @@ export class ApiError extends Error {
       code?: string;
       detail?: string;
       data?: unknown;
+      errors?: FieldErrors;
     } = {},
   ) {
     super(message);
@@ -36,6 +45,22 @@ export class ApiError extends Error {
     this.code = opts.code;
     this.detail = opts.detail;
     this.data = opts.data;
+    this.errors = opts.errors;
+  }
+
+  /**
+   * Map `errors` from JSON-Pointer keys (`/name`) onto plain field names
+   * (`name`) for plugging directly into a form library. Returns an empty
+   * object when no field errors are present.
+   */
+  fieldErrors(): Record<string, string> {
+    if (!this.errors) return {};
+    const out: Record<string, string> = {};
+    for (const [key, msgs] of Object.entries(this.errors)) {
+      const field = key.startsWith('/') ? key.slice(1) : key;
+      if (msgs && msgs.length > 0) out[field] = msgs[0];
+    }
+    return out;
   }
 }
 
@@ -45,6 +70,7 @@ type ProblemShape = {
   status?: number;
   detail?: string;
   instance?: string;
+  errors?: FieldErrors;
 };
 
 /**
@@ -81,6 +107,7 @@ export function normalizeError(err: unknown): never {
       code,
       detail,
       data: axErr.response?.data,
+      errors: payload.errors,
     });
   }
 

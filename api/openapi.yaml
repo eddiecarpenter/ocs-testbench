@@ -125,6 +125,27 @@ paths:
                   $ref: '#/components/schemas/Peer'
         default:
           $ref: '#/components/responses/Problem'
+    post:
+      tags: [Peers]
+      operationId: createPeer
+      summary: Create a new peer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PeerInput'
+      responses:
+        '201':
+          description: Peer created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Peer'
+        '422':
+          $ref: '#/components/responses/ValidationProblem'
+        default:
+          $ref: '#/components/responses/Problem'
 
   /peers/{id}:
     parameters:
@@ -140,6 +161,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Peer'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      tags: [Peers]
+      operationId: updatePeer
+      summary: Replace a peer's configuration
+      description: |
+        Full replacement of the mutable fields. Live-state fields (`status`,
+        `statusDetail`, `lastChangeAt`) are ignored on write and always
+        reflect the server's current view in the response.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PeerInput'
+      responses:
+        '200':
+          description: Peer updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Peer'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      tags: [Peers]
+      operationId: deletePeer
+      summary: Delete a peer
+      responses:
+        '204':
+          description: Peer deleted
         '404':
           $ref: '#/components/responses/NotFound'
         default:
@@ -352,6 +411,14 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
+    ValidationProblem:
+      description: |
+        Validation error (RFC 7807). Carries field-level error messages
+        keyed by JSON Pointer references into the request body.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
 
   schemas:
     # ─────────────── Errors ───────────────
@@ -381,6 +448,18 @@ components:
           type: string
           format: uri
           description: A URI that identifies the specific occurrence
+        errors:
+          type: object
+          description: |
+            Optional field-level validation errors. Keys are JSON Pointer
+            references into the request body (e.g. `/name`, `/endpoint`);
+            values are arrays of human-readable error messages for that
+            field. Present on `422` responses and ignorable otherwise.
+          additionalProperties:
+            type: array
+            items:
+              type: string
+            minItems: 1
 
     # ─────────────── Pagination ───────────────
 
@@ -463,6 +542,30 @@ components:
           type: string
           format: date-time
           description: Timestamp of the most recent status change
+
+    PeerInput:
+      type: object
+      description: |
+        Writable subset of `Peer`. Used for both create (POST /peers) and
+        replace (PUT /peers/{id}). Live-state fields (`status`,
+        `statusDetail`, `lastChangeAt`) are computed server-side and
+        rejected on write.
+      required: [name, endpoint, originHost]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        endpoint:
+          type: string
+          description: Host:port of the peer
+          pattern: '^[^:]+:[0-9]+$'
+          examples: ['10.0.1.5:3868']
+        originHost:
+          type: string
+          description: Diameter Origin-Host identity
+          minLength: 1
+          examples: ['ctf-01.test.local']
 
     # ─────────────── Subscribers ───────────────
 

@@ -94,7 +94,8 @@ export interface paths {
         /** List configured peers with current connection status */
         get: operations["listPeers"];
         put?: never;
-        post?: never;
+        /** Create a new peer */
+        post: operations["createPeer"];
         delete?: never;
         options?: never;
         head?: never;
@@ -113,9 +114,16 @@ export interface paths {
         };
         /** Get a single peer by id */
         get: operations["getPeer"];
-        put?: never;
+        /**
+         * Replace a peer's configuration
+         * @description Full replacement of the mutable fields. Live-state fields (`status`,
+         *     `statusDetail`, `lastChangeAt`) are ignored on write and always
+         *     reflect the server's current view in the response.
+         */
+        put: operations["updatePeer"];
         post?: never;
-        delete?: never;
+        /** Delete a peer */
+        delete: operations["deletePeer"];
         options?: never;
         head?: never;
         patch?: never;
@@ -300,6 +308,15 @@ export interface components {
              * @description A URI that identifies the specific occurrence
              */
             instance?: string;
+            /**
+             * @description Optional field-level validation errors. Keys are JSON Pointer
+             *     references into the request body (e.g. `/name`, `/endpoint`);
+             *     values are arrays of human-readable error messages for that
+             *     field. Present on `422` responses and ignorable otherwise.
+             */
+            errors?: {
+                [key: string]: string[];
+            };
         };
         PageMeta: {
             /** @description Total number of matching items */
@@ -344,6 +361,25 @@ export interface components {
              * @description Timestamp of the most recent status change
              */
             lastChangeAt?: string;
+        };
+        /**
+         * @description Writable subset of `Peer`. Used for both create (POST /peers) and
+         *     replace (PUT /peers/{id}). Live-state fields (`status`,
+         *     `statusDetail`, `lastChangeAt`) are computed server-side and
+         *     rejected on write.
+         */
+        PeerInput: {
+            name: string;
+            /**
+             * @description Host:port of the peer
+             * @example 10.0.1.5:3868
+             */
+            endpoint: string;
+            /**
+             * @description Diameter Origin-Host identity
+             * @example ctf-01.test.local
+             */
+            originHost: string;
         };
         Subscriber: {
             id: string;
@@ -482,6 +518,18 @@ export interface components {
                 "application/problem+json": components["schemas"]["Problem"];
             };
         };
+        /**
+         * @description Validation error (RFC 7807). Carries field-level error messages
+         *     keyed by JSON Pointer references into the request body.
+         */
+        ValidationProblem: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
     };
     parameters: {
         /** @description Resource identifier */
@@ -603,6 +651,32 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    createPeer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PeerInput"];
+            };
+        };
+        responses: {
+            /** @description Peer created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Peer"];
+                };
+            };
+            422: components["responses"]["ValidationProblem"];
+            default: components["responses"]["Problem"];
+        };
+    };
     getPeer: {
         parameters: {
             query?: never;
@@ -623,6 +697,59 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Peer"];
                 };
+            };
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    updatePeer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PeerInput"];
+            };
+        };
+        responses: {
+            /** @description Peer updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Peer"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationProblem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    deletePeer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Peer deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             404: components["responses"]["NotFound"];
             default: components["responses"]["Problem"];

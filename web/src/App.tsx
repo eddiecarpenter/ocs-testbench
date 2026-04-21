@@ -9,6 +9,7 @@ import { ErrorProvider } from './context/error/ErrorProvider';
 import { theme } from './theme/theme';
 import { AppShell } from './layout/AppShell';
 import { DashboardPage } from './pages/dashboard/DashboardPage';
+import { PeersPage } from './pages/peers/PeersPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
 
 const queryClient = createQueryClient();
@@ -23,7 +24,7 @@ export function App() {
             <Routes>
             <Route element={<AppShell />}>
               <Route index element={<DashboardPage />} />
-              <Route path="peers" element={<PlaceholderPage title="Peers" />} />
+              <Route path="peers" element={<PeersPage />} />
               <Route
                 path="subscribers"
                 element={<PlaceholderPage title="Subscribers" />}
