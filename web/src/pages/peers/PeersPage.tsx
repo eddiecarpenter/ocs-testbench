@@ -479,11 +479,10 @@ function CreatePeerDrawer({
   const handleSubmit = async (values: PeerInput) => {
     try {
       const peer = await createPeer.mutateAsync(values);
-      notifications.show({
-        color: 'teal',
-        title: 'Peer created',
-        message: `${peer.name} is ready.`,
-      });
+      // No separate "created" toast — the lifecycle toast raised by
+      // onCreated already leads with "Peer 'x' created", so firing a
+      // success toast here would just stack two notifications for the
+      // same event (same reasoning as the update flow).
       onClose();
       // Defer so the drawer close transition runs before the modal opens —
       // avoids the modal overlay stacking under the drawer's fade-out.
