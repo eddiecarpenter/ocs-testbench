@@ -19,7 +19,12 @@ import './fakeApi/executionsFakeApi';
 import './fakeApi/metricsFakeApi';
 
 import { mock } from './MockAdapter';
+import { installMockSse } from './sse';
 
 // Anything that hasn't been explicitly mocked goes through to the real
 // backend. Prevents surprises as the spec grows.
 mock.onAny().passThrough();
+
+// Install the mock SSE transport so `new EventSource(...)` in the app
+// points at the in-memory emitter instead of the (non-existent) server.
+installMockSse();
