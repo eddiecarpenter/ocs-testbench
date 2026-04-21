@@ -204,6 +204,30 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
+  /peers/{id}/test:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [Peers]
+      operationId: testPeer
+      summary: Dry-run a CER/CEA probe against a peer
+      description: |
+        Performs a synchronous capability exchange probe using the peer's
+        configured identity/transport. Does not alter the peer's persistent
+        connection state — purely a diagnostic action intended to validate
+        configuration changes before they are saved.
+      responses:
+        '200':
+          description: Probe completed (inspect `ok` for outcome)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PeerTestResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+
   /subscribers:
     get:
       tags: [Subscribers]
@@ -517,22 +541,50 @@ components:
       type: string
       enum: [connected, connecting, disconnected, error]
 
+    PeerTransport:
+      type: string
+      description: Transport protocol used for the Diameter connection.
+      enum: [TCP, TLS]
+
     Peer:
       type: object
-      required: [id, name, endpoint, originHost, status]
+      required:
+        [id, name, host, port, originHost, originRealm, transport, watchdogIntervalSeconds, autoConnect, status]
       properties:
         id:
           type: string
         name:
           type: string
-        endpoint:
+        host:
           type: string
-          description: Host:port of the peer
-          examples: ['10.0.1.5:3868']
+          description: Peer hostname or IP address
+          examples: ['10.0.1.5']
+        port:
+          type: integer
+          description: TCP/TLS port
+          minimum: 1
+          maximum: 65535
+          examples: [3868]
         originHost:
           type: string
           description: Diameter Origin-Host identity
           examples: ['ctf-01.test.local']
+        originRealm:
+          type: string
+          description: Diameter Origin-Realm identity
+          examples: ['test.local']
+        transport:
+          $ref: '#/components/schemas/PeerTransport'
+        watchdogIntervalSeconds:
+          type: integer
+          description: Device-Watchdog interval (seconds)
+          minimum: 5
+          maximum: 3600
+          default: 30
+        autoConnect:
+          type: boolean
+          description: Automatically connect this peer on application startup
+          default: true
         status:
           $ref: '#/components/schemas/PeerStatus'
         statusDetail:
@@ -550,22 +602,61 @@ components:
         replace (PUT /peers/{id}). Live-state fields (`status`,
         `statusDetail`, `lastChangeAt`) are computed server-side and
         rejected on write.
-      required: [name, endpoint, originHost]
+      required: [name, host, port, originHost, originRealm, transport, watchdogIntervalSeconds, autoConnect]
       properties:
         name:
           type: string
           minLength: 1
           maxLength: 64
-        endpoint:
+        host:
           type: string
-          description: Host:port of the peer
-          pattern: '^[^:]+:[0-9]+$'
-          examples: ['10.0.1.5:3868']
+          description: Peer hostname or IP address
+          minLength: 1
+          examples: ['10.0.1.5']
+        port:
+          type: integer
+          description: TCP/TLS port
+          minimum: 1
+          maximum: 65535
+          examples: [3868]
         originHost:
           type: string
           description: Diameter Origin-Host identity
           minLength: 1
           examples: ['ctf-01.test.local']
+        originRealm:
+          type: string
+          description: Diameter Origin-Realm identity
+          minLength: 1
+          examples: ['test.local']
+        transport:
+          $ref: '#/components/schemas/PeerTransport'
+        watchdogIntervalSeconds:
+          type: integer
+          minimum: 5
+          maximum: 3600
+          default: 30
+        autoConnect:
+          type: boolean
+          default: true
+
+    PeerTestResult:
+      type: object
+      description: |
+        Outcome of a synchronous CER/CEA probe against a configured peer.
+        Useful for validating configuration changes before saving.
+      required: [ok, durationMs]
+      properties:
+        ok:
+          type: boolean
+          description: True when a CEA was received without error
+        durationMs:
+          type: integer
+          minimum: 0
+          description: Round-trip time of the probe in milliseconds
+        detail:
+          type: string
+          description: Human-readable detail (e.g. 'CER/CEA timeout', 'handshake OK')
 
     # ─────────────── Subscribers ───────────────
 

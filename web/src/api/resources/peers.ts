@@ -5,7 +5,9 @@ import type { components } from '../schema';
 
 export type Peer = components['schemas']['Peer'];
 export type PeerStatus = components['schemas']['PeerStatus'];
+export type PeerTransport = components['schemas']['PeerTransport'];
 export type PeerInput = components['schemas']['PeerInput'];
+export type PeerTestResult = components['schemas']['PeerTestResult'];
 
 export const peerKeys = {
   all: ['peers'] as const,
@@ -42,6 +44,9 @@ export const updatePeer = (id: string, input: PeerInput) =>
 
 export const deletePeer = (id: string) =>
   ApiService.delete<void>(`/peers/${encodeURIComponent(id)}`);
+
+export const testPeer = (id: string) =>
+  ApiService.post<PeerTestResult>(`/peers/${encodeURIComponent(id)}/test`);
 
 /**
  * Create a new peer. On success, invalidates the list so the new row
@@ -80,6 +85,16 @@ export function useUpdatePeer(id: string) {
  * Delete a peer. Drops the detail cache and removes the row from the
  * list cache synchronously — no refetch needed.
  */
+/**
+ * Dry-run CER/CEA probe. Does not mutate persistent state — result is
+ * returned to the caller for UI display only.
+ */
+export function useTestPeer(id: string) {
+  return useMutation({
+    mutationFn: () => testPeer(id),
+  });
+}
+
 export function useDeletePeer() {
   const qc = useQueryClient();
   return useMutation({

@@ -1,4 +1,8 @@
-import type { Peer, PeerInput } from '../../api/resources/peers';
+import type {
+  Peer,
+  PeerInput,
+  PeerTestResult,
+} from '../../api/resources/peers';
 import { peerFixtures } from '../data/peers';
 import { mock } from '../MockAdapter';
 
@@ -11,8 +15,12 @@ type FieldErrors = Record<string, string[]>;
 function validate(input: Partial<PeerInput> | undefined): FieldErrors | null {
   const errors: FieldErrors = {};
   const name = input?.name?.trim();
-  const endpoint = input?.endpoint?.trim();
+  const host = input?.host?.trim();
+  const port = input?.port;
   const originHost = input?.originHost?.trim();
+  const originRealm = input?.originRealm?.trim();
+  const transport = input?.transport;
+  const watchdog = input?.watchdogIntervalSeconds;
 
   if (!name) errors['/name'] = ['Name is required'];
   else if (name.length > 64) errors['/name'] = ['Name must be 64 chars or less'];
@@ -21,11 +29,25 @@ function validate(input: Partial<PeerInput> | undefined): FieldErrors | null {
   else if (name.toLowerCase() === 'reserved')
     errors['/name'] = ['Name "reserved" is not allowed'];
 
-  if (!endpoint) errors['/endpoint'] = ['Endpoint is required'];
-  else if (!/^[^:]+:[0-9]+$/.test(endpoint))
-    errors['/endpoint'] = ['Endpoint must be host:port'];
+  if (!host) errors['/host'] = ['Host is required'];
 
-  if (!originHost) errors['/originHost'] = ['Origin host is required'];
+  if (typeof port !== 'number' || !Number.isInteger(port))
+    errors['/port'] = ['Port is required'];
+  else if (port < 1 || port > 65535)
+    errors['/port'] = ['Port must be between 1 and 65535'];
+
+  if (!originHost) errors['/originHost'] = ['Origin-Host is required'];
+  if (!originRealm) errors['/originRealm'] = ['Origin-Realm is required'];
+
+  if (transport !== 'TCP' && transport !== 'TLS')
+    errors['/transport'] = ['Transport must be TCP or TLS'];
+
+  if (typeof watchdog !== 'number' || !Number.isInteger(watchdog))
+    errors['/watchdogIntervalSeconds'] = ['Watchdog interval is required'];
+  else if (watchdog < 5 || watchdog > 3600)
+    errors['/watchdogIntervalSeconds'] = [
+      'Watchdog interval must be between 5 and 3600 seconds',
+    ];
 
   return Object.keys(errors).length > 0 ? errors : null;
 }
@@ -43,6 +65,23 @@ function validationProblem(
       errors,
     },
   ];
+}
+
+function applyInput(base: Partial<Peer>, input: PeerInput): Peer {
+  return {
+    id: base.id!,
+    name: input.name,
+    host: input.host,
+    port: input.port,
+    originHost: input.originHost,
+    originRealm: input.originRealm,
+    transport: input.transport,
+    watchdogIntervalSeconds: input.watchdogIntervalSeconds,
+    autoConnect: input.autoConnect,
+    status: base.status ?? 'disconnected',
+    statusDetail: base.statusDetail,
+    lastChangeAt: new Date().toISOString(),
+  };
 }
 
 // List
@@ -87,16 +126,49 @@ mock
     }
 
     const id = `peer-${String(peers.length + 1).padStart(2, '0')}`;
-    const created: Peer = {
-      id,
-      name: input!.name,
-      endpoint: input!.endpoint,
-      originHost: input!.originHost,
-      status: 'disconnected',
-      lastChangeAt: new Date().toISOString(),
-    };
+    const created = applyInput({ id, status: 'disconnected' }, input!);
     peers.push(created);
     return [201, created];
+  });
+
+// Test — CER/CEA dry-run
+mock
+  .onPost(/\/peers\/[^/]+\/test$/)
+  .withDelayInMs(600)
+  .reply((config): [number, PeerTestResult | Record<string, unknown>] => {
+    const m = /\/peers\/([^/]+)\/test$/.exec(config.url ?? '');
+    const id = m ? decodeURIComponent(m[1]) : '';
+    const peer = peers.find((p) => p.id === id);
+    if (!peer) {
+      return [
+        404,
+        {
+          type: 'about:blank',
+          title: 'Peer not found',
+          status: 404,
+          detail: `No peer with id "${id}"`,
+        },
+      ];
+    }
+    // Mock outcome: peers in "error" fail, everyone else succeeds.
+    if (peer.status === 'error') {
+      return [
+        200,
+        {
+          ok: false,
+          durationMs: 1_500,
+          detail: peer.statusDetail ?? 'CER/CEA timeout',
+        },
+      ];
+    }
+    return [
+      200,
+      {
+        ok: true,
+        durationMs: 42 + Math.floor(Math.random() * 30),
+        detail: 'Capability exchange OK',
+      },
+    ];
   });
 
 // Update
@@ -129,13 +201,7 @@ mock
       });
     }
 
-    const updated: Peer = {
-      ...peers[idx],
-      name: input!.name,
-      endpoint: input!.endpoint,
-      originHost: input!.originHost,
-      lastChangeAt: new Date().toISOString(),
-    };
+    const updated = applyInput(peers[idx], input!);
     peers[idx] = updated;
     return [200, updated];
   });

@@ -129,6 +129,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/peers/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dry-run a CER/CEA probe against a peer
+         * @description Performs a synchronous capability exchange probe using the peer's
+         *     configured identity/transport. Does not alter the peer's persistent
+         *     connection state — purely a diagnostic action intended to validate
+         *     configuration changes before they are saved.
+         */
+        post: operations["testPeer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/subscribers": {
         parameters: {
             query?: never;
@@ -340,19 +366,45 @@ export interface components {
         };
         /** @enum {string} */
         PeerStatus: "connected" | "connecting" | "disconnected" | "error";
+        /**
+         * @description Transport protocol used for the Diameter connection.
+         * @enum {string}
+         */
+        PeerTransport: "TCP" | "TLS";
         Peer: {
             id: string;
             name: string;
             /**
-             * @description Host:port of the peer
-             * @example 10.0.1.5:3868
+             * @description Peer hostname or IP address
+             * @example 10.0.1.5
              */
-            endpoint: string;
+            host: string;
+            /**
+             * @description TCP/TLS port
+             * @example 3868
+             */
+            port: number;
             /**
              * @description Diameter Origin-Host identity
              * @example ctf-01.test.local
              */
             originHost: string;
+            /**
+             * @description Diameter Origin-Realm identity
+             * @example test.local
+             */
+            originRealm: string;
+            transport: components["schemas"]["PeerTransport"];
+            /**
+             * @description Device-Watchdog interval (seconds)
+             * @default 30
+             */
+            watchdogIntervalSeconds: number;
+            /**
+             * @description Automatically connect this peer on application startup
+             * @default true
+             */
+            autoConnect: boolean;
             status: components["schemas"]["PeerStatus"];
             /** @description Optional human-readable status detail (e.g. 'CER/CEA timeout') */
             statusDetail?: string;
@@ -371,15 +423,42 @@ export interface components {
         PeerInput: {
             name: string;
             /**
-             * @description Host:port of the peer
-             * @example 10.0.1.5:3868
+             * @description Peer hostname or IP address
+             * @example 10.0.1.5
              */
-            endpoint: string;
+            host: string;
+            /**
+             * @description TCP/TLS port
+             * @example 3868
+             */
+            port: number;
             /**
              * @description Diameter Origin-Host identity
              * @example ctf-01.test.local
              */
             originHost: string;
+            /**
+             * @description Diameter Origin-Realm identity
+             * @example test.local
+             */
+            originRealm: string;
+            transport: components["schemas"]["PeerTransport"];
+            /** @default 30 */
+            watchdogIntervalSeconds: number;
+            /** @default true */
+            autoConnect: boolean;
+        };
+        /**
+         * @description Outcome of a synchronous CER/CEA probe against a configured peer.
+         *     Useful for validating configuration changes before saving.
+         */
+        PeerTestResult: {
+            /** @description True when a CEA was received without error */
+            ok: boolean;
+            /** @description Round-trip time of the probe in milliseconds */
+            durationMs: number;
+            /** @description Human-readable detail (e.g. 'CER/CEA timeout', 'handshake OK') */
+            detail?: string;
         };
         Subscriber: {
             id: string;
@@ -750,6 +829,31 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    testPeer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Probe completed (inspect `ok` for outcome) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PeerTestResult"];
+                };
             };
             404: components["responses"]["NotFound"];
             default: components["responses"]["Problem"];
