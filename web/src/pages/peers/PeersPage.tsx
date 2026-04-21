@@ -334,13 +334,11 @@ function RowMenu({
 }) {
   const connect = useConnectPeer();
   const disconnect = useDisconnectPeer();
-  // Treat any non-idle state as "has a live connection" so Disconnect is the
-  // surfaced action. `connecting`/`disconnecting` are transient — showing
-  // Connect during those would let the user kick off a second transition.
-  const isLive =
-    peer.status === 'connected' ||
-    peer.status === 'connecting' ||
-    peer.status === 'disconnecting';
+  // Only `disconnected` offers Connect. Every other state — connected,
+  // connecting, disconnecting, restarting, error — offers Disconnect so
+  // the user has a way to stop the session (including a peer that's
+  // stuck in `error` retrying supervision).
+  const showDisconnect = peer.status !== 'disconnected';
 
   // Outcome toasts are handled globally by `usePeerStatusToasts` — it
   // watches the list cache and fires on every settled status change, so
@@ -382,7 +380,7 @@ function RowMenu({
         </ActionIcon>
       </Menu.Target>
       <Menu.Dropdown>
-        {isLive ? (
+        {showDisconnect ? (
           <Menu.Item
             leftSection={<IconPlugConnectedX size={14} />}
             onClick={handleDisconnect}
