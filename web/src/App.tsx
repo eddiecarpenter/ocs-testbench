@@ -4,6 +4,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { Route, Routes } from 'react-router';
 
 import { createQueryClient } from './api/query-client';
+import { usePeerStatusToasts } from './api/resources/usePeerStatusToasts';
 import { SseProvider } from './api/sse/SseProvider';
 import { ErrorProvider } from './context/error/ErrorProvider';
 import { theme } from './theme/theme';
@@ -21,6 +22,7 @@ export function App() {
         <QueryClientProvider client={queryClient}>
           <SseProvider>
             <Notifications position="top-right" />
+            <GlobalPeerToasts />
             <Routes>
             <Route element={<AppShell />}>
               <Route index element={<DashboardPage />} />
@@ -52,4 +54,14 @@ export function App() {
       </MantineProvider>
     </ErrorProvider>
   );
+}
+
+/**
+ * Empty mount point for the global peer-status toast subscription. Has
+ * to live inside `QueryClientProvider` — a plain hook call in `App`
+ * would run above it.
+ */
+function GlobalPeerToasts() {
+  usePeerStatusToasts();
+  return null;
 }

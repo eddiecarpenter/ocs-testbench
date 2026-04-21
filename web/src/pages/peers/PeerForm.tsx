@@ -31,7 +31,10 @@ interface PeerFormProps {
 
 const EMPTY: PeerInput = {
   name: '',
-  host: '',
+  // Loopback default — matches the typical local-dev scenario where the
+  // testbench connects to a server running on the same machine. Users
+  // can override for remote peers.
+  host: '127.0.0.1',
   port: 3868,
   originHost: '',
   originRealm: '',

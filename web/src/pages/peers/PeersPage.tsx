@@ -342,14 +342,13 @@ function RowMenu({
     peer.status === 'connecting' ||
     peer.status === 'disconnecting';
 
+  // Outcome toasts are handled globally by `usePeerStatusToasts` — it
+  // watches the list cache and fires on every settled status change, so
+  // we only need to surface thrown errors (optimistic rollback puts the
+  // cache back to the previous state, which produces no transition).
   const handleConnect = async () => {
     try {
-      const result = await connect.mutateAsync(peer.id);
-      notifications.show({
-        color: result.status === 'error' ? 'red' : 'teal',
-        title: result.status === 'error' ? 'Connect failed' : 'Peer connected',
-        message: result.statusDetail ?? `${result.name} is ${result.status}.`,
-      });
+      await connect.mutateAsync(peer.id);
     } catch (err) {
       notifications.show({
         color: 'red',
@@ -361,12 +360,7 @@ function RowMenu({
 
   const handleDisconnect = async () => {
     try {
-      const result = await disconnect.mutateAsync(peer.id);
-      notifications.show({
-        color: 'gray',
-        title: 'Peer disconnected',
-        message: result.statusDetail ?? `${result.name} is disconnected.`,
-      });
+      await disconnect.mutateAsync(peer.id);
     } catch (err) {
       notifications.show({
         color: 'red',
@@ -679,30 +673,17 @@ function PeerLifecyclePrompt({
       ? restart.mutateAsync(peer.id)
       : connect.mutateAsync(peer.id);
 
-    promise.then(
-      (result) => {
-        notifications.show({
-          color: result.status === 'error' ? 'red' : 'teal',
-          title:
-            result.status === 'error'
-              ? isRestart
-                ? 'Restart failed'
-                : 'Connect failed'
-              : isRestart
-                ? 'Peer restarted'
-                : 'Peer connected',
-          message:
-            result.statusDetail ?? `${result.name} is ${result.status}.`,
-        });
-      },
-      (err: unknown) => {
-        notifications.show({
-          color: 'red',
-          title: isRestart ? 'Restart failed' : 'Connect failed',
-          message: err instanceof Error ? err.message : 'Unexpected error',
-        });
-      },
-    );
+    // Success toast is handled globally by `usePeerStatusToasts`, which
+    // fires on any status transition. We only need to surface thrown
+    // errors here — a rollback leaves the cache unchanged, so no global
+    // toast would fire for a failed request.
+    promise.catch((err: unknown) => {
+      notifications.show({
+        color: 'red',
+        title: isRestart ? 'Restart failed' : 'Connect failed',
+        message: err instanceof Error ? err.message : 'Unexpected error',
+      });
+    });
   };
 
   const copy = prompt ? promptCopy(prompt) : undefined;
