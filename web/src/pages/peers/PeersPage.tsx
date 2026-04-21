@@ -339,6 +339,13 @@ function RowMenu({
   // the user has a way to stop the session (including a peer that's
   // stuck in `error` retrying supervision).
   const showDisconnect = peer.status !== 'disconnected';
+  // Transient states are mid-transition; kicking off a second action
+  // during one would race the optimistic patch. Disable the menu item
+  // until the peer settles.
+  const isTransient =
+    peer.status === 'connecting' ||
+    peer.status === 'disconnecting' ||
+    peer.status === 'restarting';
 
   // Outcome toasts are handled globally by `usePeerStatusToasts` — it
   // watches the list cache and fires on every settled status change, so
@@ -384,7 +391,7 @@ function RowMenu({
           <Menu.Item
             leftSection={<IconPlugConnectedX size={14} />}
             onClick={handleDisconnect}
-            disabled={disconnect.isPending || peer.status === 'disconnecting'}
+            disabled={isTransient || disconnect.isPending}
           >
             Disconnect
           </Menu.Item>
@@ -392,7 +399,7 @@ function RowMenu({
           <Menu.Item
             leftSection={<IconPlugConnected size={14} />}
             onClick={handleConnect}
-            disabled={connect.isPending}
+            disabled={isTransient || connect.isPending}
           >
             Connect
           </Menu.Item>
