@@ -415,7 +415,7 @@ export interface components {
             activeRuns: number;
         };
         /** @enum {string} */
-        PeerStatus: "connected" | "connecting" | "disconnected" | "disconnecting" | "error";
+        PeerStatus: "connected" | "connecting" | "disconnected" | "disconnecting" | "restarting" | "error";
         /**
          * @description Transport protocol used for the Diameter connection.
          * @enum {string}

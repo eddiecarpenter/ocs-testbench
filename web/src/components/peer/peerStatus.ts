@@ -6,6 +6,7 @@ export const STATUS_COLOR: Record<PeerStatus, string> = {
   error: 'var(--mantine-color-red-6)',
   connecting: 'var(--mantine-color-yellow-6)',
   disconnecting: 'var(--mantine-color-yellow-6)',
+  restarting: 'var(--mantine-color-yellow-6)',
 };
 
 export const STATUS_LABEL: Record<PeerStatus, string> = {
@@ -14,4 +15,5 @@ export const STATUS_LABEL: Record<PeerStatus, string> = {
   error: 'Error',
   connecting: 'Connecting…',
   disconnecting: 'Disconnecting…',
+  restarting: 'Restarting…',
 };

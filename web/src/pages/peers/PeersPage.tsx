@@ -39,10 +39,11 @@ import {
   useConnectPeer,
   useCreatePeer,
   useDeletePeer,
-  useDisconnectPeer,
   usePeers,
+  useRestartPeer,
   useTestPeerConfig,
   useUpdatePeer,
+  useDisconnectPeer,
 } from '../../api/resources/peers';
 import { PeerStatusLabel } from '../../components/peer/PeerStatusLabel';
 import { PeerForm } from './PeerForm';
@@ -662,17 +663,17 @@ function PeerLifecyclePrompt({
   onClose: () => void;
 }) {
   const connect = useConnectPeer();
-  const disconnect = useDisconnectPeer();
-  const pending = connect.isPending || disconnect.isPending;
+  const restart = useRestartPeer();
+  const pending = connect.isPending || restart.isPending;
 
   const handleConfirm = async () => {
     if (!prompt) return;
     const { peer, kind } = prompt;
     try {
-      if (kind === 'updated-live') {
-        await disconnect.mutateAsync(peer.id);
-      }
-      const result = await connect.mutateAsync(peer.id);
+      const result =
+        kind === 'updated-live'
+          ? await restart.mutateAsync(peer.id)
+          : await connect.mutateAsync(peer.id);
       notifications.show({
         color: result.status === 'error' ? 'red' : 'teal',
         title:
@@ -746,8 +747,8 @@ function promptCopy(p: PeerPrompt): {
         title: 'Connect peer now?',
         body: (
           <>
-            Peer {name} was updated but is not currently connected. Would you
-            like to connect it now?
+            Peer {name} was updated but is not currently{' '}
+            <strong>connected</strong>. Would you like to connect it now?
           </>
         ),
         cancelLabel: 'Not now',
@@ -758,8 +759,9 @@ function promptCopy(p: PeerPrompt): {
         title: 'Restart peer?',
         body: (
           <>
-            Peer {name} was updated. The peer is currently connected. Would
-            you like to restart it so that the changes can take effect?
+            Peer {name} was updated. The peer is currently{' '}
+            <strong>connected</strong>. Would you like to restart it so that
+            the changes can take effect?
           </>
         ),
         cancelLabel: 'Later',

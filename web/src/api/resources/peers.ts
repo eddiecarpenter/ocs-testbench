@@ -178,6 +178,30 @@ export function useDisconnectPeer() {
   });
 }
 
+/**
+ * Restart a peer by disconnecting then reconnecting. The transient state
+ * is a single `restarting` status rather than the two-phase
+ * `disconnecting` → `connecting` sequence you'd see from calling the
+ * individual actions — the user asked for one, simpler transition.
+ */
+export function useRestartPeer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await disconnectPeer(id);
+      return connectPeer(id);
+    },
+    onMutate: (id) => ({
+      prev: optimisticStatusPatch(qc, id, 'restarting'),
+      id,
+    }),
+    onError: (_err, _id, ctx) => {
+      if (ctx?.prev) writePeerToCaches(qc, ctx.prev);
+    },
+    onSuccess: (peer) => writePeerToCaches(qc, peer),
+  });
+}
+
 export function useDeletePeer() {
   const qc = useQueryClient();
   return useMutation({

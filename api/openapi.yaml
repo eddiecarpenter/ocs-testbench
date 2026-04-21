@@ -592,7 +592,7 @@ components:
 
     PeerStatus:
       type: string
-      enum: [connected, connecting, disconnected, disconnecting, error]
+      enum: [connected, connecting, disconnected, disconnecting, restarting, error]
 
     PeerTransport:
       type: string
