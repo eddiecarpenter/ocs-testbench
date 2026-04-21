@@ -49,6 +49,20 @@ import { PeerForm } from './PeerForm';
 
 type StatusFilter = 'all' | PeerStatus;
 
+type PeerPrompt =
+  | { kind: 'created'; peer: Peer }
+  | { kind: 'updated-idle'; peer: Peer }
+  | { kind: 'updated-live'; peer: Peer };
+
+/** Post-mutation a peer is "live" if it's active or attempting/holding an error. */
+function isLivePeer(p: Peer): boolean {
+  return (
+    p.status === 'connected' ||
+    p.status === 'connecting' ||
+    p.status === 'error'
+  );
+}
+
 /**
  * Make the Drawer a vertical flex container so the form inside can have
  * its own flex:1 scrollable middle and a sticky footer. Without this the
@@ -91,13 +105,14 @@ export function PeersPage() {
     { kind: 'closed' } | { kind: 'create' } | { kind: 'edit'; peer: Peer }
   >({ kind: 'closed' });
   const [deleteTarget, setDeleteTarget] = useState<Peer | undefined>();
-  // Post-create: prompt the user to start the freshly created peer now.
-  // Auto-connect governs server-startup behaviour only (see PeerForm copy),
-  // so we always ask — regardless of the autoConnect value.
-  const [startPrompt, setStartPrompt] = useState<Peer | undefined>();
-  // Post-update: if the user just saved changes to a peer that is currently
-  // live, offer to restart it so the new configuration takes effect.
-  const [restartPrompt, setRestartPrompt] = useState<Peer | undefined>();
+  // Single post-mutation prompt, varying by (create vs update) × (idle vs
+  // live). Three copy/action combinations:
+  //   - created          → "A new peer 'x' was created. Connect now?" → Connect
+  //   - updated-idle     → "Peer 'x' was updated but is not currently
+  //                         connected. Connect now?" → Connect
+  //   - updated-live     → "Peer 'x' was updated. Currently connected.
+  //                         Restart?" → Disconnect + Connect
+  const [prompt, setPrompt] = useState<PeerPrompt | undefined>();
 
   const filtered = useMemo(() => {
     if (!peers.data) return [];
@@ -274,7 +289,7 @@ export function PeersPage() {
       <CreatePeerDrawer
         open={drawer.kind === 'create'}
         onClose={() => setDrawer({ kind: 'closed' })}
-        onCreated={(p) => setStartPrompt(p)}
+        onCreated={(p) => setPrompt({ kind: 'created', peer: p })}
       />
       <EditPeerDrawer
         peer={drawer.kind === 'edit' ? drawer.peer : undefined}
@@ -283,30 +298,20 @@ export function PeersPage() {
           setDrawer({ kind: 'closed' });
           setDeleteTarget(p);
         }}
-        onUpdated={(p) => {
-          // Only prompt to restart if the peer currently has a live
-          // connection — otherwise the new config just takes effect on the
-          // next manual Connect or on server restart.
-          if (
-            p.status === 'connected' ||
-            p.status === 'connecting' ||
-            p.status === 'error'
-          ) {
-            setRestartPrompt(p);
-          }
-        }}
+        onUpdated={(p) =>
+          setPrompt({
+            kind: isLivePeer(p) ? 'updated-live' : 'updated-idle',
+            peer: p,
+          })
+        }
       />
       <DeletePeerModal
         peer={deleteTarget}
         onClose={() => setDeleteTarget(undefined)}
       />
-      <StartPeerModal
-        peer={startPrompt}
-        onClose={() => setStartPrompt(undefined)}
-      />
-      <RestartPeerModal
-        peer={restartPrompt}
-        onClose={() => setRestartPrompt(undefined)}
+      <PeerLifecyclePrompt
+        prompt={prompt}
+        onClose={() => setPrompt(undefined)}
       />
     </Stack>
   );
@@ -638,63 +643,78 @@ function DeletePeerModal({
 }
 
 /**
- * Post-create prompt: `autoConnect` only governs server-startup behaviour,
- * so we always ask whether the user wants to connect the freshly created
- * peer right now. Explicit beats magic — and the toast that fired on
- * success already communicated that creation succeeded.
+ * Unified post-mutation lifecycle prompt. Three variants:
+ *
+ *   - `created`       — new peer; offer immediate connect.
+ *   - `updated-idle`  — edited peer that is not live; offer connect.
+ *   - `updated-live`  — edited peer that is live; offer restart so the
+ *                       new config takes effect on the running session.
+ *
+ * autoConnect is intentionally **not** mentioned in any variant — it
+ * governs server-startup behaviour only (documented in the form helper
+ * text) and has no bearing on the decision here.
  */
-function StartPeerModal({
-  peer,
+function PeerLifecyclePrompt({
+  prompt,
   onClose,
 }: {
-  peer: Peer | undefined;
+  prompt: PeerPrompt | undefined;
   onClose: () => void;
 }) {
   const connect = useConnectPeer();
+  const disconnect = useDisconnectPeer();
+  const pending = connect.isPending || disconnect.isPending;
 
-  const handleStart = async () => {
-    if (!peer) return;
+  const handleConfirm = async () => {
+    if (!prompt) return;
+    const { peer, kind } = prompt;
     try {
+      if (kind === 'updated-live') {
+        await disconnect.mutateAsync(peer.id);
+      }
       const result = await connect.mutateAsync(peer.id);
       notifications.show({
         color: result.status === 'error' ? 'red' : 'teal',
-        title: result.status === 'error' ? 'Connect failed' : 'Peer connected',
+        title:
+          result.status === 'error'
+            ? kind === 'updated-live'
+              ? 'Restart failed'
+              : 'Connect failed'
+            : kind === 'updated-live'
+              ? 'Peer restarted'
+              : 'Peer connected',
         message: result.statusDetail ?? `${result.name} is ${result.status}.`,
       });
       onClose();
     } catch (err) {
       notifications.show({
         color: 'red',
-        title: 'Connect failed',
+        title: kind === 'updated-live' ? 'Restart failed' : 'Connect failed',
         message: err instanceof Error ? err.message : 'Unexpected error',
       });
       onClose();
     }
   };
 
+  const copy = prompt ? promptCopy(prompt) : undefined;
+
   return (
     <Modal
-      opened={Boolean(peer)}
+      opened={Boolean(prompt)}
       onClose={onClose}
-      title="Start peer now?"
+      title={copy?.title ?? ''}
       centered
-      closeOnClickOutside={!connect.isPending}
-      closeOnEscape={!connect.isPending}
+      closeOnClickOutside={!pending}
+      closeOnEscape={!pending}
     >
       <Stack gap="md">
-        <Text size="sm">
-          <strong>{peer?.name ?? ''}</strong> was created.
-          {peer?.autoConnect
-            ? ' Auto-connect is on, so it will connect on the next server start — but the server is already running. '
-            : ' '}
-          Would you like to connect it now?
-        </Text>
+        <Text size="sm">{copy?.body}</Text>
         <Group justify="flex-end">
-          <Button variant="subtle" onClick={onClose} disabled={connect.isPending}>
-            Not now
+          <Button variant="subtle" onClick={onClose} disabled={pending}>
+            {copy?.cancelLabel ?? 'Cancel'}
           </Button>
-          <Button loading={connect.isPending} onClick={handleStart}>
-            Start peer
+          <Button loading={pending} onClick={handleConfirm}>
+            {copy?.confirmLabel ?? 'Confirm'}
           </Button>
         </Group>
       </Stack>
@@ -702,68 +722,48 @@ function StartPeerModal({
   );
 }
 
-/**
- * Post-update prompt: when a peer's configuration changes while a
- * connection is live, the running session still holds the old config.
- * Offer to restart (disconnect then reconnect) so the new values take
- * effect. Skipped entirely when the peer is idle.
- */
-function RestartPeerModal({
-  peer,
-  onClose,
-}: {
-  peer: Peer | undefined;
-  onClose: () => void;
-}) {
-  const connect = useConnectPeer();
-  const disconnect = useDisconnectPeer();
-  const pending = connect.isPending || disconnect.isPending;
-
-  const handleRestart = async () => {
-    if (!peer) return;
-    try {
-      await disconnect.mutateAsync(peer.id);
-      const result = await connect.mutateAsync(peer.id);
-      notifications.show({
-        color: result.status === 'error' ? 'red' : 'teal',
-        title: result.status === 'error' ? 'Restart failed' : 'Peer restarted',
-        message: result.statusDetail ?? `${result.name} is ${result.status}.`,
-      });
-      onClose();
-    } catch (err) {
-      notifications.show({
-        color: 'red',
-        title: 'Restart failed',
-        message: err instanceof Error ? err.message : 'Unexpected error',
-      });
-      onClose();
-    }
-  };
-
-  return (
-    <Modal
-      opened={Boolean(peer)}
-      onClose={onClose}
-      title="Restart peer?"
-      centered
-      closeOnClickOutside={!pending}
-      closeOnEscape={!pending}
-    >
-      <Stack gap="md">
-        <Text size="sm">
-          <strong>{peer?.name ?? ''}</strong> is currently live and still
-          running the previous configuration. Restart it now so the updated
-          settings take effect?
-        </Text>
-        <Group justify="flex-end">
-          <Button variant="subtle" onClick={onClose} disabled={pending}>
-            Later
-          </Button>
-          <Button loading={pending} onClick={handleRestart}>
-            Restart peer
-          </Button>
-        </Group>
-      </Stack>
-    </Modal>
-  );
+function promptCopy(p: PeerPrompt): {
+  title: string;
+  body: React.ReactNode;
+  cancelLabel: string;
+  confirmLabel: string;
+} {
+  const name = <strong>&apos;{p.peer.name}&apos;</strong>;
+  switch (p.kind) {
+    case 'created':
+      return {
+        title: 'Connect peer now?',
+        body: (
+          <>
+            A new peer {name} was created. Would you like to connect it now?
+          </>
+        ),
+        cancelLabel: 'Not now',
+        confirmLabel: 'Connect',
+      };
+    case 'updated-idle':
+      return {
+        title: 'Connect peer now?',
+        body: (
+          <>
+            Peer {name} was updated but is not currently connected. Would you
+            like to connect it now?
+          </>
+        ),
+        cancelLabel: 'Not now',
+        confirmLabel: 'Connect',
+      };
+    case 'updated-live':
+      return {
+        title: 'Restart peer?',
+        body: (
+          <>
+            Peer {name} was updated. The peer is currently connected. Would
+            you like to restart it so that the changes can take effect?
+          </>
+        ),
+        cancelLabel: 'Later',
+        confirmLabel: 'Restart',
+      };
+  }
 }
