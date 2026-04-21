@@ -1,38 +1,11 @@
 import { Card, Group, Stack, Text, Title } from '@mantine/core';
 
-import type { Peer, PeerStatus } from '../../api/resources/peers';
+import type { Peer } from '../../api/resources/peers';
+import { STATUS_LABEL } from '../../components/peer/peerStatus';
+import { StatusDot } from '../../components/peer/PeerStatusLabel';
 
 interface PeerStatusCardProps {
   peers: Peer[];
-}
-
-const statusColor: Record<PeerStatus, string> = {
-  connected: 'var(--mantine-color-teal-6)',
-  disconnected: 'var(--mantine-color-gray-5)',
-  error: 'var(--mantine-color-red-6)',
-  connecting: 'var(--mantine-color-yellow-6)',
-};
-
-const statusLabel: Record<PeerStatus, string> = {
-  connected: 'connected',
-  disconnected: 'disconnected',
-  error: 'error',
-  connecting: 'connecting',
-};
-
-function StatusDot({ status }: { status: PeerStatus }) {
-  return (
-    <span
-      aria-label={statusLabel[status]}
-      style={{
-        display: 'inline-block',
-        width: 8,
-        height: 8,
-        borderRadius: '50%',
-        background: statusColor[status],
-      }}
-    />
-  );
 }
 
 export function PeerStatusCard({ peers }: PeerStatusCardProps) {
@@ -57,12 +30,12 @@ export function PeerStatusCard({ peers }: PeerStatusCardProps) {
                     {peer.name}
                   </Text>
                   <Text size="xs" c="dimmed">
-                    {peer.endpoint} · {peer.originHost}
+                    {peer.host}:{peer.port} · {peer.originHost}
                   </Text>
                 </Stack>
               </Group>
               <Text size="sm" c="dimmed">
-                {peer.statusDetail ?? statusLabel[peer.status]}
+                {peer.statusDetail ?? STATUS_LABEL[peer.status]}
               </Text>
             </Group>
           ))}

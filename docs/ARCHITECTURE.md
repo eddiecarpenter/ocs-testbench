@@ -195,6 +195,23 @@ via `go:embed`. The frontend consumes the same API as any other client.
 Dark mode / theme switching is included in the MVP. Storybook is used for
 component prototyping and visual verification during development.
 
+#### CRUD UI conventions
+
+Applies to all resource pages (peers, subscribers, templates, scenarios, …):
+
+- **List view** uses a Mantine `Table` with a kebab (`⋯`) action menu per row.
+- **Create and edit** open a right-hand **Drawer** (not a modal) with a
+  sectioned form body and footer actions.
+- **Delete** is **not** exposed as a row action. It lives inside the edit
+  drawer footer (red subtle button, left-aligned) so the full identity of
+  the resource is visible at the moment of confirmation. This makes it much
+  harder to accidentally delete the wrong row from a dense table.
+- Delete itself still goes through a small confirmation modal before the
+  DELETE call fires.
+- Field-level validation errors (RFC 7807 `422` with `errors` map keyed by
+  JSON Pointer) are routed onto the form fields via `@mantine/form`'s
+  `setErrors()`; non-field errors surface as toasts.
+
 ### Single binary
 
 The Go binary serves both the API and the embedded UI. No external dependencies,

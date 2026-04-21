@@ -125,6 +125,27 @@ paths:
                   $ref: '#/components/schemas/Peer'
         default:
           $ref: '#/components/responses/Problem'
+    post:
+      tags: [Peers]
+      operationId: createPeer
+      summary: Create a new peer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PeerInput'
+      responses:
+        '201':
+          description: Peer created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Peer'
+        '422':
+          $ref: '#/components/responses/ValidationProblem'
+        default:
+          $ref: '#/components/responses/Problem'
 
   /peers/{id}:
     parameters:
@@ -142,6 +163,121 @@ paths:
                 $ref: '#/components/schemas/Peer'
         '404':
           $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      tags: [Peers]
+      operationId: updatePeer
+      summary: Replace a peer's configuration
+      description: |
+        Full replacement of the mutable fields. Live-state fields (`status`,
+        `statusDetail`, `lastChangeAt`) are ignored on write and always
+        reflect the server's current view in the response.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PeerInput'
+      responses:
+        '200':
+          description: Peer updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Peer'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      tags: [Peers]
+      operationId: deletePeer
+      summary: Delete a peer
+      responses:
+        '204':
+          description: Peer deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /peers/{id}/connect:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [Peers]
+      operationId: connectPeer
+      summary: Initiate a connection to this peer
+      description: |
+        Triggers a CER/CEA exchange and moves the peer towards `connected`.
+        Returns the updated `Peer` immediately — the status may still be
+        `connecting` when the response is returned; clients should react
+        to subsequent `peer.updated` SSE events for the final outcome.
+      responses:
+        '200':
+          description: Connection attempt started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Peer'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /peers/{id}/disconnect:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [Peers]
+      operationId: disconnectPeer
+      summary: Disconnect this peer
+      description: |
+        Closes the Diameter transport. If `autoConnect` is true, the peer
+        will **not** be automatically reconnected — supervision only fires
+        at server startup. Use `POST /peers/{id}/connect` to reopen the
+        link explicitly.
+      responses:
+        '200':
+          description: Peer disconnected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Peer'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /peers/test:
+    post:
+      tags: [Peers]
+      operationId: testPeerConfig
+      summary: Dry-run a CER/CEA probe against a candidate peer config
+      description: |
+        Performs a synchronous capability exchange probe using the
+        `PeerInput` in the request body. The probe does **not** read from
+        or write to persistent state — it is intentionally stateless so
+        the UI can validate configuration changes before they are saved
+        (including for brand-new peers that have no id yet).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PeerInput'
+      responses:
+        '200':
+          description: Probe completed (inspect `ok` for outcome)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PeerTestResult'
+        '422':
+          $ref: '#/components/responses/ValidationProblem'
         default:
           $ref: '#/components/responses/Problem'
 
@@ -352,6 +488,14 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
+    ValidationProblem:
+      description: |
+        Validation error (RFC 7807). Carries field-level error messages
+        keyed by JSON Pointer references into the request body.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
 
   schemas:
     # ─────────────── Errors ───────────────
@@ -381,6 +525,18 @@ components:
           type: string
           format: uri
           description: A URI that identifies the specific occurrence
+        errors:
+          type: object
+          description: |
+            Optional field-level validation errors. Keys are JSON Pointer
+            references into the request body (e.g. `/name`, `/endpoint`);
+            values are arrays of human-readable error messages for that
+            field. Present on `422` responses and ignorable otherwise.
+          additionalProperties:
+            type: array
+            items:
+              type: string
+            minItems: 1
 
     # ─────────────── Pagination ───────────────
 
@@ -436,24 +592,56 @@ components:
 
     PeerStatus:
       type: string
-      enum: [connected, connecting, disconnected, error]
+      enum: [connected, connecting, disconnected, disconnecting, restarting, error]
+
+    PeerTransport:
+      type: string
+      description: Transport protocol used for the Diameter connection.
+      enum: [TCP, TLS]
 
     Peer:
       type: object
-      required: [id, name, endpoint, originHost, status]
+      required:
+        [id, name, host, port, originHost, originRealm, transport, watchdogIntervalSeconds, autoConnect, status]
       properties:
         id:
           type: string
         name:
           type: string
-        endpoint:
+        host:
           type: string
-          description: Host:port of the peer
-          examples: ['10.0.1.5:3868']
+          description: Peer hostname or IP address
+          examples: ['10.0.1.5']
+        port:
+          type: integer
+          description: TCP/TLS port
+          minimum: 1
+          maximum: 65535
+          examples: [3868]
         originHost:
           type: string
           description: Diameter Origin-Host identity
           examples: ['ctf-01.test.local']
+        originRealm:
+          type: string
+          description: Diameter Origin-Realm identity
+          examples: ['test.local']
+        transport:
+          $ref: '#/components/schemas/PeerTransport'
+        watchdogIntervalSeconds:
+          type: integer
+          description: Device-Watchdog interval (seconds)
+          minimum: 5
+          maximum: 3600
+          default: 30
+        autoConnect:
+          type: boolean
+          description: |
+            If true, the server attempts to connect this peer at server
+            startup. Does **not** trigger a connection when the peer is
+            created or updated mid-run — those require an explicit
+            `POST /peers/{id}/connect`.
+          default: true
         status:
           $ref: '#/components/schemas/PeerStatus'
         statusDetail:
@@ -463,6 +651,70 @@ components:
           type: string
           format: date-time
           description: Timestamp of the most recent status change
+
+    PeerInput:
+      type: object
+      description: |
+        Writable subset of `Peer`. Used for both create (POST /peers) and
+        replace (PUT /peers/{id}). Live-state fields (`status`,
+        `statusDetail`, `lastChangeAt`) are computed server-side and
+        rejected on write.
+      required: [name, host, port, originHost, originRealm, transport, watchdogIntervalSeconds, autoConnect]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        host:
+          type: string
+          description: Peer hostname or IP address
+          minLength: 1
+          examples: ['10.0.1.5']
+        port:
+          type: integer
+          description: TCP/TLS port
+          minimum: 1
+          maximum: 65535
+          examples: [3868]
+        originHost:
+          type: string
+          description: Diameter Origin-Host identity
+          minLength: 1
+          examples: ['ctf-01.test.local']
+        originRealm:
+          type: string
+          description: Diameter Origin-Realm identity
+          minLength: 1
+          examples: ['test.local']
+        transport:
+          $ref: '#/components/schemas/PeerTransport'
+        watchdogIntervalSeconds:
+          type: integer
+          minimum: 5
+          maximum: 3600
+          default: 30
+        autoConnect:
+          type: boolean
+          description: If true, the server connects this peer at server startup.
+          default: true
+
+    PeerTestResult:
+      type: object
+      description: |
+        Outcome of a synchronous CER/CEA probe against a configured peer.
+        Useful for validating configuration changes before saving.
+      required: [ok, durationMs]
+      properties:
+        ok:
+          type: boolean
+          description: True when a CEA was received without error
+        durationMs:
+          type: integer
+          minimum: 0
+          description: Round-trip time of the probe in milliseconds
+        detail:
+          type: string
+          description: Human-readable detail (e.g. 'CER/CEA timeout', 'handshake OK')
 
     # ─────────────── Subscribers ───────────────
 
