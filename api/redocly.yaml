@@ -1,0 +1,11 @@
+extends:
+  - recommended
+
+# Policy: quiet rules that don't yet apply to MVP.
+# Re-enable `security-defined` when auth lands (bearer JWT, see PROJECT_BRIEF).
+rules:
+  security-defined: off
+  info-license: off
+  operation-4xx-response: off
+  operation-operationId-url-safe: warn
+  operation-tag-defined: error

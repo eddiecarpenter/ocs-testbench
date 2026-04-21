@@ -1,6 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+
+import { buildResponseTimeSeries } from '../../mocks/data/metrics';
 import { ResponseTimeCard } from './ResponseTimeCard';
-import { mockResponseTime } from '../../mock/dashboard';
+
+const HOUR_MS = 60 * 60 * 1000;
 
 const meta = {
   title: 'Dashboard/ResponseTimeCard',
@@ -15,14 +18,14 @@ type Story = StoryObj<typeof meta>;
 
 export const LastHour: Story = {
   args: {
-    data: mockResponseTime(30),
+    data: buildResponseTimeSeries('PT1H', HOUR_MS, 30).points,
     rangeLabel: 'Last hour',
   },
 };
 
 export const FullRun: Story = {
   args: {
-    data: mockResponseTime(60),
+    data: buildResponseTimeSeries('PT1H', HOUR_MS, 60).points,
     rangeLabel: 'Full run',
   },
 };

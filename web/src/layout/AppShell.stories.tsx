@@ -1,9 +1,17 @@
-import type { Meta, StoryObj } from '@storybook/react-vite';
 import { Box } from '@mantine/core';
-import { AppShell } from './AppShell';
+import { QueryClientProvider } from '@tanstack/react-query';
+import type { Meta, StoryObj } from '@storybook/react-vite';
+import { MemoryRouter, Route, Routes } from 'react-router';
+
+import { createQueryClient } from '../api/query-client';
 import { DashboardPage } from '../pages/dashboard/DashboardPage';
 import { PlaceholderPage } from '../pages/PlaceholderPage';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { AppShell } from './AppShell';
+
+// Load the mock REST layer so DashboardPage queries resolve in Storybook.
+await import('../mocks');
+
+const queryClient = createQueryClient();
 
 const meta = {
   title: 'Layout/AppShell',
@@ -21,34 +29,36 @@ type Story = StoryObj<typeof meta>;
 // Storybook without blank white screens.
 export const WithDashboard: Story = {
   render: () => (
-    <Box>
-      <Routes>
-        <Route element={<AppShell />}>
-          <Route index element={<DashboardPage />} />
-          <Route path="peers" element={<PlaceholderPage title="Peers" />} />
-          <Route
-            path="subscribers"
-            element={<PlaceholderPage title="Subscribers" />}
-          />
-          <Route
-            path="templates"
-            element={<PlaceholderPage title="AVP Templates" />}
-          />
-          <Route
-            path="scenarios"
-            element={<PlaceholderPage title="Scenarios" />}
-          />
-          <Route
-            path="execution"
-            element={<PlaceholderPage title="Executions" />}
-          />
-          <Route
-            path="settings"
-            element={<PlaceholderPage title="Settings" />}
-          />
-        </Route>
-      </Routes>
-    </Box>
+    <QueryClientProvider client={queryClient}>
+      <Box>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route index element={<DashboardPage />} />
+            <Route path="peers" element={<PlaceholderPage title="Peers" />} />
+            <Route
+              path="subscribers"
+              element={<PlaceholderPage title="Subscribers" />}
+            />
+            <Route
+              path="templates"
+              element={<PlaceholderPage title="AVP Templates" />}
+            />
+            <Route
+              path="scenarios"
+              element={<PlaceholderPage title="Scenarios" />}
+            />
+            <Route
+              path="execution"
+              element={<PlaceholderPage title="Executions" />}
+            />
+            <Route
+              path="settings"
+              element={<PlaceholderPage title="Settings" />}
+            />
+          </Route>
+        </Routes>
+      </Box>
+    </QueryClientProvider>
   ),
 };
 
