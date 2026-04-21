@@ -14,12 +14,14 @@ import { IconRefresh } from '@tabler/icons-react';
 import { useEffect, useMemo } from 'react';
 
 import { ApiError } from '../../api/errors';
+import { buildIccid } from '../../api/iccid';
 import { buildImei, isValidImei } from '../../api/imei';
 import type {
   Subscriber,
   SubscriberInput,
   TacEntry,
 } from '../../api/resources/subscribers';
+import { isValidMccmnc, useSettings } from '../../settings/settings';
 
 interface SubscriberFormProps {
   /** When provided, the form pre-fills with this subscriber's fields (edit mode). */
@@ -93,6 +95,7 @@ export function SubscriberForm({
   onDelete,
   onCancel,
 }: SubscriberFormProps) {
+  const settings = useSettings();
   const form = useForm<FormValues>({
     initialValues: initial ? fromSubscriber(initial, catalog) : EMPTY,
     validateInputOnChange: true,
@@ -244,6 +247,32 @@ export function SubscriberForm({
             required
             key={form.key('iccid')}
             {...form.getInputProps('iccid')}
+            rightSectionWidth={110}
+            rightSection={
+              isValidMccmnc(settings.mccmnc) ? (
+                <Button
+                  variant="subtle"
+                  size="compact-xs"
+                  leftSection={<IconRefresh size={12} />}
+                  onClick={() => {
+                    const next = buildIccid(settings.mccmnc);
+                    if (next) form.setFieldValue('iccid', next);
+                  }}
+                >
+                  Generate
+                </Button>
+              ) : (
+                <ActionIcon
+                  variant="transparent"
+                  color="gray"
+                  size="sm"
+                  disabled
+                  aria-label="Generate ICCID (set MCCMNC in Settings)"
+                >
+                  <IconRefresh size={14} />
+                </ActionIcon>
+              )
+            }
           />
         </Stack>
 

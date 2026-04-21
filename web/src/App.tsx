@@ -12,6 +12,7 @@ import { AppShell } from './layout/AppShell';
 import { DashboardPage } from './pages/dashboard/DashboardPage';
 import { PeersPage } from './pages/peers/PeersPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
+import { SettingsPage } from './pages/settings/SettingsPage';
 import { SubscribersPage } from './pages/subscribers/SubscribersPage';
 
 const queryClient = createQueryClient();
@@ -41,10 +42,7 @@ export function App() {
                 path="execution"
                 element={<PlaceholderPage title="Executions" />}
               />
-              <Route
-                path="settings"
-                element={<PlaceholderPage title="Settings" />}
-              />
+              <Route path="settings" element={<SettingsPage />} />
             </Route>
           </Routes>
           </SseProvider>
