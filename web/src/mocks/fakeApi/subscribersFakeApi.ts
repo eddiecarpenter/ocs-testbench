@@ -32,14 +32,10 @@ function validate(
   excludeId?: string,
 ): FieldErrors | null {
   const errors: FieldErrors = {};
-  const name = input?.name?.trim();
   const msisdn = input?.msisdn?.trim();
   const iccid = input?.iccid?.trim();
   const tac = input?.tac?.trim() || undefined;
   const imei = input?.imei?.trim() || undefined;
-
-  if (!name) errors['/name'] = ['Name is required'];
-  else if (name.length > 64) errors['/name'] = ['Name must be 64 chars or less'];
 
   if (!msisdn) errors['/msisdn'] = ['MSISDN is required'];
   else if (!/^[0-9]{8,15}$/.test(msisdn))
@@ -96,7 +92,6 @@ function validationProblem(
 function applyInput(base: Partial<Subscriber>, input: SubscriberInput): Subscriber {
   return {
     id: base.id!,
-    name: input.name,
     msisdn: input.msisdn,
     iccid: input.iccid,
     tac: input.tac || undefined,

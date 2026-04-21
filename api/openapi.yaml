@@ -873,19 +873,15 @@ components:
         credentials (MSISDN + ICCID), an optional device binding
         (Manufacturer + Model, expressed server-side as a TAC prefix), and
         an optional IMEI (only meaningful when a device is bound).
-      required: [id, name, msisdn, iccid]
+      required: [id, msisdn, iccid]
       properties:
         id:
           type: string
-        name:
-          type: string
-          description: Human-readable label for this subscriber
-          examples: ['Alice Test']
         msisdn:
           type: string
           description: |
-            E.164-style MSISDN, digits only (no `+` prefix). Unique across
-            subscribers.
+            E.164-style MSISDN, digits only (no `+` prefix). The primary
+            identifier of a subscriber; unique across subscribers.
           pattern: '^[0-9]{8,15}$'
           examples: ['27821234567']
         iccid:
@@ -919,12 +915,8 @@ components:
       description: |
         Writable subset of `Subscriber`. Used for both create
         (POST /subscribers) and replace (PUT /subscribers/{id}).
-      required: [name, msisdn, iccid]
+      required: [msisdn, iccid]
       properties:
-        name:
-          type: string
-          minLength: 1
-          maxLength: 64
         msisdn:
           type: string
           pattern: '^[0-9]{8,15}$'

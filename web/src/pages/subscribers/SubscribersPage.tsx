@@ -81,7 +81,6 @@ export function SubscribersPage() {
     if (!q) return subs.data;
     return subs.data.filter(
       (s) =>
-        s.name.toLowerCase().includes(q) ||
         s.msisdn.toLowerCase().includes(q) ||
         s.iccid.toLowerCase().includes(q) ||
         (s.imei ?? '').toLowerCase().includes(q),
@@ -152,7 +151,6 @@ export function SubscribersPage() {
           <Table highlightOnHover verticalSpacing="sm" horizontalSpacing="md">
             <Table.Thead>
               <Table.Tr>
-                <Table.Th tt="uppercase" fz="xs" c="dimmed">Name</Table.Th>
                 <Table.Th tt="uppercase" fz="xs" c="dimmed">MSISDN</Table.Th>
                 <Table.Th tt="uppercase" fz="xs" c="dimmed">ICCID</Table.Th>
                 <Table.Th tt="uppercase" fz="xs" c="dimmed">IMEI</Table.Th>
@@ -163,7 +161,7 @@ export function SubscribersPage() {
             <Table.Tbody>
               {filtered.length === 0 ? (
                 <Table.Tr>
-                  <Table.Td colSpan={6}>
+                  <Table.Td colSpan={5}>
                     <Text c="dimmed" ta="center" py="md" size="sm">
                       {subs.data.length === 0
                         ? 'No subscribers yet. Click Add subscriber to create one.'
@@ -228,12 +226,7 @@ function SubscriberRow({
   return (
     <Table.Tr>
       <Table.Td>
-        <Text size="sm" fw={600}>
-          {sub.name}
-        </Text>
-      </Table.Td>
-      <Table.Td>
-        <Text size="sm" ff="monospace">
+        <Text size="sm" ff="monospace" fw={600}>
           {sub.msisdn}
         </Text>
       </Table.Td>
@@ -258,7 +251,7 @@ function SubscriberRow({
             <ActionIcon
               variant="subtle"
               color="gray"
-              aria-label={`Actions for ${sub.name}`}
+              aria-label={`Actions for ${sub.msisdn}`}
             >
               <IconDots size={16} />
             </ActionIcon>
@@ -291,7 +284,7 @@ function CreateSubscriberDrawer({
       notifications.show({
         color: 'teal',
         title: 'Subscriber created',
-        message: `${created.name} is ready.`,
+        message: `${created.msisdn} is ready.`,
       });
       onClose();
       return created;
@@ -381,7 +374,7 @@ function EditSubscriberForm({
       notifications.show({
         color: 'teal',
         title: 'Subscriber updated',
-        message: `${next.name} was saved.`,
+        message: `${next.msisdn} was saved.`,
       });
       onClose();
       return next;
@@ -425,7 +418,7 @@ function DeleteSubscriberModal({
       notifications.show({
         color: 'teal',
         title: 'Subscriber deleted',
-        message: `${sub.name} was removed.`,
+        message: `${sub.msisdn} was removed.`,
       });
       onClose();
     } catch (err) {
@@ -448,8 +441,8 @@ function DeleteSubscriberModal({
     >
       <Stack gap="md">
         <Text size="sm">
-          Are you sure you want to delete{' '}
-          <strong>{sub?.name ?? ''}</strong>? This cannot be undone.
+          Are you sure you want to delete subscriber{' '}
+          <strong>{sub?.msisdn ?? ''}</strong>? This cannot be undone.
         </Text>
         <Group justify="flex-end">
           <Button

@@ -39,7 +39,6 @@ interface SubscriberFormProps {
  * round-trip, and derive `tac` from them on submit.
  */
 interface FormValues {
-  name: string;
   msisdn: string;
   iccid: string;
   manufacturer: string;
@@ -48,7 +47,6 @@ interface FormValues {
 }
 
 const EMPTY: FormValues = {
-  name: '',
   msisdn: '',
   iccid: '',
   manufacturer: '',
@@ -62,7 +60,6 @@ function fromSubscriber(
 ): FormValues {
   const entry = sub.tac ? catalog.find((e) => e.tac === sub.tac) : undefined;
   return {
-    name: sub.name,
     msisdn: sub.msisdn,
     iccid: sub.iccid,
     manufacturer: entry?.manufacturer ?? '',
@@ -100,7 +97,6 @@ export function SubscriberForm({
     initialValues: initial ? fromSubscriber(initial, catalog) : EMPTY,
     validateInputOnChange: true,
     validate: {
-      name: (v) => (v.trim() ? null : 'Name is required'),
       msisdn: (v) =>
         /^[0-9]{8,15}$/.test(v.trim())
           ? null
@@ -175,7 +171,6 @@ export function SubscriberForm({
 
   const handleSubmit = form.onSubmit(async (values) => {
     const input: SubscriberInput = {
-      name: values.name.trim(),
       msisdn: values.msisdn.trim(),
       iccid: values.iccid.trim(),
       tac: pickedTac || undefined,
@@ -227,26 +222,12 @@ export function SubscriberForm({
           {mode === 'edit' ? 'Edit subscriber' : 'Add subscriber'}
         </Text>
         <Title order={3} fw={600}>
-          {mode === 'edit' ? (initial?.name ?? 'Subscriber') : 'New subscriber'}
+          {mode === 'edit' ? (initial?.msisdn ?? 'Subscriber') : 'New subscriber'}
         </Title>
       </Stack>
 
       {/* Scrollable body */}
       <Stack gap="lg" style={{ flex: 1, overflowY: 'auto' }} pr="xs">
-        {/* IDENTITY */}
-        <Stack gap="sm">
-          <SectionLabel>Identity</SectionLabel>
-          <TextInput
-            label="Name"
-            placeholder="Alice Test"
-            required
-            key={form.key('name')}
-            {...form.getInputProps('name')}
-          />
-        </Stack>
-
-        <Divider />
-
         {/* SIM */}
         <Stack gap="sm">
           <SectionLabel>SIM</SectionLabel>

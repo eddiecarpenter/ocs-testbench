@@ -3,10 +3,10 @@ import { buildImei } from '../../api/imei';
 
 /**
  * Five subscribers matching the Figma "Subscribers / Light" screen.
- * Names / MSISDN / ICCID come from the design; IMEIs are composed
- * from the TAC picked for each subscriber so they Luhn-validate.
+ * MSISDN / ICCID come from the design; IMEIs are composed from the TAC
+ * picked for each subscriber so they Luhn-validate.
  *
- * Two subscribers (Charlie Pool, Eve Testbench) are deliberately left
+ * Two subscribers (27831122334, 27835566778) are deliberately left
  * without a device binding so the empty-device "—" rendering is
  * exercised on the list screen.
  */
@@ -23,7 +23,6 @@ const imeiFor = (tac: string, serial: string): string =>
 export const subscriberFixtures: Subscriber[] = [
   {
     id: 'sub-01',
-    name: 'Alice Test',
     msisdn: '27821234567',
     iccid: '89270100001234567890',
     tac: TAC_APPLE_IPHONE_13,
@@ -31,7 +30,6 @@ export const subscriberFixtures: Subscriber[] = [
   },
   {
     id: 'sub-02',
-    name: 'Bob Demo',
     msisdn: '27837654321',
     iccid: '89270100009876543210',
     tac: TAC_APPLE_IPHONE_7,
@@ -39,14 +37,12 @@ export const subscriberFixtures: Subscriber[] = [
   },
   {
     id: 'sub-03',
-    name: 'Charlie Pool',
     msisdn: '27831122334',
     iccid: '89270100005544332211',
     // No device bound — list shows "—".
   },
   {
     id: 'sub-04',
-    name: 'Diana Load',
     msisdn: '27839988776',
     iccid: '89270100003344556677',
     tac: TAC_GOOGLE_PIXEL_4,
@@ -54,7 +50,6 @@ export const subscriberFixtures: Subscriber[] = [
   },
   {
     id: 'sub-05',
-    name: 'Eve Testbench',
     msisdn: '27835566778',
     iccid: '89270100007788990011',
   },

@@ -619,13 +619,8 @@ export interface components {
         Subscriber: {
             id: string;
             /**
-             * @description Human-readable label for this subscriber
-             * @example Alice Test
-             */
-            name: string;
-            /**
-             * @description E.164-style MSISDN, digits only (no `+` prefix). Unique across
-             *     subscribers.
+             * @description E.164-style MSISDN, digits only (no `+` prefix). The primary
+             *     identifier of a subscriber; unique across subscribers.
              * @example 27821234567
              */
             msisdn: string;
@@ -657,7 +652,6 @@ export interface components {
          *     (POST /subscribers) and replace (PUT /subscribers/{id}).
          */
         SubscriberInput: {
-            name: string;
             msisdn: string;
             iccid: string;
             /**
