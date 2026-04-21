@@ -8,6 +8,7 @@ import {
   Group,
   Menu,
   Modal,
+  SegmentedControl,
   Select,
   Skeleton,
   Stack,
@@ -26,7 +27,7 @@ import {
   IconPlugConnectedX,
   IconSearch,
 } from '@tabler/icons-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { ApiError } from '../../api/errors';
 import type {
@@ -54,6 +55,27 @@ type PeerPrompt =
   | { kind: 'created'; peer: Peer }
   | { kind: 'updated-idle'; peer: Peer }
   | { kind: 'updated-live'; peer: Peer };
+
+/**
+ * Dev toggle for the post-update UX. Kept here rather than in Settings
+ * so you can A/B the two styles side-by-side while evaluating. Persists
+ * in localStorage so a page reload doesn't reset the choice. Remove this
+ * (and pin one style) once the winner is clear.
+ */
+type UpdatePromptStyle = 'modal' | 'toast';
+const UPDATE_PROMPT_STYLE_KEY = 'peers:updatePromptStyle';
+
+function useUpdatePromptStyle(): [UpdatePromptStyle, (v: UpdatePromptStyle) => void] {
+  const [style, setStyle] = useState<UpdatePromptStyle>(() => {
+    if (typeof window === 'undefined') return 'modal';
+    const v = window.localStorage.getItem(UPDATE_PROMPT_STYLE_KEY);
+    return v === 'toast' ? 'toast' : 'modal';
+  });
+  useEffect(() => {
+    window.localStorage.setItem(UPDATE_PROMPT_STYLE_KEY, style);
+  }, [style]);
+  return [style, setStyle];
+}
 
 /** Post-mutation a peer is "live" if it's active or attempting/holding an error. */
 function isLivePeer(p: Peer): boolean {
@@ -114,6 +136,9 @@ export function PeersPage() {
   //   - updated-live     → "Peer 'x' was updated. Currently connected.
   //                         Restart?" → Disconnect + Connect
   const [prompt, setPrompt] = useState<PeerPrompt | undefined>();
+  const [updateUx, setUpdateUx] = useUpdatePromptStyle();
+  const connect = useConnectPeer();
+  const restart = useRestartPeer();
 
   const filtered = useMemo(() => {
     if (!peers.data) return [];
@@ -178,6 +203,25 @@ export function PeersPage() {
           leftSectionWidth={60}
           styles={{ input: { paddingLeft: 60 } }}
         />
+      </Group>
+
+      {/* Dev affordance — remove once we pin one of the two update flows. */}
+      <Group gap="xs" align="center">
+        <Text size="xs" c="dimmed" tt="uppercase" fw={600} style={{ letterSpacing: 0.5 }}>
+          Update prompt
+        </Text>
+        <SegmentedControl
+          size="xs"
+          value={updateUx}
+          onChange={(v) => setUpdateUx(v as UpdatePromptStyle)}
+          data={[
+            { label: 'Modal', value: 'modal' },
+            { label: 'Toast', value: 'toast' },
+          ]}
+        />
+        <Text size="xs" c="dimmed">
+          (A/B the post-update UX — persists locally)
+        </Text>
       </Group>
 
       {peers.isError ? (
@@ -299,12 +343,14 @@ export function PeersPage() {
           setDrawer({ kind: 'closed' });
           setDeleteTarget(p);
         }}
-        onUpdated={(p) =>
-          setPrompt({
-            kind: isLivePeer(p) ? 'updated-live' : 'updated-idle',
-            peer: p,
-          })
-        }
+        onUpdated={(p) => {
+          const kind = isLivePeer(p) ? 'updated-live' : 'updated-idle';
+          if (updateUx === 'modal') {
+            setPrompt({ kind, peer: p });
+          } else {
+            showUpdateToast({ kind, peer: p }, { connect, restart });
+          }
+        }}
       />
       <DeletePeerModal
         peer={deleteTarget}
@@ -760,4 +806,79 @@ function promptCopy(p: PeerPrompt): {
         confirmLabel: 'Restart',
       };
   }
+}
+
+/**
+ * Non-blocking alternative to `PeerLifecyclePrompt` for the update path:
+ * a toast with an inline action button. Lives in the same global toast
+ * channel as status changes, so after editing you can keep working and
+ * the reminder sits unobtrusively in the corner until you act or
+ * dismiss. The `created` path still uses the modal — a new peer is a
+ * bigger decision point and a transient toast is too easy to miss.
+ */
+function showUpdateToast(
+  p: Extract<PeerPrompt, { kind: `updated-${string}` }>,
+  mutations: {
+    connect: ReturnType<typeof useConnectPeer>;
+    restart: ReturnType<typeof useRestartPeer>;
+  },
+) {
+  const isRestart = p.kind === 'updated-live';
+  const id = `peer-update-${p.peer.id}-${Date.now()}`;
+
+  const run = () => {
+    notifications.hide(id);
+    const promise = isRestart
+      ? mutations.restart.mutateAsync(p.peer.id)
+      : mutations.connect.mutateAsync(p.peer.id);
+    promise.catch((err: unknown) => {
+      notifications.show({
+        color: 'red',
+        title: isRestart ? 'Restart failed' : 'Connect failed',
+        message: err instanceof Error ? err.message : 'Unexpected error',
+      });
+    });
+  };
+
+  notifications.show({
+    id,
+    withCloseButton: true,
+    autoClose: 10_000,
+    color: isRestart ? 'yellow' : 'blue',
+    title: (
+      <Text size="sm" fw={600}>
+        Peer &apos;{p.peer.name}&apos; updated
+      </Text>
+    ),
+    message: (
+      <Stack gap={8} mt={4}>
+        <Text size="sm" c="dimmed">
+          {isRestart ? (
+            <>
+              Currently <strong>connected</strong>. Restart to apply the new
+              configuration.
+            </>
+          ) : (
+            <>
+              Not currently <strong>connected</strong>. Connect now to start
+              the peer.
+            </>
+          )}
+        </Text>
+        <Group gap="xs">
+          <Button size="xs" variant="light" onClick={run}>
+            {isRestart ? 'Restart now' : 'Connect now'}
+          </Button>
+          <Button
+            size="xs"
+            variant="subtle"
+            color="gray"
+            onClick={() => notifications.hide(id)}
+          >
+            Dismiss
+          </Button>
+        </Group>
+      </Stack>
+    ),
+  });
 }
