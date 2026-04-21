@@ -204,6 +204,54 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
+  /peers/{id}/connect:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [Peers]
+      operationId: connectPeer
+      summary: Initiate a connection to this peer
+      description: |
+        Triggers a CER/CEA exchange and moves the peer towards `connected`.
+        Returns the updated `Peer` immediately — the status may still be
+        `connecting` when the response is returned; clients should react
+        to subsequent `peer.updated` SSE events for the final outcome.
+      responses:
+        '200':
+          description: Connection attempt started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Peer'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /peers/{id}/disconnect:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [Peers]
+      operationId: disconnectPeer
+      summary: Disconnect this peer
+      description: |
+        Closes the Diameter transport. If `autoConnect` is true, the peer
+        will **not** be automatically reconnected — supervision only fires
+        at server startup. Use `POST /peers/{id}/connect` to reopen the
+        link explicitly.
+      responses:
+        '200':
+          description: Peer disconnected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Peer'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+
   /peers/test:
     post:
       tags: [Peers]
@@ -544,7 +592,7 @@ components:
 
     PeerStatus:
       type: string
-      enum: [connected, connecting, disconnected, error]
+      enum: [connected, connecting, disconnected, disconnecting, error]
 
     PeerTransport:
       type: string
@@ -588,7 +636,11 @@ components:
           default: 30
         autoConnect:
           type: boolean
-          description: Automatically connect this peer on application startup
+          description: |
+            If true, the server attempts to connect this peer at server
+            startup. Does **not** trigger a connection when the peer is
+            created or updated mid-run — those require an explicit
+            `POST /peers/{id}/connect`.
           default: true
         status:
           $ref: '#/components/schemas/PeerStatus'
@@ -643,6 +695,7 @@ components:
           default: 30
         autoConnect:
           type: boolean
+          description: If true, the server connects this peer at server startup.
           default: true
 
     PeerTestResult:

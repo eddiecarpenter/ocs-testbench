@@ -36,8 +36,10 @@ import type {
   PeerTestResult,
 } from '../../api/resources/peers';
 import {
+  useConnectPeer,
   useCreatePeer,
   useDeletePeer,
+  useDisconnectPeer,
   usePeers,
   useTestPeerConfig,
   useUpdatePeer,
@@ -71,6 +73,7 @@ const STATUS_FILTER_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'connected', label: 'Connected' },
   { value: 'connecting', label: 'Connecting' },
+  { value: 'disconnecting', label: 'Disconnecting' },
   { value: 'disconnected', label: 'Disconnected' },
   { value: 'error', label: 'Error' },
 ];
@@ -88,6 +91,13 @@ export function PeersPage() {
     { kind: 'closed' } | { kind: 'create' } | { kind: 'edit'; peer: Peer }
   >({ kind: 'closed' });
   const [deleteTarget, setDeleteTarget] = useState<Peer | undefined>();
+  // Post-create: prompt the user to start the freshly created peer now.
+  // Auto-connect governs server-startup behaviour only (see PeerForm copy),
+  // so we always ask — regardless of the autoConnect value.
+  const [startPrompt, setStartPrompt] = useState<Peer | undefined>();
+  // Post-update: if the user just saved changes to a peer that is currently
+  // live, offer to restart it so the new configuration takes effect.
+  const [restartPrompt, setRestartPrompt] = useState<Peer | undefined>();
 
   const filtered = useMemo(() => {
     if (!peers.data) return [];
@@ -264,6 +274,7 @@ export function PeersPage() {
       <CreatePeerDrawer
         open={drawer.kind === 'create'}
         onClose={() => setDrawer({ kind: 'closed' })}
+        onCreated={(p) => setStartPrompt(p)}
       />
       <EditPeerDrawer
         peer={drawer.kind === 'edit' ? drawer.peer : undefined}
@@ -272,10 +283,30 @@ export function PeersPage() {
           setDrawer({ kind: 'closed' });
           setDeleteTarget(p);
         }}
+        onUpdated={(p) => {
+          // Only prompt to restart if the peer currently has a live
+          // connection — otherwise the new config just takes effect on the
+          // next manual Connect or on server restart.
+          if (
+            p.status === 'connected' ||
+            p.status === 'connecting' ||
+            p.status === 'error'
+          ) {
+            setRestartPrompt(p);
+          }
+        }}
       />
       <DeletePeerModal
         peer={deleteTarget}
         onClose={() => setDeleteTarget(undefined)}
+      />
+      <StartPeerModal
+        peer={startPrompt}
+        onClose={() => setStartPrompt(undefined)}
+      />
+      <RestartPeerModal
+        peer={restartPrompt}
+        onClose={() => setRestartPrompt(undefined)}
       />
     </Stack>
   );
@@ -295,7 +326,50 @@ function RowMenu({
   peer: Peer;
   onEdit: () => void;
 }) {
-  const isConnected = peer.status === 'connected' || peer.status === 'connecting';
+  const connect = useConnectPeer();
+  const disconnect = useDisconnectPeer();
+  // Treat any non-idle state as "has a live connection" so Disconnect is the
+  // surfaced action. `connecting`/`disconnecting` are transient — showing
+  // Connect during those would let the user kick off a second transition.
+  const isLive =
+    peer.status === 'connected' ||
+    peer.status === 'connecting' ||
+    peer.status === 'disconnecting';
+
+  const handleConnect = async () => {
+    try {
+      const result = await connect.mutateAsync(peer.id);
+      notifications.show({
+        color: result.status === 'error' ? 'red' : 'teal',
+        title: result.status === 'error' ? 'Connect failed' : 'Peer connected',
+        message: result.statusDetail ?? `${result.name} is ${result.status}.`,
+      });
+    } catch (err) {
+      notifications.show({
+        color: 'red',
+        title: 'Connect failed',
+        message: err instanceof Error ? err.message : 'Unexpected error',
+      });
+    }
+  };
+
+  const handleDisconnect = async () => {
+    try {
+      const result = await disconnect.mutateAsync(peer.id);
+      notifications.show({
+        color: 'gray',
+        title: 'Peer disconnected',
+        message: result.statusDetail ?? `${result.name} is disconnected.`,
+      });
+    } catch (err) {
+      notifications.show({
+        color: 'red',
+        title: 'Disconnect failed',
+        message: err instanceof Error ? err.message : 'Unexpected error',
+      });
+    }
+  };
+
   return (
     <Menu shadow="md" width={180} position="bottom-end">
       <Menu.Target>
@@ -308,29 +382,19 @@ function RowMenu({
         </ActionIcon>
       </Menu.Target>
       <Menu.Dropdown>
-        {isConnected ? (
+        {isLive ? (
           <Menu.Item
             leftSection={<IconPlugConnectedX size={14} />}
-            onClick={() =>
-              notifications.show({
-                color: 'gray',
-                title: 'Disconnect not wired',
-                message: 'Disconnect action will be wired once the peer lifecycle endpoints land.',
-              })
-            }
+            onClick={handleDisconnect}
+            disabled={disconnect.isPending || peer.status === 'disconnecting'}
           >
             Disconnect
           </Menu.Item>
         ) : (
           <Menu.Item
             leftSection={<IconPlugConnected size={14} />}
-            onClick={() =>
-              notifications.show({
-                color: 'gray',
-                title: 'Connect not wired',
-                message: 'Connect action will be wired once the peer lifecycle endpoints land.',
-              })
-            }
+            onClick={handleConnect}
+            disabled={connect.isPending}
           >
             Connect
           </Menu.Item>
@@ -372,9 +436,11 @@ function useProbeConfig() {
 function CreatePeerDrawer({
   open,
   onClose,
+  onCreated,
 }: {
   open: boolean;
   onClose: () => void;
+  onCreated: (p: Peer) => void;
 }) {
   const createPeer = useCreatePeer();
   const probe = useProbeConfig();
@@ -388,6 +454,9 @@ function CreatePeerDrawer({
         message: `${peer.name} is ready.`,
       });
       onClose();
+      // Defer so the drawer close transition runs before the modal opens —
+      // avoids the modal overlay stacking under the drawer's fade-out.
+      setTimeout(() => onCreated(peer), 0);
       return peer;
     } catch (err) {
       if (err instanceof ApiError && err.status === 422) throw err;
@@ -429,10 +498,12 @@ function EditPeerDrawer({
   peer,
   onClose,
   onRequestDelete,
+  onUpdated,
 }: {
   peer: Peer | undefined;
   onClose: () => void;
   onRequestDelete: (p: Peer) => void;
+  onUpdated: (p: Peer) => void;
 }) {
   return (
     <Drawer
@@ -449,6 +520,7 @@ function EditPeerDrawer({
           peer={peer}
           onClose={onClose}
           onRequestDelete={() => onRequestDelete(peer)}
+          onUpdated={onUpdated}
         />
       )}
     </Drawer>
@@ -459,10 +531,12 @@ function EditPeerForm({
   peer,
   onClose,
   onRequestDelete,
+  onUpdated,
 }: {
   peer: Peer;
   onClose: () => void;
   onRequestDelete: () => void;
+  onUpdated: (p: Peer) => void;
 }) {
   const updatePeer = useUpdatePeer(peer.id);
   const probe = useProbeConfig();
@@ -476,6 +550,7 @@ function EditPeerForm({
         message: `${next.name} has been saved.`,
       });
       onClose();
+      setTimeout(() => onUpdated(next), 0);
       return next;
     } catch (err) {
       if (err instanceof ApiError && err.status === 422) throw err;
@@ -555,6 +630,137 @@ function DeletePeerModal({
           </Button>
           <Button color="red" loading={deletePeer.isPending} onClick={handleConfirm}>
             Delete
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+/**
+ * Post-create prompt: `autoConnect` only governs server-startup behaviour,
+ * so we always ask whether the user wants to connect the freshly created
+ * peer right now. Explicit beats magic — and the toast that fired on
+ * success already communicated that creation succeeded.
+ */
+function StartPeerModal({
+  peer,
+  onClose,
+}: {
+  peer: Peer | undefined;
+  onClose: () => void;
+}) {
+  const connect = useConnectPeer();
+
+  const handleStart = async () => {
+    if (!peer) return;
+    try {
+      const result = await connect.mutateAsync(peer.id);
+      notifications.show({
+        color: result.status === 'error' ? 'red' : 'teal',
+        title: result.status === 'error' ? 'Connect failed' : 'Peer connected',
+        message: result.statusDetail ?? `${result.name} is ${result.status}.`,
+      });
+      onClose();
+    } catch (err) {
+      notifications.show({
+        color: 'red',
+        title: 'Connect failed',
+        message: err instanceof Error ? err.message : 'Unexpected error',
+      });
+      onClose();
+    }
+  };
+
+  return (
+    <Modal
+      opened={Boolean(peer)}
+      onClose={onClose}
+      title="Start peer now?"
+      centered
+      closeOnClickOutside={!connect.isPending}
+      closeOnEscape={!connect.isPending}
+    >
+      <Stack gap="md">
+        <Text size="sm">
+          <strong>{peer?.name ?? ''}</strong> was created.
+          {peer?.autoConnect
+            ? ' Auto-connect is on, so it will connect on the next server start — but the server is already running. '
+            : ' '}
+          Would you like to connect it now?
+        </Text>
+        <Group justify="flex-end">
+          <Button variant="subtle" onClick={onClose} disabled={connect.isPending}>
+            Not now
+          </Button>
+          <Button loading={connect.isPending} onClick={handleStart}>
+            Start peer
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+/**
+ * Post-update prompt: when a peer's configuration changes while a
+ * connection is live, the running session still holds the old config.
+ * Offer to restart (disconnect then reconnect) so the new values take
+ * effect. Skipped entirely when the peer is idle.
+ */
+function RestartPeerModal({
+  peer,
+  onClose,
+}: {
+  peer: Peer | undefined;
+  onClose: () => void;
+}) {
+  const connect = useConnectPeer();
+  const disconnect = useDisconnectPeer();
+  const pending = connect.isPending || disconnect.isPending;
+
+  const handleRestart = async () => {
+    if (!peer) return;
+    try {
+      await disconnect.mutateAsync(peer.id);
+      const result = await connect.mutateAsync(peer.id);
+      notifications.show({
+        color: result.status === 'error' ? 'red' : 'teal',
+        title: result.status === 'error' ? 'Restart failed' : 'Peer restarted',
+        message: result.statusDetail ?? `${result.name} is ${result.status}.`,
+      });
+      onClose();
+    } catch (err) {
+      notifications.show({
+        color: 'red',
+        title: 'Restart failed',
+        message: err instanceof Error ? err.message : 'Unexpected error',
+      });
+      onClose();
+    }
+  };
+
+  return (
+    <Modal
+      opened={Boolean(peer)}
+      onClose={onClose}
+      title="Restart peer?"
+      centered
+      closeOnClickOutside={!pending}
+      closeOnEscape={!pending}
+    >
+      <Stack gap="md">
+        <Text size="sm">
+          <strong>{peer?.name ?? ''}</strong> is currently live and still
+          running the previous configuration. Restart it now so the updated
+          settings take effect?
+        </Text>
+        <Group justify="flex-end">
+          <Button variant="subtle" onClick={onClose} disabled={pending}>
+            Later
+          </Button>
+          <Button loading={pending} onClick={handleRestart}>
+            Restart peer
           </Button>
         </Group>
       </Stack>

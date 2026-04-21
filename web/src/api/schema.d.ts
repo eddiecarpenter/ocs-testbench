@@ -129,6 +129,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/peers/{id}/connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Initiate a connection to this peer
+         * @description Triggers a CER/CEA exchange and moves the peer towards `connected`.
+         *     Returns the updated `Peer` immediately — the status may still be
+         *     `connecting` when the response is returned; clients should react
+         *     to subsequent `peer.updated` SSE events for the final outcome.
+         */
+        post: operations["connectPeer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/peers/{id}/disconnect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Disconnect this peer
+         * @description Closes the Diameter transport. If `autoConnect` is true, the peer
+         *     will **not** be automatically reconnected — supervision only fires
+         *     at server startup. Use `POST /peers/{id}/connect` to reopen the
+         *     link explicitly.
+         */
+        post: operations["disconnectPeer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/peers/test": {
         parameters: {
             query?: never;
@@ -363,7 +415,7 @@ export interface components {
             activeRuns: number;
         };
         /** @enum {string} */
-        PeerStatus: "connected" | "connecting" | "disconnected" | "error";
+        PeerStatus: "connected" | "connecting" | "disconnected" | "disconnecting" | "error";
         /**
          * @description Transport protocol used for the Diameter connection.
          * @enum {string}
@@ -399,7 +451,10 @@ export interface components {
              */
             watchdogIntervalSeconds: number;
             /**
-             * @description Automatically connect this peer on application startup
+             * @description If true, the server attempts to connect this peer at server
+             *     startup. Does **not** trigger a connection when the peer is
+             *     created or updated mid-run — those require an explicit
+             *     `POST /peers/{id}/connect`.
              * @default true
              */
             autoConnect: boolean;
@@ -443,7 +498,10 @@ export interface components {
             transport: components["schemas"]["PeerTransport"];
             /** @default 30 */
             watchdogIntervalSeconds: number;
-            /** @default true */
+            /**
+             * @description If true, the server connects this peer at server startup.
+             * @default true
+             */
             autoConnect: boolean;
         };
         /**
@@ -827,6 +885,56 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    connectPeer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Connection attempt started */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Peer"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    disconnectPeer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Peer disconnected */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Peer"];
+                };
             };
             404: components["responses"]["NotFound"];
             default: components["responses"]["Problem"];

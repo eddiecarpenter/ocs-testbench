@@ -249,7 +249,8 @@ export function PeerForm({
                 Auto-connect on startup
               </Text>
               <Text size="xs" c="dimmed">
-                Automatically connect this peer when the application starts
+                Connect this peer automatically when the server starts. Does
+                not connect the peer now — use the Connect action for that.
               </Text>
             </Stack>
             <Switch
@@ -289,7 +290,11 @@ export function PeerForm({
               Test
             </Button>
           )}
-          <Button type="submit" loading={submitting} disabled={testing || deleting}>
+          <Button
+            type="submit"
+            loading={submitting}
+            disabled={!form.isValid() || testing || deleting}
+          >
             {mode === 'edit' ? 'Update' : 'Create'}
           </Button>
         </Group>

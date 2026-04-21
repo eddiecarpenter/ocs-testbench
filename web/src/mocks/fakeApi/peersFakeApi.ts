@@ -199,6 +199,65 @@ mock
     return [200, updated];
   });
 
+// Connect — move peer to `connected` (with a brief `connecting` stop). The
+// second SSE-style flip would normally come from the server's transport
+// supervisor; the mock just returns the settled state for simplicity.
+mock
+  .onPost(/\/peers\/[^/]+\/connect$/)
+  .withDelayInMs(400)
+  .reply((config) => {
+    const m = /\/peers\/([^/]+)\/connect$/.exec(config.url ?? '');
+    const id = m ? decodeURIComponent(m[1]) : '';
+    const peer = peers.find((p) => p.id === id);
+    if (!peer) {
+      return [
+        404,
+        {
+          type: 'about:blank',
+          title: 'Peer not found',
+          status: 404,
+          detail: `No peer with id "${id}"`,
+        },
+      ];
+    }
+    // Contrived: hosts in 10.0.99.x cannot connect (same rule as the test
+    // probe) so the failure path is exercisable.
+    if (peer.host.startsWith('10.0.99.')) {
+      peer.status = 'error';
+      peer.statusDetail = 'CER/CEA timeout';
+    } else {
+      peer.status = 'connected';
+      peer.statusDetail = undefined;
+    }
+    peer.lastChangeAt = new Date().toISOString();
+    return [200, peer];
+  });
+
+// Disconnect — explicit disconnect. Supervision does not auto-reconnect.
+mock
+  .onPost(/\/peers\/[^/]+\/disconnect$/)
+  .withDelayInMs(250)
+  .reply((config) => {
+    const m = /\/peers\/([^/]+)\/disconnect$/.exec(config.url ?? '');
+    const id = m ? decodeURIComponent(m[1]) : '';
+    const peer = peers.find((p) => p.id === id);
+    if (!peer) {
+      return [
+        404,
+        {
+          type: 'about:blank',
+          title: 'Peer not found',
+          status: 404,
+          detail: `No peer with id "${id}"`,
+        },
+      ];
+    }
+    peer.status = 'disconnected';
+    peer.statusDetail = 'Administratively disconnected';
+    peer.lastChangeAt = new Date().toISOString();
+    return [200, peer];
+  });
+
 // Delete
 mock
   .onDelete(/\/peers\/[^/]+$/)

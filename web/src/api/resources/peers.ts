@@ -48,6 +48,12 @@ export const deletePeer = (id: string) =>
 export const testPeerConfig = (input: PeerInput) =>
   ApiService.post<PeerTestResult, PeerInput>('/peers/test', input);
 
+export const connectPeer = (id: string) =>
+  ApiService.post<Peer>(`/peers/${encodeURIComponent(id)}/connect`);
+
+export const disconnectPeer = (id: string) =>
+  ApiService.post<Peer>(`/peers/${encodeURIComponent(id)}/disconnect`);
+
 /**
  * Create a new peer. On success, invalidates the list so the new row
  * appears and seeds the detail cache for instant navigation.
@@ -93,6 +99,82 @@ export function useUpdatePeer(id: string) {
 export function useTestPeerConfig() {
   return useMutation({
     mutationFn: (input: PeerInput) => testPeerConfig(input),
+  });
+}
+
+/**
+ * Shared cache patcher for connect/disconnect — writes the returned peer into
+ * the detail cache and patches the list row in place so the UI reflects the
+ * new status without a refetch. SSE reconciles anything we missed.
+ */
+function writePeerToCaches(qc: ReturnType<typeof useQueryClient>, peer: Peer) {
+  qc.setQueryData(peerKeys.detail(peer.id), peer);
+  qc.setQueryData<Peer[]>(peerKeys.list(), (prev) =>
+    prev ? prev.map((p) => (p.id === peer.id ? peer : p)) : prev,
+  );
+}
+
+/**
+ * Optimistically patch a peer's status so the UI reflects the in-flight
+ * action (`connecting` / `disconnecting`) immediately. Returns a snapshot
+ * of the previous peer so the caller can roll back on error.
+ */
+function optimisticStatusPatch(
+  qc: ReturnType<typeof useQueryClient>,
+  id: string,
+  nextStatus: PeerStatus,
+  nextDetail?: string,
+): Peer | undefined {
+  const prev = qc.getQueryData<Peer>(peerKeys.detail(id))
+    ?? qc.getQueryData<Peer[]>(peerKeys.list())?.find((p) => p.id === id);
+  if (!prev) return undefined;
+  const patched: Peer = {
+    ...prev,
+    status: nextStatus,
+    statusDetail: nextDetail,
+    lastChangeAt: new Date().toISOString(),
+  };
+  writePeerToCaches(qc, patched);
+  return prev;
+}
+
+/**
+ * Explicitly connect a peer. Independent of `autoConnect`, which governs
+ * server-startup behaviour only. Optimistically flips status to
+ * `connecting` so the UI shows immediate feedback; rolls back on error.
+ */
+export function useConnectPeer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => connectPeer(id),
+    onMutate: (id) => ({
+      prev: optimisticStatusPatch(qc, id, 'connecting'),
+      id,
+    }),
+    onError: (_err, _id, ctx) => {
+      if (ctx?.prev) writePeerToCaches(qc, ctx.prev);
+    },
+    onSuccess: (peer) => writePeerToCaches(qc, peer),
+  });
+}
+
+/**
+ * Explicitly disconnect a peer. Supervision does not auto-reconnect.
+ * Optimistically flips status to `disconnected` with a "Disconnecting…"
+ * detail so the transition is visible while the request is in flight.
+ */
+export function useDisconnectPeer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => disconnectPeer(id),
+    onMutate: (id) => ({
+      prev: optimisticStatusPatch(qc, id, 'disconnecting'),
+      id,
+    }),
+    onError: (_err, _id, ctx) => {
+      if (ctx?.prev) writePeerToCaches(qc, ctx.prev);
+    },
+    onSuccess: (peer) => writePeerToCaches(qc, peer),
   });
 }
 
