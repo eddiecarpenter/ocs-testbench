@@ -14,7 +14,7 @@ import { peerKeys, type Peer, type PeerStatus } from './peers';
  * Transient states (`connecting`, `disconnecting`, `restarting`) are
  * suppressed: they're already visible in the row badge and doubling up
  * would produce three toasts for a single restart. We only toast on
- * settled outcomes (`connected`, `disconnected`, `error`).
+ * settled outcomes (`connected`, `disconnected`, `stopped`, `error`).
  */
 export function usePeerStatusToasts() {
   const qc = useQueryClient();

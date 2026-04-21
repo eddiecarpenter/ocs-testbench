@@ -22,8 +22,8 @@ import {
   IconDots,
   IconPencil,
   IconPlus,
-  IconPlugConnected,
-  IconPlugConnectedX,
+  IconPlayerPlay,
+  IconPlayerStop,
   IconSearch,
 } from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
@@ -36,14 +36,14 @@ import type {
   PeerTestResult,
 } from '../../api/resources/peers';
 import {
-  useConnectPeer,
   useCreatePeer,
   useDeletePeer,
   usePeers,
   useRestartPeer,
+  useStartPeer,
+  useStopPeer,
   useTestPeerConfig,
   useUpdatePeer,
-  useDisconnectPeer,
 } from '../../api/resources/peers';
 import { PeerStatusLabel } from '../../components/peer/PeerStatusLabel';
 import { PeerForm } from './PeerForm';
@@ -52,8 +52,8 @@ type StatusFilter = 'all' | PeerStatus;
 
 /**
  * Input to the post-mutation lifecycle toast. Three variants:
- *   - `created`       — brand-new peer; offer Connect.
- *   - `updated-idle`  — edited peer currently disconnected; offer Connect.
+ *   - `created`       — brand-new peer (always `stopped`); offer Start.
+ *   - `updated-idle`  — edited peer not currently running; offer Start.
  *   - `updated-live`  — edited peer currently live; offer Restart so the
  *                       new config takes effect.
  * All three use the same non-blocking toast — no modals.
@@ -63,7 +63,11 @@ type LifecycleToastInput =
   | { kind: 'updated-idle'; peer: Peer }
   | { kind: 'updated-live'; peer: Peer };
 
-/** Post-mutation a peer is "live" if it's active or attempting/holding an error. */
+/**
+ * Post-mutation a peer is "live" if supervision is engaged — either it's
+ * connected, in flight, or retrying. A `stopped` or `disconnected` peer
+ * is not live and the update toast should offer Start instead of Restart.
+ */
 function isLivePeer(p: Peer): boolean {
   return (
     p.status === 'connected' ||
@@ -105,6 +109,7 @@ const STATUS_FILTER_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: 'connecting', label: 'Connecting' },
   { value: 'disconnecting', label: 'Disconnecting' },
   { value: 'disconnected', label: 'Disconnected' },
+  { value: 'stopped', label: 'Stopped' },
   { value: 'error', label: 'Error' },
 ];
 
@@ -131,7 +136,7 @@ export function PeersPage() {
   // All three post-mutation flows (created / updated-idle / updated-live)
   // surface as a non-blocking toast with inline Connect/Restart actions.
   // See `showLifecycleToast`.
-  const connect = useConnectPeer();
+  const start = useStartPeer();
   const restart = useRestartPeer();
 
   const filtered = useMemo(() => {
@@ -310,7 +315,7 @@ export function PeersPage() {
         open={drawer.kind === 'create'}
         onClose={() => setDrawer({ kind: 'closed' })}
         onCreated={(p) =>
-          showLifecycleToast({ kind: 'created', peer: p }, { connect, restart })
+          showLifecycleToast({ kind: 'created', peer: p }, { start, restart })
         }
       />
       <EditPeerDrawer
@@ -326,7 +331,7 @@ export function PeersPage() {
               kind: isLivePeer(p) ? 'updated-live' : 'updated-idle',
               peer: p,
             },
-            { connect, restart },
+            { start, restart },
           )
         }
       />
@@ -339,7 +344,7 @@ export function PeersPage() {
 }
 
 /**
- * Kebab menu on each row — Connect/Disconnect + Edit only. Destructive
+ * Kebab menu on each row — Start/Stop + Edit only. Destructive
  * actions (Delete) deliberately live inside the Edit drawer so the full
  * peer identity is visible at the moment of confirmation — reduces the
  * risk of deleting the wrong row from a dense table. This is the
@@ -352,13 +357,14 @@ function RowMenu({
   peer: Peer;
   onEdit: () => void;
 }) {
-  const connect = useConnectPeer();
-  const disconnect = useDisconnectPeer();
-  // Only `disconnected` offers Connect. Every other state — connected,
-  // connecting, disconnecting, restarting, error — offers Disconnect so
-  // the user has a way to stop the session (including a peer that's
-  // stuck in `error` retrying supervision).
-  const showDisconnect = peer.status !== 'disconnected';
+  const start = useStartPeer();
+  const stop = useStopPeer();
+  // Only `stopped` offers Start. Every other state — connected,
+  // connecting, disconnected, disconnecting, restarting, error — offers
+  // Stop so the user has a way to halt supervision (including a peer
+  // stuck in `error` retrying, or a `disconnected` peer that's still
+  // being redialed by supervision).
+  const showStop = peer.status !== 'stopped';
   // Transient states are mid-transition; kicking off a second action
   // during one would race the optimistic patch. Disable the menu item
   // until the peer settles.
@@ -371,25 +377,25 @@ function RowMenu({
   // watches the list cache and fires on every settled status change, so
   // we only need to surface thrown errors (optimistic rollback puts the
   // cache back to the previous state, which produces no transition).
-  const handleConnect = async () => {
+  const handleStart = async () => {
     try {
-      await connect.mutateAsync(peer.id);
+      await start.mutateAsync(peer.id);
     } catch (err) {
       notifications.show({
         color: 'red',
-        title: 'Connect failed',
+        title: 'Start failed',
         message: err instanceof Error ? err.message : 'Unexpected error',
       });
     }
   };
 
-  const handleDisconnect = async () => {
+  const handleStop = async () => {
     try {
-      await disconnect.mutateAsync(peer.id);
+      await stop.mutateAsync(peer.id);
     } catch (err) {
       notifications.show({
         color: 'red',
-        title: 'Disconnect failed',
+        title: 'Stop failed',
         message: err instanceof Error ? err.message : 'Unexpected error',
       });
     }
@@ -407,21 +413,21 @@ function RowMenu({
         </ActionIcon>
       </Menu.Target>
       <Menu.Dropdown>
-        {showDisconnect ? (
+        {showStop ? (
           <Menu.Item
-            leftSection={<IconPlugConnectedX size={14} />}
-            onClick={handleDisconnect}
-            disabled={isTransient || disconnect.isPending}
+            leftSection={<IconPlayerStop size={14} />}
+            onClick={handleStop}
+            disabled={isTransient || stop.isPending}
           >
-            Disconnect
+            Stop
           </Menu.Item>
         ) : (
           <Menu.Item
-            leftSection={<IconPlugConnected size={14} />}
-            onClick={handleConnect}
-            disabled={isTransient || connect.isPending}
+            leftSection={<IconPlayerPlay size={14} />}
+            onClick={handleStart}
+            disabled={isTransient || start.isPending}
           >
-            Connect
+            Start
           </Menu.Item>
         )}
         <Menu.Item leftSection={<IconPencil size={14} />} onClick={onEdit}>
@@ -667,16 +673,17 @@ function DeletePeerModal({
 }
 
 /**
- * Unified post-mutation toast with inline Connect/Restart action. Used
- * for all three flows (create, update-idle, update-live). Non-blocking:
- * the user can keep working and the reminder sits in the corner until
- * they act, dismiss, or it auto-closes after 10 s. autoConnect is
- * intentionally not mentioned — it governs server-startup only.
+ * Unified post-mutation toast with inline Start/Restart action. Used for
+ * all three flows (create, update-idle, update-live). Non-blocking: the
+ * user can keep working and the reminder sits in the corner until they
+ * act, dismiss, or it auto-closes after 10 s. `autoConnect` is
+ * intentionally not mentioned — it governs server-startup only and has
+ * no bearing on the current peer status.
  */
 function showLifecycleToast(
   p: LifecycleToastInput,
   mutations: {
-    connect: ReturnType<typeof useConnectPeer>;
+    start: ReturnType<typeof useStartPeer>;
     restart: ReturnType<typeof useRestartPeer>;
   },
 ) {
@@ -687,11 +694,11 @@ function showLifecycleToast(
     notifications.hide(id);
     const promise = isRestart
       ? mutations.restart.mutateAsync(p.peer.id)
-      : mutations.connect.mutateAsync(p.peer.id);
+      : mutations.start.mutateAsync(p.peer.id);
     promise.catch((err: unknown) => {
       notifications.show({
         color: 'red',
-        title: isRestart ? 'Restart failed' : 'Connect failed',
+        title: isRestart ? 'Restart failed' : 'Start failed',
         message: err instanceof Error ? err.message : 'Unexpected error',
       });
     });
@@ -704,7 +711,7 @@ function showLifecycleToast(
 
   const body =
     p.kind === 'created' ? (
-      <>Would you like to connect it now?</>
+      <>Would you like to <strong>start</strong> it now?</>
     ) : isRestart ? (
       <>
         Currently <strong>connected</strong>. Restart to apply the new
@@ -712,8 +719,8 @@ function showLifecycleToast(
       </>
     ) : (
       <>
-        Not currently <strong>connected</strong>. Connect now to start the
-        peer.
+        Not currently <strong>running</strong>. Start the peer now to apply
+        the new configuration.
       </>
     );
 
@@ -734,7 +741,7 @@ function showLifecycleToast(
         </Text>
         <Group gap="xs">
           <Button size="xs" variant="light" onClick={run}>
-            {isRestart ? 'Restart now' : 'Connect now'}
+            {isRestart ? 'Restart now' : 'Start now'}
           </Button>
           <Button
             size="xs"
