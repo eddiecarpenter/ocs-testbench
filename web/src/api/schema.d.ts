@@ -4,6 +4,69 @@
  */
 
 export interface paths {
+    "/openapi.yaml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * This OpenAPI spec, served as YAML
+         * @description Returns the spec the running server was built against. Useful for
+         *     clients that want to introspect the live contract (Postman,
+         *     contract-diff checks in CI, etc.).
+         */
+        get: operations["getOpenApiYaml"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/openapi.json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * This OpenAPI spec, served as JSON
+         * @description JSON-converted copy of `/openapi.yaml` for tools that only speak JSON.
+         */
+        get: operations["getOpenApiJson"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/docs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Browsable API reference (Redoc / Swagger UI)
+         * @description HTML page that renders `/openapi.yaml` using Redoc (or Swagger UI).
+         *     Intended for humans — point a browser at it.
+         */
+        get: operations["getApiDocs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/dashboard/kpis": {
         parameters: {
             query?: never;
@@ -325,6 +388,70 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    getOpenApiYaml: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OpenAPI 3.1 document (YAML) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/yaml": string;
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getOpenApiJson: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OpenAPI 3.1 document (JSON) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getApiDocs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTML documentation page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+        };
+    };
     getDashboardKpis: {
         parameters: {
             query?: never;

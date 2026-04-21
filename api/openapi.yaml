@@ -33,8 +33,65 @@ tags:
     description: Past and in-progress scenario executions
   - name: Metrics
     description: Time-series telemetry
+  - name: Docs
+    description: Self-describing API — the spec and browsable docs
 
 paths:
+  /openapi.yaml:
+    get:
+      tags: [Docs]
+      operationId: getOpenApiYaml
+      summary: This OpenAPI spec, served as YAML
+      description: |
+        Returns the spec the running server was built against. Useful for
+        clients that want to introspect the live contract (Postman,
+        contract-diff checks in CI, etc.).
+      responses:
+        '200':
+          description: OpenAPI 3.1 document (YAML)
+          content:
+            application/yaml:
+              schema:
+                type: string
+                description: Raw YAML document
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /openapi.json:
+    get:
+      tags: [Docs]
+      operationId: getOpenApiJson
+      summary: This OpenAPI spec, served as JSON
+      description: |
+        JSON-converted copy of `/openapi.yaml` for tools that only speak JSON.
+      responses:
+        '200':
+          description: OpenAPI 3.1 document (JSON)
+          content:
+            application/json:
+              schema:
+                type: object
+                description: OpenAPI 3.1 document
+                additionalProperties: true
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /docs:
+    get:
+      tags: [Docs]
+      operationId: getApiDocs
+      summary: Browsable API reference (Redoc / Swagger UI)
+      description: |
+        HTML page that renders `/openapi.yaml` using Redoc (or Swagger UI).
+        Intended for humans — point a browser at it.
+      responses:
+        '200':
+          description: HTML documentation page
+          content:
+            text/html:
+              schema:
+                type: string
+
   /dashboard/kpis:
     get:
       tags: [Dashboard]
