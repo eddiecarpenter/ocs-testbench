@@ -1,0 +1,551 @@
+openapi: 3.1.0
+info:
+  title: OCS Testbench API
+  version: 0.1.0
+  description: |
+    REST API for the OCS Testbench UI and external clients.
+
+    This specification is the single source of truth for the HTTP contract
+    between the Go backend (`internal/api`) and the React frontend (`web/`).
+    Generated TypeScript types live at `web/src/api/schema.d.ts` — regenerate
+    after any change to this file.
+
+    Real-time server → client events (peer status changes, session state,
+    execution progress) are delivered via a separate SSE endpoint
+    (specified elsewhere, see `docs/ARCHITECTURE.md §9`).
+
+servers:
+  - url: /api/v1
+    description: Current server (relative to origin)
+
+tags:
+  - name: Dashboard
+    description: Aggregated dashboard views
+  - name: Peers
+    description: Diameter peer configuration and live status
+  - name: Subscribers
+    description: Subscriber identities used in test scenarios
+  - name: Templates
+    description: AVP templates
+  - name: Scenarios
+    description: Test scenario definitions
+  - name: Executions
+    description: Past and in-progress scenario executions
+  - name: Metrics
+    description: Time-series telemetry
+  - name: Docs
+    description: Self-describing API — the spec and browsable docs
+
+paths:
+  /openapi.yaml:
+    get:
+      tags: [Docs]
+      operationId: getOpenApiYaml
+      summary: This OpenAPI spec, served as YAML
+      description: |
+        Returns the spec the running server was built against. Useful for
+        clients that want to introspect the live contract (Postman,
+        contract-diff checks in CI, etc.).
+      responses:
+        '200':
+          description: OpenAPI 3.1 document (YAML)
+          content:
+            application/yaml:
+              schema:
+                type: string
+                description: Raw YAML document
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /openapi.json:
+    get:
+      tags: [Docs]
+      operationId: getOpenApiJson
+      summary: This OpenAPI spec, served as JSON
+      description: |
+        JSON-converted copy of `/openapi.yaml` for tools that only speak JSON.
+      responses:
+        '200':
+          description: OpenAPI 3.1 document (JSON)
+          content:
+            application/json:
+              schema:
+                type: object
+                description: OpenAPI 3.1 document
+                additionalProperties: true
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /docs:
+    get:
+      tags: [Docs]
+      operationId: getApiDocs
+      summary: Browsable API reference (Redoc / Swagger UI)
+      description: |
+        HTML page that renders `/openapi.yaml` using Redoc (or Swagger UI).
+        Intended for humans — point a browser at it.
+      responses:
+        '200':
+          description: HTML documentation page
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /dashboard/kpis:
+    get:
+      tags: [Dashboard]
+      operationId: getDashboardKpis
+      summary: Aggregated KPI counters for the dashboard
+      responses:
+        '200':
+          description: Current KPI snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardKpis'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /peers:
+    get:
+      tags: [Peers]
+      operationId: listPeers
+      summary: List configured peers with current connection status
+      responses:
+        '200':
+          description: Peer list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Peer'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /peers/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Peers]
+      operationId: getPeer
+      summary: Get a single peer by id
+      responses:
+        '200':
+          description: Peer detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Peer'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /subscribers:
+    get:
+      tags: [Subscribers]
+      operationId: listSubscribers
+      summary: List subscribers (paginated)
+      parameters:
+        - $ref: '#/components/parameters/LimitQuery'
+        - $ref: '#/components/parameters/OffsetQuery'
+      responses:
+        '200':
+          description: Paginated subscriber list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubscriberPage'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /templates:
+    get:
+      tags: [Templates]
+      operationId: listTemplates
+      summary: List AVP templates
+      responses:
+        '200':
+          description: Template list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TemplateSummary'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /scenarios:
+    get:
+      tags: [Scenarios]
+      operationId: listScenarios
+      summary: List scenarios
+      responses:
+        '200':
+          description: Scenario list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ScenarioSummary'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /executions:
+    get:
+      tags: [Executions]
+      operationId: listExecutions
+      summary: List past and in-progress executions
+      parameters:
+        - name: status
+          in: query
+          description: Filter by execution result/status
+          schema:
+            $ref: '#/components/schemas/ExecutionResult'
+        - $ref: '#/components/parameters/LimitQuery'
+        - $ref: '#/components/parameters/OffsetQuery'
+      responses:
+        '200':
+          description: Execution list (newest first)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionPage'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /metrics/response-time:
+    get:
+      tags: [Metrics]
+      operationId: getResponseTimeSeries
+      summary: p50 / p95 / p99 response-time series
+      parameters:
+        - name: window
+          in: query
+          description: Time window to return (ISO 8601 duration)
+          required: false
+          schema:
+            type: string
+            default: PT1H
+            examples: [PT15M, PT1H, PT24H]
+      responses:
+        '200':
+          description: Response-time series
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResponseTimeSeries'
+        default:
+          $ref: '#/components/responses/Problem'
+
+components:
+  parameters:
+    IdPath:
+      name: id
+      in: path
+      required: true
+      description: Resource identifier
+      schema:
+        type: string
+    LimitQuery:
+      name: limit
+      in: query
+      description: Maximum number of items to return
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 50
+    OffsetQuery:
+      name: offset
+      in: query
+      description: Number of items to skip
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+
+  responses:
+    Problem:
+      description: Error response (RFC 7807)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Resource not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+
+  schemas:
+    # ─────────────── Errors ───────────────
+
+    Problem:
+      type: object
+      description: RFC 7807 problem details
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: A URI reference that identifies the problem type
+          default: about:blank
+        title:
+          type: string
+          description: A short, human-readable summary of the problem
+        status:
+          type: integer
+          description: The HTTP status code
+          minimum: 100
+          maximum: 599
+        detail:
+          type: string
+          description: A human-readable explanation specific to this occurrence
+        instance:
+          type: string
+          format: uri
+          description: A URI that identifies the specific occurrence
+
+    # ─────────────── Pagination ───────────────
+
+    PageMeta:
+      type: object
+      required: [total, limit, offset]
+      properties:
+        total:
+          type: integer
+          description: Total number of matching items
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+        offset:
+          type: integer
+          minimum: 0
+
+    # ─────────────── Dashboard ───────────────
+
+    DashboardKpis:
+      type: object
+      required: [peers, subscribers, templates, scenarios, activeRuns]
+      properties:
+        peers:
+          type: object
+          required: [connected, total]
+          properties:
+            connected:
+              type: integer
+              minimum: 0
+            total:
+              type: integer
+              minimum: 0
+        subscribers:
+          type: integer
+          minimum: 0
+          description: Total registered subscribers
+        templates:
+          type: integer
+          minimum: 0
+          description: Total AVP templates
+        scenarios:
+          type: integer
+          minimum: 0
+          description: Total defined scenarios
+        activeRuns:
+          type: integer
+          minimum: 0
+          description: Number of executions currently in progress
+
+    # ─────────────── Peers ───────────────
+
+    PeerStatus:
+      type: string
+      enum: [connected, connecting, disconnected, error]
+
+    Peer:
+      type: object
+      required: [id, name, endpoint, originHost, status]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        endpoint:
+          type: string
+          description: Host:port of the peer
+          examples: ['10.0.1.5:3868']
+        originHost:
+          type: string
+          description: Diameter Origin-Host identity
+          examples: ['ctf-01.test.local']
+        status:
+          $ref: '#/components/schemas/PeerStatus'
+        statusDetail:
+          type: string
+          description: Optional human-readable status detail (e.g. 'CER/CEA timeout')
+        lastChangeAt:
+          type: string
+          format: date-time
+          description: Timestamp of the most recent status change
+
+    # ─────────────── Subscribers ───────────────
+
+    Subscriber:
+      type: object
+      required: [id, msisdn]
+      properties:
+        id:
+          type: string
+        msisdn:
+          type: string
+          description: Subscriber MSISDN
+        imsi:
+          type: string
+        imei:
+          type: string
+        notes:
+          type: string
+
+    SubscriberPage:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Subscriber'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+
+    # ─────────────── Templates ───────────────
+
+    TemplateSummary:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        avpCount:
+          type: integer
+          minimum: 0
+          description: Number of AVPs defined on this template
+        updatedAt:
+          type: string
+          format: date-time
+
+    # ─────────────── Scenarios ───────────────
+
+    ScenarioSummary:
+      type: object
+      required: [id, name, stepCount]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        stepCount:
+          type: integer
+          minimum: 0
+        updatedAt:
+          type: string
+          format: date-time
+
+    # ─────────────── Executions ───────────────
+
+    ExecutionMode:
+      type: string
+      enum: [interactive, continuous]
+
+    ExecutionResult:
+      type: string
+      enum: [running, success, failure]
+
+    ExecutionSummary:
+      type: object
+      required: [id, scenarioName, mode, peerId, result, startedAt]
+      properties:
+        id:
+          type: string
+        scenarioName:
+          type: string
+          description: Name of the scenario at execution time
+        mode:
+          $ref: '#/components/schemas/ExecutionMode'
+        peerId:
+          type: string
+          description: Peer used for this execution
+        peerName:
+          type: string
+          description: Peer display name at execution time (denormalised)
+        result:
+          $ref: '#/components/schemas/ExecutionResult'
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+          description: Present only when the execution has completed
+
+    ExecutionPage:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExecutionSummary'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+
+    # ─────────────── Metrics ───────────────
+
+    ResponseTimePoint:
+      type: object
+      required: [t, p50, p95, p99]
+      properties:
+        t:
+          type: string
+          format: date-time
+          description: Bucket timestamp (end of bucket)
+        p50:
+          type: number
+          description: 50th percentile response time in milliseconds
+          minimum: 0
+        p95:
+          type: number
+          minimum: 0
+        p99:
+          type: number
+          minimum: 0
+
+    ResponseTimeSeries:
+      type: object
+      required: [window, points]
+      properties:
+        window:
+          type: string
+          description: The window that was returned, as ISO 8601 duration
+          examples: [PT1H]
+        bucketSize:
+          type: string
+          description: Size of each bucket, as ISO 8601 duration
+          examples: [PT2M]
+        points:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResponseTimePoint'

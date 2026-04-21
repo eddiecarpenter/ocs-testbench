@@ -1,6 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+
+import { executionFixtures } from '../../mocks/data/executions';
 import { RecentExecutionsCard } from './RecentExecutionsCard';
-import { mockExecutions } from '../../mock/dashboard';
+
+const recent = executionFixtures.slice(0, 5);
 
 const meta = {
   title: 'Dashboard/RecentExecutionsCard',
@@ -14,12 +17,12 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
-  args: { executions: mockExecutions },
+  args: { executions: recent },
 };
 
 export const AllSuccess: Story = {
   args: {
-    executions: mockExecutions.map((e) => ({ ...e, result: 'success' as const })),
+    executions: recent.map((e) => ({ ...e, result: 'success' as const })),
   },
 };
 

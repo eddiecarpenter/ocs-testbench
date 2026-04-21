@@ -1,8 +1,9 @@
 import { Card, Group, Stack, Text, Title } from '@mantine/core';
-import type { PeerStatus, PeerSummary } from '../../types/dashboard';
+
+import type { Peer, PeerStatus } from '../../api/resources/peers';
 
 interface PeerStatusCardProps {
-  peers: PeerSummary[];
+  peers: Peer[];
 }
 
 const statusColor: Record<PeerStatus, string> = {
@@ -15,7 +16,7 @@ const statusColor: Record<PeerStatus, string> = {
 const statusLabel: Record<PeerStatus, string> = {
   connected: 'connected',
   disconnected: 'disconnected',
-  error: 'CER/CEA timeout',
+  error: 'error',
   connecting: 'connecting',
 };
 
@@ -43,7 +44,12 @@ export function PeerStatusCard({ peers }: PeerStatusCardProps) {
         </Title>
         <Stack gap="sm">
           {peers.map((peer) => (
-            <Group key={peer.id} justify="space-between" align="center" wrap="nowrap">
+            <Group
+              key={peer.id}
+              justify="space-between"
+              align="center"
+              wrap="nowrap"
+            >
               <Group gap="sm" wrap="nowrap">
                 <StatusDot status={peer.status} />
                 <Stack gap={0}>
@@ -51,12 +57,12 @@ export function PeerStatusCard({ peers }: PeerStatusCardProps) {
                     {peer.name}
                   </Text>
                   <Text size="xs" c="dimmed">
-                    {peer.detail}
+                    {peer.endpoint} · {peer.originHost}
                   </Text>
                 </Stack>
               </Group>
               <Text size="sm" c="dimmed">
-                {statusLabel[peer.status]}
+                {peer.statusDetail ?? statusLabel[peer.status]}
               </Text>
             </Group>
           ))}
