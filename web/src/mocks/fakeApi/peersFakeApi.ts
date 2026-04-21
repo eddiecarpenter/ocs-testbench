@@ -206,7 +206,7 @@ mock
   .onPost(/\/peers\/[^/]+\/connect$/)
   // Held long enough that the `connecting` transient is visibly on screen
   // — a few hundred ms flickers past too fast to read.
-  .withDelayInMs(1500)
+  .withDelayInMs(10_000)
   .reply((config) => {
     const m = /\/peers\/([^/]+)\/connect$/.exec(config.url ?? '');
     const id = m ? decodeURIComponent(m[1]) : '';
@@ -238,7 +238,7 @@ mock
 // Disconnect — explicit disconnect. Supervision does not auto-reconnect.
 mock
   .onPost(/\/peers\/[^/]+\/disconnect$/)
-  .withDelayInMs(1200)
+  .withDelayInMs(10_000)
   .reply((config) => {
     const m = /\/peers\/([^/]+)\/disconnect$/.exec(config.url ?? '');
     const id = m ? decodeURIComponent(m[1]) : '';

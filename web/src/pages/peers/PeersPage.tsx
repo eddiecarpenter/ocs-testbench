@@ -664,37 +664,45 @@ function PeerLifecyclePrompt({
 }) {
   const connect = useConnectPeer();
   const restart = useRestartPeer();
-  const pending = connect.isPending || restart.isPending;
 
-  const handleConfirm = async () => {
+  // Close the dialog the moment the user confirms, then let the mutation
+  // settle in the background. The optimistic status patch already gives
+  // live feedback in the row; holding the modal open for 10+ seconds
+  // while the transport handshakes blocks the user for no reason.
+  const handleConfirm = () => {
     if (!prompt) return;
     const { peer, kind } = prompt;
-    try {
-      const result =
-        kind === 'updated-live'
-          ? await restart.mutateAsync(peer.id)
-          : await connect.mutateAsync(peer.id);
-      notifications.show({
-        color: result.status === 'error' ? 'red' : 'teal',
-        title:
-          result.status === 'error'
-            ? kind === 'updated-live'
-              ? 'Restart failed'
-              : 'Connect failed'
-            : kind === 'updated-live'
-              ? 'Peer restarted'
-              : 'Peer connected',
-        message: result.statusDetail ?? `${result.name} is ${result.status}.`,
-      });
-      onClose();
-    } catch (err) {
-      notifications.show({
-        color: 'red',
-        title: kind === 'updated-live' ? 'Restart failed' : 'Connect failed',
-        message: err instanceof Error ? err.message : 'Unexpected error',
-      });
-      onClose();
-    }
+    const isRestart = kind === 'updated-live';
+    onClose();
+
+    const promise = isRestart
+      ? restart.mutateAsync(peer.id)
+      : connect.mutateAsync(peer.id);
+
+    promise.then(
+      (result) => {
+        notifications.show({
+          color: result.status === 'error' ? 'red' : 'teal',
+          title:
+            result.status === 'error'
+              ? isRestart
+                ? 'Restart failed'
+                : 'Connect failed'
+              : isRestart
+                ? 'Peer restarted'
+                : 'Peer connected',
+          message:
+            result.statusDetail ?? `${result.name} is ${result.status}.`,
+        });
+      },
+      (err: unknown) => {
+        notifications.show({
+          color: 'red',
+          title: isRestart ? 'Restart failed' : 'Connect failed',
+          message: err instanceof Error ? err.message : 'Unexpected error',
+        });
+      },
+    );
   };
 
   const copy = prompt ? promptCopy(prompt) : undefined;
@@ -705,16 +713,14 @@ function PeerLifecyclePrompt({
       onClose={onClose}
       title={copy?.title ?? ''}
       centered
-      closeOnClickOutside={!pending}
-      closeOnEscape={!pending}
     >
       <Stack gap="md">
         <Text size="sm">{copy?.body}</Text>
         <Group justify="flex-end">
-          <Button variant="subtle" onClick={onClose} disabled={pending}>
+          <Button variant="subtle" onClick={onClose}>
             {copy?.cancelLabel ?? 'Cancel'}
           </Button>
-          <Button loading={pending} onClick={handleConfirm}>
+          <Button onClick={handleConfirm}>
             {copy?.confirmLabel ?? 'Confirm'}
           </Button>
         </Group>
