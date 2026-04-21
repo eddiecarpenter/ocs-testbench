@@ -249,11 +249,13 @@ export function PeerForm({
           <Group justify="space-between" align="flex-start" wrap="nowrap">
             <Stack gap={2}>
               <Text size="sm" fw={500}>
-                Auto-connect on startup
+                Auto-start on server boot
               </Text>
               <Text size="xs" c="dimmed">
-                Connect this peer automatically when the server starts. Does
-                not connect the peer now — use the Connect action for that.
+                Start this peer automatically when the server boots. Has no
+                effect on the current status — a peer with this flag on can
+                still be Stopped by the operator, and this setting won&apos;t
+                start it now. Use the Start action for that.
               </Text>
             </Stack>
             <Switch

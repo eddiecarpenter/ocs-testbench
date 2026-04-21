@@ -1,6 +1,6 @@
 import type { Peer } from '../../api/resources/peers';
 
-/** 5 peers, 3 connected, 1 disconnected, 1 error — matches dashboard KPIs. */
+/** 5 peers: 3 connected, 1 stopped (admin down), 1 error — matches dashboard KPIs. */
 export const peerFixtures: Peer[] = [
   {
     id: 'peer-01',
@@ -25,8 +25,8 @@ export const peerFixtures: Peer[] = [
     transport: 'TCP',
     watchdogIntervalSeconds: 30,
     autoConnect: false,
-    status: 'disconnected',
-    statusDetail: 'Administratively disabled',
+    status: 'stopped',
+    statusDetail: 'Administratively stopped',
     lastChangeAt: '2026-04-20T17:10:00Z',
   },
   {

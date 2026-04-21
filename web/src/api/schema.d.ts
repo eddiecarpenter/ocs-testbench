@@ -129,7 +129,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/peers/{id}/connect": {
+    "/peers/{id}/start": {
         parameters: {
             query?: never;
             header?: never;
@@ -142,20 +142,23 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Initiate a connection to this peer
-         * @description Triggers a CER/CEA exchange and moves the peer towards `connected`.
-         *     Returns the updated `Peer` immediately — the status may still be
-         *     `connecting` when the response is returned; clients should react
-         *     to subsequent `peer.updated` SSE events for the final outcome.
+         * Start this peer (enable supervision + connect)
+         * @description Enables the supervision loop for this peer and triggers a CER/CEA
+         *     exchange. Moves the peer from `stopped` through `connecting` to
+         *     `connected` (or `error` / `disconnected` with ongoing retries if
+         *     the handshake fails). Returns the updated `Peer` immediately —
+         *     the status may still be `connecting` when the response is
+         *     returned; clients should react to subsequent `peer.updated` SSE
+         *     events for the final outcome.
          */
-        post: operations["connectPeer"];
+        post: operations["startPeer"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/peers/{id}/disconnect": {
+    "/peers/{id}/stop": {
         parameters: {
             query?: never;
             header?: never;
@@ -168,13 +171,15 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Disconnect this peer
-         * @description Closes the Diameter transport. If `autoConnect` is true, the peer
-         *     will **not** be automatically reconnected — supervision only fires
-         *     at server startup. Use `POST /peers/{id}/connect` to reopen the
-         *     link explicitly.
+         * Stop this peer (disable supervision + disconnect)
+         * @description Administratively stops this peer: disables the supervision loop
+         *     and closes the Diameter transport. The peer transitions to
+         *     `stopped` and will not retry. This is distinct from the
+         *     transport-level `disconnected` state (where supervision is still
+         *     active and will redial on its own). Use `POST /peers/{id}/start`
+         *     to resume.
          */
-        post: operations["disconnectPeer"];
+        post: operations["stopPeer"];
         delete?: never;
         options?: never;
         head?: never;
@@ -414,8 +419,29 @@ export interface components {
             /** @description Number of executions currently in progress */
             activeRuns: number;
         };
-        /** @enum {string} */
-        PeerStatus: "connected" | "connecting" | "disconnected" | "disconnecting" | "restarting" | "error";
+        /**
+         * @description Current runtime state of a peer.
+         *
+         *     - `stopped`       — Administratively down. Supervision is off; no
+         *                         reconnect attempts will be made. This is the
+         *                         default state for a freshly created peer.
+         *     - `disconnected`  — Supervision is on but the transport is down.
+         *                         The server will redial automatically.
+         *     - `connecting`    — CER/CEA exchange in progress.
+         *     - `connected`     — Session established.
+         *     - `disconnecting` — Graceful teardown in progress (admin-initiated).
+         *     - `restarting`    — Admin-initiated stop followed by start so a
+         *                         config change can take effect.
+         *     - `error`         — Supervision is on but the peer is in a
+         *                         persistent failure state (exponential backoff).
+         *
+         *     The distinction between `stopped` and `disconnected` is
+         *     deliberate: the former means "admin does not want this up"; the
+         *     latter means "admin wants this up but the transport is
+         *     currently down".
+         * @enum {string}
+         */
+        PeerStatus: "stopped" | "disconnected" | "connecting" | "connected" | "disconnecting" | "restarting" | "error";
         /**
          * @description Transport protocol used for the Diameter connection.
          * @enum {string}
@@ -451,10 +477,15 @@ export interface components {
              */
             watchdogIntervalSeconds: number;
             /**
-             * @description If true, the server attempts to connect this peer at server
-             *     startup. Does **not** trigger a connection when the peer is
-             *     created or updated mid-run — those require an explicit
-             *     `POST /peers/{id}/connect`.
+             * @description Pure server-boot flag. When the server starts, peers with
+             *     `autoConnect: true` are automatically started (equivalent to
+             *     `POST /peers/{id}/start`); peers with `autoConnect: false`
+             *     remain `stopped` until the operator starts them.
+             *
+             *     This flag has **no bearing on current status**. A peer can
+             *     be `autoConnect: true` and `stopped` (the operator stopped
+             *     it after boot), or `autoConnect: false` and `connected`
+             *     (started manually during this run).
              * @default true
              */
             autoConnect: boolean;
@@ -890,7 +921,7 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
-    connectPeer: {
+    startPeer: {
         parameters: {
             query?: never;
             header?: never;
@@ -902,7 +933,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Connection attempt started */
+            /** @description Peer started */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -915,7 +946,7 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
-    disconnectPeer: {
+    stopPeer: {
         parameters: {
             query?: never;
             header?: never;
@@ -927,7 +958,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Peer disconnected */
+            /** @description Peer stopped */
             200: {
                 headers: {
                     [name: string]: unknown;

@@ -48,11 +48,11 @@ export const deletePeer = (id: string) =>
 export const testPeerConfig = (input: PeerInput) =>
   ApiService.post<PeerTestResult, PeerInput>('/peers/test', input);
 
-export const connectPeer = (id: string) =>
-  ApiService.post<Peer>(`/peers/${encodeURIComponent(id)}/connect`);
+export const startPeer = (id: string) =>
+  ApiService.post<Peer>(`/peers/${encodeURIComponent(id)}/start`);
 
-export const disconnectPeer = (id: string) =>
-  ApiService.post<Peer>(`/peers/${encodeURIComponent(id)}/disconnect`);
+export const stopPeer = (id: string) =>
+  ApiService.post<Peer>(`/peers/${encodeURIComponent(id)}/stop`);
 
 /**
  * Create a new peer. On success, invalidates the list so the new row
@@ -103,7 +103,7 @@ export function useTestPeerConfig() {
 }
 
 /**
- * Shared cache patcher for connect/disconnect — writes the returned peer into
+ * Shared cache patcher for start/stop — writes the returned peer into
  * the detail cache and patches the list row in place so the UI reflects the
  * new status without a refetch. SSE reconciles anything we missed.
  */
@@ -139,14 +139,15 @@ function optimisticStatusPatch(
 }
 
 /**
- * Explicitly connect a peer. Independent of `autoConnect`, which governs
- * server-startup behaviour only. Optimistically flips status to
- * `connecting` so the UI shows immediate feedback; rolls back on error.
+ * Explicitly start a peer (enable supervision + connect). Independent of
+ * `autoConnect`, which governs server-startup behaviour only.
+ * Optimistically flips status to `connecting` so the UI shows immediate
+ * feedback; rolls back on error.
  */
-export function useConnectPeer() {
+export function useStartPeer() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => connectPeer(id),
+    mutationFn: (id: string) => startPeer(id),
     onMutate: (id) => ({
       prev: optimisticStatusPatch(qc, id, 'connecting'),
       id,
@@ -159,14 +160,16 @@ export function useConnectPeer() {
 }
 
 /**
- * Explicitly disconnect a peer. Supervision does not auto-reconnect.
- * Optimistically flips status to `disconnected` with a "Disconnecting…"
- * detail so the transition is visible while the request is in flight.
+ * Explicitly stop a peer (disable supervision + disconnect). The peer
+ * settles to `stopped` — distinct from `disconnected`, which implies
+ * supervision is still trying to reconnect. Optimistically flips status
+ * to `disconnecting` so the transition is visible while the request is
+ * in flight.
  */
-export function useDisconnectPeer() {
+export function useStopPeer() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => disconnectPeer(id),
+    mutationFn: (id: string) => stopPeer(id),
     onMutate: (id) => ({
       prev: optimisticStatusPatch(qc, id, 'disconnecting'),
       id,
@@ -179,7 +182,7 @@ export function useDisconnectPeer() {
 }
 
 /**
- * Restart a peer by disconnecting then reconnecting. The transient state
+ * Restart a peer by stopping then starting. The transient state
  * is a single `restarting` status rather than the two-phase
  * `disconnecting` → `connecting` sequence you'd see from calling the
  * individual actions — the user asked for one, simpler transition.
@@ -188,8 +191,8 @@ export function useRestartPeer() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      await disconnectPeer(id);
-      return connectPeer(id);
+      await stopPeer(id);
+      return startPeer(id);
     },
     onMutate: (id) => ({
       prev: optimisticStatusPatch(qc, id, 'restarting'),

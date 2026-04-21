@@ -78,7 +78,7 @@ function applyInput(base: Partial<Peer>, input: PeerInput): Peer {
     transport: input.transport,
     watchdogIntervalSeconds: input.watchdogIntervalSeconds,
     autoConnect: input.autoConnect,
-    status: base.status ?? 'disconnected',
+    status: base.status ?? 'stopped',
     statusDetail: base.statusDetail,
     lastChangeAt: new Date().toISOString(),
   };
@@ -126,7 +126,11 @@ mock
     }
 
     const id = `peer-${String(peers.length + 1).padStart(2, '0')}`;
-    const created = applyInput({ id, status: 'disconnected' }, input!);
+    // Newly created peers are always `stopped` (admin down). The
+    // post-create lifecycle toast is where the operator chooses whether
+    // to start it now. `autoConnect` is a pure server-boot flag and has
+    // no bearing on the status of a just-created peer at runtime.
+    const created = applyInput({ id, status: 'stopped' }, input!);
     peers.push(created);
     return [201, created];
   });
@@ -199,16 +203,17 @@ mock
     return [200, updated];
   });
 
-// Connect — move peer to `connected` (with a brief `connecting` stop). The
-// second SSE-style flip would normally come from the server's transport
-// supervisor; the mock just returns the settled state for simplicity.
+// Start — enables supervision and moves peer to `connected` (with a brief
+// `connecting` transient). The second SSE-style flip would normally come
+// from the server's transport supervisor; the mock just returns the
+// settled state for simplicity.
 mock
-  .onPost(/\/peers\/[^/]+\/connect$/)
+  .onPost(/\/peers\/[^/]+\/start$/)
   // Held long enough that the `connecting` transient is visibly on screen
   // — a few hundred ms flickers past too fast to read.
   .withDelayInMs(10_000)
   .reply((config) => {
-    const m = /\/peers\/([^/]+)\/connect$/.exec(config.url ?? '');
+    const m = /\/peers\/([^/]+)\/start$/.exec(config.url ?? '');
     const id = m ? decodeURIComponent(m[1]) : '';
     const peer = peers.find((p) => p.id === id);
     if (!peer) {
@@ -235,12 +240,13 @@ mock
     return [200, peer];
   });
 
-// Disconnect — explicit disconnect. Supervision does not auto-reconnect.
+// Stop — explicit admin stop. Disables supervision; peer will not
+// auto-reconnect and settles to `stopped` (not `disconnected`).
 mock
-  .onPost(/\/peers\/[^/]+\/disconnect$/)
+  .onPost(/\/peers\/[^/]+\/stop$/)
   .withDelayInMs(10_000)
   .reply((config) => {
-    const m = /\/peers\/([^/]+)\/disconnect$/.exec(config.url ?? '');
+    const m = /\/peers\/([^/]+)\/stop$/.exec(config.url ?? '');
     const id = m ? decodeURIComponent(m[1]) : '';
     const peer = peers.find((p) => p.id === id);
     if (!peer) {
@@ -254,8 +260,8 @@ mock
         },
       ];
     }
-    peer.status = 'disconnected';
-    peer.statusDetail = 'Administratively disconnected';
+    peer.status = 'stopped';
+    peer.statusDetail = 'Administratively stopped';
     peer.lastChangeAt = new Date().toISOString();
     return [200, peer];
   });
