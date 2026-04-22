@@ -25,7 +25,7 @@ of truth for the HTTP contract between:
 
 ## Conventions
 
-- **Base path:** `/api/v1/...`. Breaking changes bump to `v2`.
+- **Base path:** `/api/v1/...`. The path version is incremented only for breaking contract changes.
 - **JSON case:** `camelCase` in requests and responses.
 - **Timestamps:** ISO 8601 UTC, e.g. `2026-04-21T12:00:00Z`. The frontend
   formats relative times ("12s ago") for display.
@@ -33,7 +33,7 @@ of truth for the HTTP contract between:
 - **Errors:** RFC 7807 `application/problem+json` on all non-2xx responses.
 - **Pagination:** envelope with `items` + `page` (`total`, `limit`, `offset`).
   Collection endpoints that grow unbounded use pagination; small fixed sets
-  (peers, templates, scenarios) return a plain array.
+  (peers, subscribers, scenarios) return a plain array.
 - **IDs:** strings everywhere. Avoids JS number-precision issues, lets the
   backend choose UUID / ulid / integer later without breaking the wire format.
 

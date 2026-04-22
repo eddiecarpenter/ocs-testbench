@@ -69,10 +69,10 @@ Four persistent resources, one enum, one variable system.
 - **Executions** are runtime records of a scenario running against a specific
   subscriber+peer binding. They carry live mutable context during runs.
 
-There is **no separate Template or Placeholder resource**. A scenario is fully
-self-contained — it owns its CCR envelope, its MSCC catalogue, its variables,
-and its step list. Starter scenarios serve the role templates used to serve:
-as curated starting points the user duplicates and edits.
+A scenario is the sole authoring unit. It is fully self-contained — it owns
+its CCR envelope, its MSCC catalogue, its variables, and its step list.
+Starter scenarios are curated starting points the user duplicates and edits;
+no other authoring resource exists.
 
 ### Unit type
 
@@ -687,16 +687,16 @@ Both paths edit variables; they differ only in scope.
 
 ### 4. Scenarios are self-contained
 
-A scenario owns its AVP tree, its MSCC catalogue, its variables, its step
-list. It does not reference a template or a placeholder catalogue. Users
-create scenarios by duplicating (from a system starter, another user
-scenario, or blank). After duplication there is no live dependency on the
-source.
+A scenario owns its AVP tree, its MSCC catalogue, its variables, and its
+step list. Users create scenarios by duplicating (from a system starter,
+another user scenario, or blank). After duplication there is no live
+dependency on the source.
 
-This removes entire classes of issues — template edits silently breaking
-scenarios, placeholder catalogue rename cascades, version drift warnings.
-The cost is that improvements to starter scenarios don't auto-propagate to
-duplicates; that is a deliberate trade.
+The benefit is a single authoring surface with no cross-resource cascades:
+editing a scenario cannot silently break unrelated scenarios, and there is
+no catalogue rename or version-drift machinery to maintain. The cost is
+that improvements to starter scenarios don't auto-propagate to duplicates;
+that is a deliberate trade.
 
 ---
 
