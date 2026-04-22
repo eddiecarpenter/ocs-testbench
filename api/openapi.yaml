@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: OCS Testbench API
-  version: 0.1.0
+  version: 0.2.0
   description: |
     REST API for the OCS Testbench UI and external clients.
 
@@ -10,9 +10,13 @@ info:
     Generated TypeScript types live at `web/src/api/schema.d.ts` — regenerate
     after any change to this file.
 
-    Real-time server → client events (peer status changes, session state,
-    execution progress) are delivered via a separate SSE endpoint
-    (specified elsewhere, see `docs/ARCHITECTURE.md §9`).
+    See `docs/ARCHITECTURE.md` for behavioural semantics (state machines,
+    invariants, variable resolution rules). This document is the wire
+    contract; it does not restate the semantics.
+
+    Real-time server → client events (peer status changes, execution
+    progress, pause / resume transitions) are delivered via the SSE
+    endpoint at `GET /events`.
 
 servers:
   - url: /api/v1
@@ -25,12 +29,10 @@ tags:
     description: Diameter peer configuration and live status
   - name: Subscribers
     description: Subscriber identities used in test scenarios
-  - name: Templates
-    description: AVP templates
   - name: Scenarios
-    description: Test scenario definitions
+    description: Scenario definitions (CCR envelope, services, variables, steps)
   - name: Executions
-    description: Past and in-progress scenario executions
+    description: Scenario executions — start, control, inspect
   - name: Metrics
     description: Time-series telemetry
   - name: Events
@@ -39,15 +41,13 @@ tags:
     description: Self-describing API — the spec and browsable docs
 
 paths:
+  # ─────────────── Self-describing API ───────────────
+
   /openapi.yaml:
     get:
       tags: [Docs]
       operationId: getOpenApiYaml
       summary: This OpenAPI spec, served as YAML
-      description: |
-        Returns the spec the running server was built against. Useful for
-        clients that want to introspect the live contract (Postman,
-        contract-diff checks in CI, etc.).
       responses:
         '200':
           description: OpenAPI 3.1 document (YAML)
@@ -55,7 +55,6 @@ paths:
             application/yaml:
               schema:
                 type: string
-                description: Raw YAML document
         default:
           $ref: '#/components/responses/Problem'
 
@@ -64,8 +63,6 @@ paths:
       tags: [Docs]
       operationId: getOpenApiJson
       summary: This OpenAPI spec, served as JSON
-      description: |
-        JSON-converted copy of `/openapi.yaml` for tools that only speak JSON.
       responses:
         '200':
           description: OpenAPI 3.1 document (JSON)
@@ -73,7 +70,6 @@ paths:
             application/json:
               schema:
                 type: object
-                description: OpenAPI 3.1 document
                 additionalProperties: true
         default:
           $ref: '#/components/responses/Problem'
@@ -83,9 +79,6 @@ paths:
       tags: [Docs]
       operationId: getApiDocs
       summary: Browsable API reference (Redoc / Swagger UI)
-      description: |
-        HTML page that renders `/openapi.yaml` using Redoc (or Swagger UI).
-        Intended for humans — point a browser at it.
       responses:
         '200':
           description: HTML documentation page
@@ -93,6 +86,8 @@ paths:
             text/html:
               schema:
                 type: string
+
+  # ─────────────── Dashboard ───────────────
 
   /dashboard/kpis:
     get:
@@ -108,6 +103,8 @@ paths:
                 $ref: '#/components/schemas/DashboardKpis'
         default:
           $ref: '#/components/responses/Problem'
+
+  # ─────────────── Peers ───────────────
 
   /peers:
     get:
@@ -211,14 +208,6 @@ paths:
       tags: [Peers]
       operationId: startPeer
       summary: Start this peer (enable supervision + connect)
-      description: |
-        Enables the supervision loop for this peer and triggers a CER/CEA
-        exchange. Moves the peer from `stopped` through `connecting` to
-        `connected` (or `error` / `disconnected` with ongoing retries if
-        the handshake fails). Returns the updated `Peer` immediately —
-        the status may still be `connecting` when the response is
-        returned; clients should react to subsequent `peer.updated` SSE
-        events for the final outcome.
       responses:
         '200':
           description: Peer started
@@ -238,13 +227,6 @@ paths:
       tags: [Peers]
       operationId: stopPeer
       summary: Stop this peer (disable supervision + disconnect)
-      description: |
-        Administratively stops this peer: disables the supervision loop
-        and closes the Diameter transport. The peer transitions to
-        `stopped` and will not retry. This is distinct from the
-        transport-level `disconnected` state (where supervision is still
-        active and will redial on its own). Use `POST /peers/{id}/start`
-        to resume.
       responses:
         '200':
           description: Peer stopped
@@ -263,11 +245,9 @@ paths:
       operationId: testPeerConfig
       summary: Dry-run a CER/CEA probe against a candidate peer config
       description: |
-        Performs a synchronous capability exchange probe using the
-        `PeerInput` in the request body. The probe does **not** read from
-        or write to persistent state — it is intentionally stateless so
-        the UI can validate configuration changes before they are saved
-        (including for brand-new peers that have no id yet).
+        Stateless synchronous capability exchange against the `PeerInput` in
+        the body. Neither reads nor writes persistent state — valid for
+        brand-new peers that have no id yet.
       requestBody:
         required: true
         content:
@@ -286,15 +266,17 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
+  # ─────────────── Subscribers ───────────────
+
   /subscribers:
     get:
       tags: [Subscribers]
       operationId: listSubscribers
       summary: List subscribers
       description: |
-        Returns every configured subscriber. The testbench is expected to
-        hold at most a few thousand subscribers so the list is returned
-        unpaginated — the UI does client-side search/filter.
+        Returns every configured subscriber unpaginated — the testbench is
+        expected to hold at most a few thousand subscribers and the UI does
+        client-side search/filter.
       responses:
         '200':
           description: Subscriber list
@@ -387,22 +369,9 @@ paths:
       operationId: listTacCatalog
       summary: Curated TAC (Type Allocation Code) catalogue
       description: |
-        Returns the curated list of device manufacturer/model combinations
-        supported by this testbench, each with its 8-digit TAC prefix.
-        The catalogue covers roughly the last 10 years of popular handsets
-        across major OEMs — it is intentionally a small curated set rather
-        than the full GSMA TAC database.
-
-        The UI uses this to:
-        - populate cascading Manufacturer → Model selects on the
-          subscriber edit drawer
-        - derive the TAC prefix used when generating an IMEI
-        - display the canonical "Device" label on the subscribers list
-          (e.g. `iPhone 14 Pro` is reconstructed from the `tac` on a
-          `Subscriber` by looking it up here)
-
-        Returned items are immutable on the server side and may be cached
-        aggressively by clients (`ETag` / `Cache-Control: public`).
+        Immutable server-side catalogue of manufacturer/model combinations
+        with their 8-digit TAC prefix. Used to populate Manufacturer → Model
+        cascading selects and derive IMEI generation. Cache aggressively.
       responses:
         '200':
           description: TAC catalogue
@@ -415,28 +384,37 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
-  /templates:
-    get:
-      tags: [Templates]
-      operationId: listTemplates
-      summary: List AVP templates
-      responses:
-        '200':
-          description: Template list
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/TemplateSummary'
-        default:
-          $ref: '#/components/responses/Problem'
+  # ─────────────── Scenarios ───────────────
 
   /scenarios:
     get:
       tags: [Scenarios]
       operationId: listScenarios
-      summary: List scenarios
+      summary: List scenarios (system starters + user scenarios)
+      description: |
+        Returns both system starters (`origin: "system"`, immutable) and
+        user scenarios (`origin: "user"`). UI groups by `unitType` in the
+        list view (OCTET / TIME / UNITS). Client-side filtering expected;
+        no server-side pagination.
+      parameters:
+        - name: origin
+          in: query
+          description: Filter by origin
+          required: false
+          schema:
+            $ref: '#/components/schemas/ScenarioOrigin'
+        - name: unitType
+          in: query
+          description: Filter by unit type
+          required: false
+          schema:
+            $ref: '#/components/schemas/UnitType'
+        - name: peerId
+          in: query
+          description: Filter by bound peer
+          required: false
+          schema:
+            type: string
       responses:
         '200':
           description: Scenario list
@@ -448,6 +426,136 @@ paths:
                   $ref: '#/components/schemas/ScenarioSummary'
         default:
           $ref: '#/components/responses/Problem'
+    post:
+      tags: [Scenarios]
+      operationId: createScenario
+      summary: Create a new scenario from scratch
+      description: |
+        Creates a user scenario. Most users will reach for
+        `POST /scenarios/{id}/duplicate` instead to start from a system
+        starter; this endpoint is for advanced flows that bring their own
+        full scenario body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScenarioInput'
+      responses:
+        '201':
+          description: Scenario created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Scenario'
+        '422':
+          $ref: '#/components/responses/ValidationProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /scenarios/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Scenarios]
+      operationId: getScenario
+      summary: Get a single scenario by id
+      responses:
+        '200':
+          description: Scenario detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Scenario'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      tags: [Scenarios]
+      operationId: updateScenario
+      summary: Replace a scenario
+      description: |
+        Full replacement. System starters (`origin: "system"`) are
+        immutable and return `409 Conflict` on write — duplicate first.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScenarioInput'
+      responses:
+        '200':
+          description: Scenario updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Scenario'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Scenario is a system starter and cannot be modified
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          $ref: '#/components/responses/ValidationProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      tags: [Scenarios]
+      operationId: deleteScenario
+      summary: Delete a scenario
+      description: |
+        User scenarios only. System starters cannot be deleted (returns
+        `409 Conflict`).
+      responses:
+        '204':
+          description: Scenario deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Scenario is a system starter and cannot be deleted
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /scenarios/{id}/duplicate:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [Scenarios]
+      operationId: duplicateScenario
+      summary: Duplicate a scenario into a new user scenario
+      description: |
+        Creates a new scenario with `origin: "user"` carrying a deep copy
+        of the source's AVP tree, services, variables, and steps. There is
+        no lineage tracking — the duplicate is fully independent.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScenarioDuplicateInput'
+      responses:
+        '201':
+          description: Scenario duplicated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Scenario'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  # ─────────────── Executions ───────────────
 
   /executions:
     get:
@@ -455,11 +563,23 @@ paths:
       operationId: listExecutions
       summary: List past and in-progress executions
       parameters:
-        - name: status
+        - name: state
           in: query
-          description: Filter by execution result/status
+          description: Filter by execution state
+          required: false
           schema:
-            $ref: '#/components/schemas/ExecutionResult'
+            $ref: '#/components/schemas/ExecutionState'
+        - name: scenarioId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: batchId
+          in: query
+          description: Group executions started together by a batched Run
+          required: false
+          schema:
+            type: string
         - $ref: '#/components/parameters/LimitQuery'
         - $ref: '#/components/parameters/OffsetQuery'
       responses:
@@ -471,6 +591,47 @@ paths:
                 $ref: '#/components/schemas/ExecutionPage'
         default:
           $ref: '#/components/responses/Problem'
+    post:
+      tags: [Executions]
+      operationId: startExecution
+      summary: Start a scenario — single run or batched
+      description: |
+        Creates one or more executions of a scenario. With defaults
+        (`concurrency: 1`, `repeats: 1`) a single execution is returned in
+        `items`. With higher values the engine spawns `concurrency`
+        parallel workers, each running the scenario `repeats` times; all
+        executions share a common `batchId` and are returned in `items`.
+
+        `mode` controls runtime behaviour:
+        - `interactive` — honours `pause` steps and runtime breakpoints.
+          Typical when a user starts from the Scenario Builder.
+        - `continuous` — ignores pauses and breakpoints; runs straight
+          through. Required for batched runs.
+
+        Optional `overrides` apply to every spawned execution:
+        - `subscriberIds` — pool, round-robin across iterations
+        - `peerId` — overrides the scenario's default peer binding for
+          this run only
+
+        `concurrency` and `repeats` only apply to `continuous` mode and
+        are ignored (rejected with 422) for `interactive` runs.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartExecutionInput'
+      responses:
+        '201':
+          description: Execution(s) started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StartExecutionResult'
+        '422':
+          $ref: '#/components/responses/ValidationProblem'
+        default:
+          $ref: '#/components/responses/Problem'
 
   /executions/{id}:
     parameters:
@@ -480,10 +641,10 @@ paths:
       operationId: getExecution
       summary: Get a single execution with its full step-by-step detail
       description: |
-        Returns the full execution detail including every completed step so
-        far. For running executions this represents a point-in-time
-        snapshot; subsequent state is delivered via the SSE
-        `execution.progress` event which carries the same shape.
+        Returns the full execution detail including every completed step
+        and a live snapshot of the variables map. For running executions
+        this is a point-in-time snapshot; subsequent state is delivered
+        via the SSE `execution.progress` event which carries the same shape.
       responses:
         '200':
           description: Execution detail
@@ -496,38 +657,254 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
+  /executions/{id}/pause:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [Executions]
+      operationId: pauseExecution
+      summary: Request a pause at the next safe point
+      description: |
+        Requests the engine to pause the execution at the next safe point
+        (between steps, or between consume-loop rounds). Returns the
+        current execution; the transition to `paused` is delivered via
+        the SSE `execution.paused` event when it actually happens.
+      responses:
+        '200':
+          description: Pause requested
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Execution'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IllegalStateProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /executions/{id}/resume:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [Executions]
+      operationId: resumeExecution
+      summary: Resume a paused execution
+      description: |
+        Continues normal execution from the paused step. Only valid when
+        the execution is in `paused` state; returns `409` otherwise.
+      responses:
+        '200':
+          description: Execution resumed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Execution'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IllegalStateProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /executions/{id}/step:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [Executions]
+      operationId: stepExecution
+      summary: Advance exactly one step, then pause again
+      description: |
+        Only valid from `paused` state. Executes exactly one scenario step
+        and returns to `paused`. Consume steps advance one round per call.
+      responses:
+        '200':
+          description: Step executed; back in paused state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Execution'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IllegalStateProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /executions/{id}/abort:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [Executions]
+      operationId: abortExecution
+      summary: Abort a running or paused execution
+      description: |
+        Terminates the execution immediately, transitioning it to
+        `aborted`. Sends a best-effort CCR-TERMINATE if the scenario is
+        in `sessionMode: session` and has an active session.
+      responses:
+        '200':
+          description: Execution aborted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Execution'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IllegalStateProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /executions/{id}/context:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [Executions]
+      operationId: applyContextOverride
+      summary: Context override — permanent mutation of live variables
+      description: |
+        Writes the given variable values into the execution's live context
+        map. Affects this send and every subsequent send. Only valid from
+        `paused` state. The server applies the override compatibility
+        matrix (see `docs/ARCHITECTURE.md §5`) and rejects updates to
+        engine-reserved system variables with `422`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContextOverrideInput'
+      responses:
+        '200':
+          description: Overrides applied; returns the updated execution
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Execution'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IllegalStateProblem'
+        '422':
+          $ref: '#/components/responses/ValidationProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /executions/{id}/payload:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [Executions]
+      operationId: applyPayloadOverride
+      summary: Payload override — one-shot values for the next send
+      description: |
+        Writes the given variable values into a one-shot payload override
+        map. These values shadow the live context for the **next send
+        only** and are then discarded. Only valid from `paused` state.
+        Repeated calls overwrite the pending payload override.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayloadOverrideInput'
+      responses:
+        '200':
+          description: Payload override applied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Execution'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IllegalStateProblem'
+        '422':
+          $ref: '#/components/responses/ValidationProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /executions/{id}/breakpoints:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Executions]
+      operationId: listBreakpoints
+      summary: List runtime breakpoints on this execution
+      responses:
+        '200':
+          description: Breakpoint indices
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BreakpointSet'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      tags: [Executions]
+      operationId: setBreakpoints
+      summary: Replace the set of runtime breakpoints
+      description: |
+        Breakpoints are stored on the execution, not the scenario, so they
+        don't pollute the scenario definition. The engine honours them at
+        the start of each step when the execution is in `interactive`
+        mode.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BreakpointSet'
+      responses:
+        '200':
+          description: Breakpoints updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BreakpointSet'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  # ─────────────── Events (SSE) ───────────────
+
   /events:
     get:
       tags: [Events]
       operationId: subscribeEvents
       summary: Server-Sent Events stream of live updates
       description: |
-        Opens a long-lived SSE stream of server → client events. The
-        connection stays open; the server pushes `text/event-stream`
-        records as state changes.
+        Opens a long-lived SSE stream of server → client events.
 
         ### Contract
 
         Every event carries the **full current state** of the resource it
         concerns. Clients can treat each event as a last-write-wins
-        replacement — missed events do not need to be replayed because the
-        next event for the same resource supersedes them. Reconnection is
-        automatic (the browser `EventSource` does this natively); on
-        reconnect the client should invalidate its caches so the next
-        paint reads truth from REST.
+        replacement — missed events do not need to be replayed because
+        the next event for the same resource supersedes them. Reconnection
+        is automatic; on reconnect clients should invalidate their caches
+        so the next paint reads truth from REST.
 
         ### Event types
 
         | `event:` field | Payload schema | Notes |
         |---|---|---|
-        | `peer.updated` | `Peer` | Any status transition, rename, etc. |
-        | `execution.created` | `ExecutionSummary` | A new execution has started. |
-        | `execution.progress` | `Execution` | A running execution advanced. Includes *all* completed steps so far. Terminal events carry `result: success\|failure`. |
+        | `peer.updated` | `Peer` | Any status transition, config change. |
         | `dashboard.kpi` | `DashboardKpis` | Aggregate counters changed. |
+        | `execution.created` | `ExecutionSummary` | A new execution has started. |
+        | `execution.progress` | `Execution` | A running execution advanced. Includes all completed steps so far. |
+        | `execution.paused` | `ExecutionPaused` | Execution entered `paused` state (pause step, breakpoint, or user). |
+        | `execution.resumed` | `ExecutionResumed` | Execution left `paused` state. |
+        | `execution.completed` | `Execution` | Execution reached a terminal state (`success` / `failure` / `aborted` / `error`). |
 
-        OpenAPI does not model SSE richly, so this operation documents the
-        connection point only; per-event payload shapes are the referenced
-        component schemas above.
+        OpenAPI does not model SSE richly; this operation documents the
+        connection point only.
       responses:
         '200':
           description: Event stream opened
@@ -537,6 +914,13 @@ paths:
                 type: string
                 description: |
                   SSE stream. Each record is `event: <type>\ndata: <json>\n\n`.
+                  See `application/json` below for the JSON shapes carried
+                  in `data:`.
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SseEventPayload'
+
+  # ─────────────── Metrics ───────────────
 
   /metrics/response-time:
     get:
@@ -612,6 +996,15 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
+    IllegalStateProblem:
+      description: |
+        The requested operation is not legal from the execution's current
+        state. For example: resuming an execution that is not `paused`,
+        or aborting one that has already reached a terminal state.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
 
   schemas:
     # ─────────────── Errors ───────────────
@@ -624,30 +1017,25 @@ components:
         type:
           type: string
           format: uri
-          description: A URI reference that identifies the problem type
           default: about:blank
         title:
           type: string
-          description: A short, human-readable summary of the problem
         status:
           type: integer
-          description: The HTTP status code
           minimum: 100
           maximum: 599
         detail:
           type: string
-          description: A human-readable explanation specific to this occurrence
         instance:
           type: string
           format: uri
-          description: A URI that identifies the specific occurrence
         errors:
           type: object
           description: |
             Optional field-level validation errors. Keys are JSON Pointer
-            references into the request body (e.g. `/name`, `/endpoint`);
-            values are arrays of human-readable error messages for that
-            field. Present on `422` responses and ignorable otherwise.
+            references into the request body (e.g. `/name`, `/services/0/ratingGroup`);
+            values are arrays of human-readable error messages. Present on
+            `422` responses and ignorable otherwise.
           additionalProperties:
             type: array
             items:
@@ -662,7 +1050,6 @@ components:
       properties:
         total:
           type: integer
-          description: Total number of matching items
           minimum: 0
         limit:
           type: integer
@@ -675,7 +1062,7 @@ components:
 
     DashboardKpis:
       type: object
-      required: [peers, subscribers, templates, scenarios, activeRuns]
+      required: [peers, subscribers, scenarios, activeRuns]
       properties:
         peers:
           type: object
@@ -690,19 +1077,13 @@ components:
         subscribers:
           type: integer
           minimum: 0
-          description: Total registered subscribers
-        templates:
-          type: integer
-          minimum: 0
-          description: Total AVP templates
         scenarios:
           type: integer
           minimum: 0
-          description: Total defined scenarios
         activeRuns:
           type: integer
           minimum: 0
-          description: Number of executions currently in progress
+          description: Executions currently in `running` or `paused` state
 
     # ─────────────── Peers ───────────────
 
@@ -711,23 +1092,15 @@ components:
       description: |
         Current runtime state of a peer.
 
-        - `stopped`       — Administratively down. Supervision is off; no
-                            reconnect attempts will be made. This is the
-                            default state for a freshly created peer.
-        - `disconnected`  — Supervision is on but the transport is down.
-                            The server will redial automatically.
+        - `stopped`       — Administratively down; no reconnect attempts.
+        - `disconnected`  — Supervision on, transport down; auto-redials.
         - `connecting`    — CER/CEA exchange in progress.
         - `connected`     — Session established.
-        - `disconnecting` — Graceful teardown in progress (admin-initiated).
-        - `restarting`    — Admin-initiated stop followed by start so a
-                            config change can take effect.
-        - `error`         — Supervision is on but the peer is in a
-                            persistent failure state (exponential backoff).
+        - `disconnecting` — Graceful teardown in progress.
+        - `restarting`    — Admin-initiated stop+start for a config change.
+        - `error`         — Supervision on, persistent failure, exp. backoff.
 
-        The distinction between `stopped` and `disconnected` is
-        deliberate: the former means "admin does not want this up"; the
-        latter means "admin wants this up but the transport is
-        currently down".
+        `stopped` vs `disconnected`: admin intent vs transport health.
       enum:
         - stopped
         - disconnected
@@ -753,27 +1126,22 @@ components:
           type: string
         host:
           type: string
-          description: Peer hostname or IP address
           examples: ['10.0.1.5']
         port:
           type: integer
-          description: TCP/TLS port
           minimum: 1
           maximum: 65535
           examples: [3868]
         originHost:
           type: string
-          description: Diameter Origin-Host identity
           examples: ['ctf-01.test.local']
         originRealm:
           type: string
-          description: Diameter Origin-Realm identity
           examples: ['test.local']
         transport:
           $ref: '#/components/schemas/PeerTransport'
         watchdogIntervalSeconds:
           type: integer
-          description: Device-Watchdog interval (seconds)
           minimum: 5
           maximum: 3600
           default: 30
@@ -781,32 +1149,23 @@ components:
           type: boolean
           description: |
             Pure server-boot flag. When the server starts, peers with
-            `autoConnect: true` are automatically started (equivalent to
-            `POST /peers/{id}/start`); peers with `autoConnect: false`
-            remain `stopped` until the operator starts them.
-
-            This flag has **no bearing on current status**. A peer can
-            be `autoConnect: true` and `stopped` (the operator stopped
-            it after boot), or `autoConnect: false` and `connected`
-            (started manually during this run).
+            `autoConnect: true` are started automatically; peers with
+            `autoConnect: false` remain `stopped` until operator action.
           default: true
         status:
           $ref: '#/components/schemas/PeerStatus'
         statusDetail:
           type: string
-          description: Optional human-readable status detail (e.g. 'CER/CEA timeout')
+          description: Optional human-readable status detail
         lastChangeAt:
           type: string
           format: date-time
-          description: Timestamp of the most recent status change
 
     PeerInput:
       type: object
       description: |
-        Writable subset of `Peer`. Used for both create (POST /peers) and
-        replace (PUT /peers/{id}). Live-state fields (`status`,
-        `statusDetail`, `lastChangeAt`) are computed server-side and
-        rejected on write.
+        Writable subset of `Peer`. Used for both create and replace.
+        Live-state fields are computed server-side and rejected on write.
       required: [name, host, port, originHost, originRealm, transport, watchdogIntervalSeconds, autoConnect]
       properties:
         name:
@@ -815,25 +1174,17 @@ components:
           maxLength: 64
         host:
           type: string
-          description: Peer hostname or IP address
           minLength: 1
-          examples: ['10.0.1.5']
         port:
           type: integer
-          description: TCP/TLS port
           minimum: 1
           maximum: 65535
-          examples: [3868]
         originHost:
           type: string
-          description: Diameter Origin-Host identity
           minLength: 1
-          examples: ['ctf-01.test.local']
         originRealm:
           type: string
-          description: Diameter Origin-Realm identity
           minLength: 1
-          examples: ['test.local']
         transport:
           $ref: '#/components/schemas/PeerTransport'
         watchdogIntervalSeconds:
@@ -843,78 +1194,49 @@ components:
           default: 30
         autoConnect:
           type: boolean
-          description: If true, the server connects this peer at server startup.
           default: true
 
     PeerTestResult:
       type: object
-      description: |
-        Outcome of a synchronous CER/CEA probe against a configured peer.
-        Useful for validating configuration changes before saving.
       required: [ok, durationMs]
       properties:
         ok:
           type: boolean
-          description: True when a CEA was received without error
         durationMs:
           type: integer
           minimum: 0
-          description: Round-trip time of the probe in milliseconds
         detail:
           type: string
-          description: Human-readable detail (e.g. 'CER/CEA timeout', 'handshake OK')
 
     # ─────────────── Subscribers ───────────────
 
     Subscriber:
       type: object
-      description: |
-        A subscriber identity used by test scenarios. Carries the SIM
-        credentials (MSISDN + ICCID), an optional device binding
-        (Manufacturer + Model, expressed server-side as a TAC prefix), and
-        an optional IMEI (only meaningful when a device is bound).
       required: [id, msisdn, iccid]
       properties:
         id:
           type: string
         msisdn:
           type: string
-          description: |
-            E.164-style MSISDN, digits only (no `+` prefix). The primary
-            identifier of a subscriber; unique across subscribers.
+          description: E.164 MSISDN, digits only; primary identifier.
           pattern: '^[0-9]{8,15}$'
           examples: ['27821234567']
         iccid:
           type: string
-          description: |
-            Integrated Circuit Card Identifier (SIM serial), 19 or 20
-            digits. Unique across subscribers.
+          description: SIM serial, 19 or 20 digits. Unique across subscribers.
           pattern: '^[0-9]{19,20}$'
           examples: ['89270100001234567890']
         tac:
           type: string
-          description: |
-            8-digit Type Allocation Code identifying the device
-            manufacturer + model. When present, the server recognises it
-            as one of the catalogue entries at `GET /tac-catalog` and
-            the UI looks up Manufacturer/Model labels from there.
+          description: 8-digit Type Allocation Code, from `GET /tac-catalog`.
           pattern: '^[0-9]{8}$'
-          examples: ['35398506']
         imei:
           type: string
-          description: |
-            15-digit IMEI (TAC + 6 serial + Luhn check digit). Only
-            present when a device is bound (`tac` is set). Not unique —
-            the same physical device can legitimately be paired with
-            multiple test subscribers.
+          description: 15-digit IMEI; present only when a device is bound.
           pattern: '^[0-9]{15}$'
-          examples: ['353985067894321']
 
     SubscriberInput:
       type: object
-      description: |
-        Writable subset of `Subscriber`. Used for both create
-        (POST /subscribers) and replace (PUT /subscribers/{id}).
       required: [msisdn, iccid]
       properties:
         msisdn:
@@ -925,31 +1247,18 @@ components:
           pattern: '^[0-9]{19,20}$'
         tac:
           type: string
-          description: |
-            Optional 8-digit TAC. When set, must match an entry in
-            `GET /tac-catalog` — the server will reject unknown TACs with
-            a 422.
           pattern: '^[0-9]{8}$'
         imei:
           type: string
-          description: |
-            Optional 15-digit IMEI. Must be Luhn-valid and, when `tac`
-            is also set, must share the same 8-digit prefix as `tac`.
-            Rejected with 422 otherwise.
           pattern: '^[0-9]{15}$'
 
     TacEntry:
       type: object
-      description: |
-        One entry in the curated TAC catalogue. Identifies a single
-        manufacturer/model combination by its 8-digit TAC prefix.
       required: [tac, manufacturer, model]
       properties:
         tac:
           type: string
-          description: 8-digit Type Allocation Code
           pattern: '^[0-9]{8}$'
-          examples: ['35398506']
         manufacturer:
           type: string
           examples: ['Apple']
@@ -958,41 +1267,502 @@ components:
           examples: ['iPhone 14 Pro']
         year:
           type: integer
-          description: Release year (informational)
           minimum: 2000
           maximum: 2099
 
-    # ─────────────── Templates ───────────────
+    # ─────────────── Scenarios ───────────────
+    #
+    # Scenarios are the primary authoring surface. See docs/ARCHITECTURE.md
+    # §3 and §4 for the full semantics. Key invariants this schema encodes:
+    # - `avpTree` is the CCR envelope *minus* the service-unit AVPs.
+    # - The engine places RSU/USU per `serviceModel` at send time.
+    # - Every leaf value is a variable reference; literals are variables
+    #   with `source: generator, strategy: literal`.
+    # - MSI (455) is engine-managed and derived from `serviceModel`.
 
-    TemplateSummary:
+    UnitType:
+      type: string
+      description: |
+        Service unit type. Drives which CC-* inner AVP the engine places
+        into RSU/USU/GSU.
+      enum: [OCTET, TIME, UNITS]
+
+    SessionMode:
+      type: string
+      description: |
+        Session-based vs event-based charging model.
+        - `session` — INITIAL → UPDATE(s) → TERMINATE lifecycle.
+        - `event`   — one-shot CCR-EVENT, no lifecycle.
+      enum: [session, event]
+
+    ServiceModel:
+      type: string
+      description: |
+        Where service-unit AVPs live in the CCR.
+        - `root`        — RSU/USU under the CCR root; no MSCC; MSI omitted.
+        - `single-mscc` — exactly one MSCC block; MSI = 0.
+        - `multi-mscc`  — one-to-many MSCC blocks; MSI = 1; OCTET only.
+        See compatibility matrix in docs/ARCHITECTURE.md §4.
+      enum: [root, single-mscc, multi-mscc]
+
+    ScenarioOrigin:
+      type: string
+      description: |
+        - `system` — ships with the product; immutable; can only be duplicated.
+        - `user`   — created/owned by the user.
+      enum: [system, user]
+
+    RequestType:
+      type: string
+      enum: [INITIAL, UPDATE, TERMINATE, EVENT]
+
+    VarRef:
+      type: string
+      description: |
+        Variable reference. In `avpTree` leaf values the form `{{NAME}}`
+        is used; in step configuration and expressions the bare `NAME`
+        is used. Both forms resolve to the same variable.
+      minLength: 1
+
+    VarValue:
+      description: |
+        Typed variable value. The engine normalises per the inner AVP's
+        Diameter data type at send time; JSON `number` is used for
+        Unsigned32/Unsigned64/Integer32 AVPs and for CC-Time.
+      oneOf:
+        - type: string
+        - type: integer
+        - type: number
+        - type: boolean
+        - type: 'null'
+
+    # --- Variables -------------------------------------------------------
+
+    GeneratorStrategy:
+      type: string
+      description: |
+        User-available generator strategies. System-reserved strategies
+        (session-id, charging-id, request-number, etc.) are only used for
+        implicit system variables; they cannot be assigned to user-authored
+        variables.
+      enum:
+        - literal
+        - uuid
+        - incrementer
+        - random-int
+        - random-string
+        - random-choice
+
+    GeneratorRefresh:
+      type: string
+      description: |
+        - `once`     — value fixed at execution start.
+        - `per-send` — recomputed for every CCR.
+      enum: [once, per-send]
+
+    VariableSourceGenerator:
       type: object
-      required: [id, name]
+      required: [kind, strategy, refresh]
+      properties:
+        kind:
+          type: string
+          const: generator
+        strategy:
+          $ref: '#/components/schemas/GeneratorStrategy'
+        refresh:
+          $ref: '#/components/schemas/GeneratorRefresh'
+        params:
+          type: object
+          description: |
+            Strategy-dependent parameters. Shape varies by `strategy`:
+            - `literal`       — `{ value: <VarValue> }`
+            - `incrementer`   — `{ start?: number, step?: number }`
+            - `random-int`    — `{ min?: number, max?: number }`
+            - `random-string` — `{ length: number, charset: "alpha"|"numeric"|"alphanumeric"|"hex" }`
+            - `random-choice` — `{ options: string[] }`
+            - `uuid`          — no params.
+          additionalProperties: true
+
+    VariableSourceBound:
+      type: object
+      required: [kind, from, field]
+      properties:
+        kind:
+          type: string
+          const: bound
+        from:
+          type: string
+          enum: [subscriber, peer, config, step]
+        field:
+          type: string
+          description: |
+            Name of the field on the source resource, e.g. `msisdn` /
+            `originHost` / `service-context` / `requestType`.
+
+    VariableSourceExtracted:
+      type: object
+      required: [kind, path]
+      properties:
+        kind:
+          type: string
+          const: extracted
+        path:
+          type: string
+          description: |
+            Path into the CCA response AVP tree, in dot/bracket notation
+            (e.g. `MSCC[100].Granted-Service-Unit.CC-Total-Octets`).
+        transform:
+          type: string
+          description: |
+            Optional expression applied to the extracted value before
+            assignment (see docs/ARCHITECTURE.md §19).
+
+    VariableSource:
+      description: |
+        Discriminated union identifying where a variable's value comes from.
+      oneOf:
+        - $ref: '#/components/schemas/VariableSourceGenerator'
+        - $ref: '#/components/schemas/VariableSourceBound'
+        - $ref: '#/components/schemas/VariableSourceExtracted'
+      discriminator:
+        propertyName: kind
+        mapping:
+          generator: '#/components/schemas/VariableSourceGenerator'
+          bound: '#/components/schemas/VariableSourceBound'
+          extracted: '#/components/schemas/VariableSourceExtracted'
+
+    Variable:
+      type: object
+      description: |
+        A user-declared variable. System variables (SESSION_ID, MSISDN,
+        RG<rg>_GRANTED, etc.) are auto-provisioned at run time and do not
+        appear in `scenario.variables`.
+      required: [name, source]
+      properties:
+        name:
+          type: string
+          description: |
+            Unique within the scenario. Convention — `SCREAMING_SNAKE_CASE`.
+            In `multi-mscc` mode, per-service variables are prefixed
+            `RG<rg>_` (engine-provisioned — not authored here).
+          pattern: '^[A-Z][A-Z0-9_]*$'
+        source:
+          $ref: '#/components/schemas/VariableSource'
+        description:
+          type: string
+
+    # --- AVP tree --------------------------------------------------------
+
+    AvpNode:
+      type: object
+      description: |
+        One node in the CCR envelope. Either a grouped AVP (has `children`)
+        or a leaf AVP (has `valueRef`). The `avpTree` is the CCR *minus*
+        the service-unit AVPs — those are modelled separately in
+        `scenario.services` and spliced in at send time by the engine
+        (see docs/ARCHITECTURE.md §4 and §7).
+      required: [name, code]
+      properties:
+        name:
+          type: string
+          description: AVP name from the Diameter dictionary (e.g. `Origin-Host`).
+        code:
+          type: integer
+          description: AVP code (e.g. 264 for Origin-Host).
+          minimum: 0
+        vendorId:
+          type: integer
+          description: Vendor-Id, omitted for base-protocol AVPs.
+          minimum: 0
+        children:
+          type: array
+          description: |
+            Grouped AVP body. Present iff this is a grouped AVP.
+          items:
+            $ref: '#/components/schemas/AvpNode'
+        valueRef:
+          $ref: '#/components/schemas/VarRef'
+
+    # --- Services --------------------------------------------------------
+
+    Service:
+      type: object
+      description: |
+        One service entry on a scenario. Controls how the engine
+        constructs RSU/USU (and MSCC wrapping) at send time. See §4
+        for how `serviceModel` picks between root / single-mscc /
+        multi-mscc placement.
+      required: [id, requestedUnits]
       properties:
         id:
           type: string
-        name:
+          description: |
+            Stable key for this service. In `multi-mscc` mode, typically
+            the Rating-Group as a decimal string (e.g. `"100"`) since it
+            doubles as the catalogue key and feeds `RG<rg>_` variable
+            naming.
+        ratingGroup:
+          $ref: '#/components/schemas/VarRef'
+          description: |
+            Rating-Group AVP (432). Required for `single-mscc` and
+            `multi-mscc`; omitted for `root`.
+        serviceIdentifier:
+          $ref: '#/components/schemas/VarRef'
+          description: |
+            Service-Identifier AVP (439). Optional for MSCC-based service
+            models; omitted for `root`.
+        requestedUnits:
+          $ref: '#/components/schemas/VarRef'
+          description: |
+            Variable carrying the requested-service-units quantity. Engine
+            applies the §7 presence rules to decide whether RSU is emitted.
+        usedUnits:
+          $ref: '#/components/schemas/VarRef'
+          description: |
+            Variable carrying used-service-units quantity. Engine applies
+            the §7 presence rules to decide whether USU is emitted.
+
+    ServiceSelection:
+      description: |
+        How a step picks which services (`scenario.services` entries) to
+        include. Required in `multi-mscc` scenarios; omitted otherwise.
+      oneOf:
+        - type: object
+          required: [mode, serviceIds]
+          properties:
+            mode:
+              type: string
+              const: fixed
+            serviceIds:
+              type: array
+              items:
+                type: string
+              minItems: 1
+        - type: object
+          required: [mode, from, count]
+          properties:
+            mode:
+              type: string
+              const: random
+            from:
+              type: array
+              items:
+                type: string
+              minItems: 1
+            count:
+              oneOf:
+                - type: integer
+                  minimum: 1
+                - type: object
+                  required: [min, max]
+                  properties:
+                    min:
+                      type: integer
+                      minimum: 1
+                    max:
+                      type: integer
+                      minimum: 1
+      discriminator:
+        propertyName: mode
+        mapping:
+          fixed: '#/components/schemas/ServiceSelectionFixed'
+          random: '#/components/schemas/ServiceSelectionRandom'
+
+    ServiceSelectionFixed:
+      type: object
+      required: [mode, serviceIds]
+      properties:
+        mode:
           type: string
-        description:
+          const: fixed
+        serviceIds:
+          type: array
+          items:
+            type: string
+          minItems: 1
+
+    ServiceSelectionRandom:
+      type: object
+      required: [mode, from, count]
+      properties:
+        mode:
           type: string
-        avpCount:
+          const: random
+        from:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        count:
+          oneOf:
+            - type: integer
+              minimum: 1
+            - type: object
+              required: [min, max]
+              properties:
+                min:
+                  type: integer
+                  minimum: 1
+                max:
+                  type: integer
+                  minimum: 1
+
+    # --- Steps -----------------------------------------------------------
+
+    ResultHandler:
+      type: object
+      description: |
+        Declarative reaction to a specific outcome. Evaluated after
+        assertions; action drives the scheduler.
+      required: [when, action]
+      properties:
+        when:
+          type: string
+          description: |
+            Expression evaluated against the live context (see §10).
+        action:
+          type: string
+          enum: [continue, stop, retry]
+
+    RequestStep:
+      type: object
+      required: [kind, requestType]
+      properties:
+        kind:
+          type: string
+          const: request
+        requestType:
+          $ref: '#/components/schemas/RequestType'
+        services:
+          $ref: '#/components/schemas/ServiceSelection'
+          description: |
+            Required in `multi-mscc` scenarios. Omitted in `root` and
+            `single-mscc` (the single service is implicit).
+        overrides:
+          type: object
+          description: |
+            Per-step transient map of variable-name → value, shadowing
+            scenario defaults for this step only. Keys must be declared
+            variables.
+          additionalProperties:
+            $ref: '#/components/schemas/VarValue'
+        assertions:
+          type: array
+          items:
+            type: string
+          description: |
+            Post-receive predicates. On failure the step is marked failed
+            and the first matching result handler decides what to do
+            next (default: stop).
+        guards:
+          type: array
+          items:
+            type: string
+          description: Pre-send predicates. On failure the step is skipped.
+        resultHandlers:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResultHandler'
+
+    ConsumeStep:
+      type: object
+      description: |
+        Only legal in `sessionMode: session`. Expands at run time into an
+        auto-generated sequence of CCR-UPDATEs, re-rolling random service
+        selections each round, until `terminateWhen` fires or every
+        selected service becomes `exhausted` / `error`.
+      required: [kind, windowMs]
+      properties:
+        kind:
+          type: string
+          const: consume
+        services:
+          $ref: '#/components/schemas/ServiceSelection'
+        windowMs:
+          type: integer
+          minimum: 1
+        maxRounds:
+          type: integer
+          minimum: 1
+        terminateWhen:
+          type: string
+          description: Expression; when true, exits the consume loop.
+        overrides:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/VarValue'
+        assertions:
+          type: array
+          items:
+            type: string
+
+    WaitStep:
+      type: object
+      required: [kind, durationMs]
+      properties:
+        kind:
+          type: string
+          const: wait
+        durationMs:
           type: integer
           minimum: 0
-          description: Number of AVPs defined on this template
-        updatedAt:
-          type: string
-          format: date-time
 
-    # ─────────────── Scenarios ───────────────
+    PauseStep:
+      type: object
+      description: |
+        Authored breakpoint. Suspends execution until resumed. Honoured
+        only in `interactive` execution mode; ignored in `continuous`.
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          const: pause
+        label:
+          type: string
+        prompt:
+          type: string
+
+    ScenarioStep:
+      description: Discriminated union by `kind`.
+      oneOf:
+        - $ref: '#/components/schemas/RequestStep'
+        - $ref: '#/components/schemas/ConsumeStep'
+        - $ref: '#/components/schemas/WaitStep'
+        - $ref: '#/components/schemas/PauseStep'
+      discriminator:
+        propertyName: kind
+        mapping:
+          request: '#/components/schemas/RequestStep'
+          consume: '#/components/schemas/ConsumeStep'
+          wait: '#/components/schemas/WaitStep'
+          pause: '#/components/schemas/PauseStep'
+
+    # --- Scenario top-level ----------------------------------------------
 
     ScenarioSummary:
       type: object
-      required: [id, name, stepCount]
+      description: Row-level shape for the scenarios list view.
+      required: [id, name, unitType, sessionMode, serviceModel, origin, stepCount, updatedAt]
       properties:
         id:
           type: string
         name:
           type: string
         description:
+          type: string
+        unitType:
+          $ref: '#/components/schemas/UnitType'
+        sessionMode:
+          $ref: '#/components/schemas/SessionMode'
+        serviceModel:
+          $ref: '#/components/schemas/ServiceModel'
+        origin:
+          $ref: '#/components/schemas/ScenarioOrigin'
+        favourite:
+          type: boolean
+        subscriberId:
+          type: string
+        peerId:
           type: string
         stepCount:
           type: integer
@@ -1001,42 +1771,228 @@ components:
           type: string
           format: date-time
 
+    Scenario:
+      description: Full scenario body.
+      allOf:
+        - $ref: '#/components/schemas/ScenarioSummary'
+        - type: object
+          required: [avpTree, services, variables, steps]
+          properties:
+            avpTree:
+              type: array
+              description: |
+                Root-level AVPs of the CCR envelope, minus the service-unit
+                AVPs. Structure is frozen at execution start.
+              items:
+                $ref: '#/components/schemas/AvpNode'
+            services:
+              type: array
+              description: |
+                Service entries. Exactly one in `root` / `single-mscc`;
+                one or more in `multi-mscc`.
+              items:
+                $ref: '#/components/schemas/Service'
+              minItems: 1
+            variables:
+              type: array
+              description: |
+                User-declared variables. System variables are implicit
+                and auto-provisioned at run time.
+              items:
+                $ref: '#/components/schemas/Variable'
+            steps:
+              type: array
+              items:
+                $ref: '#/components/schemas/ScenarioStep'
+
+    ScenarioInput:
+      type: object
+      description: |
+        Writable subset of `Scenario`. Used for create (POST /scenarios)
+        and replace (PUT /scenarios/{id}). Server-owned fields (`id`,
+        `origin`, `updatedAt`, `stepCount`) are ignored on write —
+        `origin` is always `user` on create/replace; system starters
+        cannot be updated.
+      required:
+        [name, unitType, sessionMode, serviceModel, subscriberId, peerId, avpTree, services, variables, steps]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        description:
+          type: string
+        unitType:
+          $ref: '#/components/schemas/UnitType'
+        sessionMode:
+          $ref: '#/components/schemas/SessionMode'
+        serviceModel:
+          $ref: '#/components/schemas/ServiceModel'
+        favourite:
+          type: boolean
+          default: false
+        subscriberId:
+          type: string
+        peerId:
+          type: string
+        avpTree:
+          type: array
+          items:
+            $ref: '#/components/schemas/AvpNode'
+        services:
+          type: array
+          items:
+            $ref: '#/components/schemas/Service'
+          minItems: 1
+        variables:
+          type: array
+          items:
+            $ref: '#/components/schemas/Variable'
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScenarioStep'
+
+    ScenarioDuplicateInput:
+      type: object
+      description: |
+        Optional body for `POST /scenarios/{id}/duplicate`. When omitted,
+        the server picks a name by suffixing ` (copy)` to the source.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+
     # ─────────────── Executions ───────────────
 
     ExecutionMode:
       type: string
+      description: |
+        Runtime behaviour of an execution — independent of the scenario's
+        `sessionMode`.
+
+        - `interactive` — honours pause steps and runtime breakpoints;
+                           UI presents a debugger.
+        - `continuous`  — ignores pauses and breakpoints; runs through.
+                           Required for batched runs (`concurrency > 1`
+                           or `repeats > 1`).
       enum: [interactive, continuous]
 
-    ExecutionResult:
+    ExecutionState:
       type: string
-      enum: [running, success, failure]
+      description: |
+        Execution state machine. See docs/ARCHITECTURE.md §6.
+
+        Non-terminal: `pending`, `running`, `paused`.
+        Terminal: `success`, `failure`, `aborted`, `error`.
+      enum:
+        - pending
+        - running
+        - paused
+        - success
+        - failure
+        - aborted
+        - error
+
+    PauseReason:
+      type: string
+      description: |
+        Why an execution entered `paused`:
+        - `pause-step` — the scenario contains an explicit `pause` step.
+        - `breakpoint` — a runtime breakpoint fired.
+        - `user`       — the user clicked Pause (or called /pause).
+      enum: [pause-step, breakpoint, user]
+
+    StartExecutionInput:
+      type: object
+      required: [scenarioId, mode]
+      properties:
+        scenarioId:
+          type: string
+        mode:
+          $ref: '#/components/schemas/ExecutionMode'
+        overrides:
+          type: object
+          description: Per-run overrides of the scenario's default bindings.
+          properties:
+            subscriberIds:
+              type: array
+              description: |
+                Subscriber pool. When multiple ids are supplied and
+                `repeats > 1`, the engine round-robins across iterations.
+              items:
+                type: string
+              minItems: 1
+            peerId:
+              type: string
+              description: |
+                Overrides the scenario's bound peer for this run only.
+        concurrency:
+          type: integer
+          description: |
+            Parallel workers. Only legal with `mode: continuous`; values
+            other than 1 with `interactive` return 422.
+          minimum: 1
+          default: 1
+        repeats:
+          type: integer
+          description: |
+            Iterations per worker. Only legal with `mode: continuous`.
+          minimum: 1
+          default: 1
+
+    StartExecutionResult:
+      type: object
+      required: [items]
+      properties:
+        batchId:
+          type: string
+          description: |
+            Present when `concurrency * repeats > 1`. Groups the spawned
+            executions for the batch view.
+        items:
+          type: array
+          description: One entry per spawned execution.
+          items:
+            $ref: '#/components/schemas/ExecutionSummary'
+          minItems: 1
 
     ExecutionSummary:
       type: object
-      required: [id, scenarioName, mode, peerId, result, startedAt]
+      required: [id, scenarioId, scenarioName, mode, state, startedAt]
       properties:
         id:
           type: string
+        scenarioId:
+          type: string
+          description: The scenario this execution was started from.
         scenarioName:
           type: string
-          description: Name of the scenario at execution time
+          description: Name at execution time (denormalised).
         mode:
           $ref: '#/components/schemas/ExecutionMode'
         peerId:
           type: string
-          description: Peer used for this execution
         peerName:
           type: string
-          description: Peer display name at execution time (denormalised)
-        result:
-          $ref: '#/components/schemas/ExecutionResult'
+        subscriberId:
+          type: string
+        subscriberMsisdn:
+          type: string
+        batchId:
+          type: string
+          description: |
+            Present on executions spawned from a batched Run.
+        state:
+          $ref: '#/components/schemas/ExecutionState'
         startedAt:
           type: string
           format: date-time
         finishedAt:
           type: string
           format: date-time
-          description: Present only when the execution has completed
+          description: Present only for terminal states.
 
     ExecutionPage:
       type: object
@@ -1049,62 +2005,220 @@ components:
         page:
           $ref: '#/components/schemas/PageMeta'
 
-    ExecutionStep:
+    StepRecord:
       type: object
-      description: One step of a scenario execution.
-      required: [n, name, result]
+      description: |
+        One completed (or in-progress) step of an execution. Matches
+        `ScenarioStep` by index; carries the wire-level request/response
+        and per-step timing.
+      required: [n, kind, state]
       properties:
         n:
           type: integer
+          description: 1-based step index.
           minimum: 1
-          description: 1-based sequence number of the step
-        name:
+        kind:
           type: string
-          description: Short step name (e.g. 'CCR-I', 'CCR-U')
-        result:
-          $ref: '#/components/schemas/ExecutionResult'
+          enum: [request, consume, wait, pause]
+        requestType:
+          $ref: '#/components/schemas/RequestType'
+          description: Present for `request` steps.
+        label:
+          type: string
+          description: 'Short human label (e.g. `CCR-I`, `pause top-up`).'
+        state:
+          type: string
+          description: |
+            - `pending` — not yet started.
+            - `running` — this step is currently executing (includes a
+                          paused debugger sitting on it).
+            - `success` — completed without assertion or engine failure.
+            - `failure` — completed with an assertion failure.
+            - `error`   — engine fault (transport loss, dictionary miss).
+            - `skipped` — guard returned false.
+          enum: [pending, running, success, failure, error, skipped]
         startedAt:
           type: string
           format: date-time
         finishedAt:
           type: string
           format: date-time
-          description: Present only when the step has completed
         durationMs:
           type: integer
           minimum: 0
-          description: Wall-clock duration in milliseconds (present when finished)
         errorDetail:
           type: string
-          description: Human-readable error when `result=failure`
+        request:
+          type: object
+          description: |
+            Wire-level CCR snapshot after variable resolution. Present
+            for `request` steps and for each round of `consume` steps.
+          additionalProperties: true
+        response:
+          type: object
+          description: Wire-level CCA snapshot.
+          additionalProperties: true
+        assertionResults:
+          type: array
+          items:
+            type: object
+            required: [expression, passed]
+            properties:
+              expression:
+                type: string
+              passed:
+                type: boolean
+              message:
+                type: string
 
     Execution:
       description: |
-        Full execution detail. Extends `ExecutionSummary` with step-by-step
-        progress. This is the payload returned by `GET /executions/{id}`
-        and carried by every SSE `execution.progress` event.
+        Full execution detail. Extends `ExecutionSummary` with the live
+        context snapshot and step-by-step history. This is the payload
+        returned by `GET /executions/{id}` and carried by every SSE
+        `execution.progress` event.
       allOf:
         - $ref: '#/components/schemas/ExecutionSummary'
         - type: object
-          required: [currentStep, totalSteps, steps]
+          required: [currentStep, totalSteps, steps, context]
           properties:
             currentStep:
               type: integer
-              minimum: 0
               description: |
-                0-based index of the step currently executing, or equal to
-                `totalSteps` when the execution has completed.
+                0-based index of the step currently executing (or
+                paused on), or equal to `totalSteps` when terminal.
+              minimum: 0
             totalSteps:
               type: integer
               minimum: 0
+            pauseReason:
+              $ref: '#/components/schemas/PauseReason'
+              description: Present when `state == paused`.
+            breakpoints:
+              type: array
+              items:
+                type: integer
+                minimum: 0
+              description: Runtime breakpoints set on this execution.
             steps:
               type: array
               description: |
-                All steps completed so far. For running executions this
-                grows as the scenario advances; terminal executions contain
-                every step in the scenario.
+                All steps completed or in progress so far. Grows over
+                time for running executions; full scenario for terminal.
               items:
-                $ref: '#/components/schemas/ExecutionStep'
+                $ref: '#/components/schemas/StepRecord'
+            context:
+              $ref: '#/components/schemas/ExecutionContextSnapshot'
+
+    ExecutionContextSnapshot:
+      type: object
+      description: |
+        Point-in-time snapshot of the live variables map, partitioned by
+        scope for UI convenience. Each map is keyed by variable name.
+      required: [system, user, extracted]
+      properties:
+        system:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/VarValue'
+          description: |
+            System variables (SESSION_ID, MSISDN, CC_REQUEST_NUMBER, …).
+        user:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/VarValue'
+          description: User-declared variables.
+        extracted:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/VarValue'
+          description: |
+            Variables whose source is `extracted`, including the auto-
+            provisioned per-RG state variables (`RG<rg>_GRANTED`,
+            `RG<rg>_STATE`, …).
+
+    # --- Override inputs -------------------------------------------------
+
+    ContextOverrideInput:
+      type: object
+      description: |
+        Variable-name → value map, applied permanently to the live context.
+        Rejected with 422 for engine-reserved system variables.
+      required: [variables]
+      properties:
+        variables:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/VarValue'
+          minProperties: 1
+
+    PayloadOverrideInput:
+      type: object
+      description: |
+        Variable-name → value map, applied to the next send only. Repeated
+        calls overwrite the pending payload override.
+      required: [variables]
+      properties:
+        variables:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/VarValue'
+          minProperties: 1
+
+    BreakpointSet:
+      type: object
+      required: [stepIndices]
+      properties:
+        stepIndices:
+          type: array
+          description: 0-based step indices at which to pause.
+          items:
+            type: integer
+            minimum: 0
+          uniqueItems: true
+
+    # --- SSE event payloads ----------------------------------------------
+
+    ExecutionPaused:
+      type: object
+      required: [executionId, atStepIndex, reason, at]
+      properties:
+        executionId:
+          type: string
+        atStepIndex:
+          type: integer
+          minimum: 0
+        reason:
+          $ref: '#/components/schemas/PauseReason'
+        at:
+          type: string
+          format: date-time
+
+    ExecutionResumed:
+      type: object
+      required: [executionId, fromStepIndex, at]
+      properties:
+        executionId:
+          type: string
+        fromStepIndex:
+          type: integer
+          minimum: 0
+        at:
+          type: string
+          format: date-time
+
+    SseEventPayload:
+      description: |
+        Union of every JSON payload carried in the `data:` field of an SSE
+        record emitted by `GET /events`. The `event:` field disambiguates;
+        see the table on `/events` for the mapping.
+      oneOf:
+        - $ref: '#/components/schemas/Peer'
+        - $ref: '#/components/schemas/DashboardKpis'
+        - $ref: '#/components/schemas/ExecutionSummary'
+        - $ref: '#/components/schemas/Execution'
+        - $ref: '#/components/schemas/ExecutionPaused'
+        - $ref: '#/components/schemas/ExecutionResumed'
 
     # ─────────────── Metrics ───────────────
 
@@ -1115,10 +2229,8 @@ components:
         t:
           type: string
           format: date-time
-          description: Bucket timestamp (end of bucket)
         p50:
           type: number
-          description: 50th percentile response time in milliseconds
           minimum: 0
         p95:
           type: number
@@ -1133,11 +2245,9 @@ components:
       properties:
         window:
           type: string
-          description: The window that was returned, as ISO 8601 duration
           examples: [PT1H]
         bucketSize:
           type: string
-          description: Size of each bucket, as ISO 8601 duration
           examples: [PT2M]
         points:
           type: array
