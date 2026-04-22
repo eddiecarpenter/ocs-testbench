@@ -33,7 +33,7 @@ against any Diameter Gy endpoint.
 
 - Session-based charging (CCR-I / CCR-U / CCR-T)
 - Event-based charging (CCR-E)
-- Service-type agnostic via AVP templates (SMS, USSD, VOICE, DATA, custom)
+- Service-type agnostic — scenarios define their own AVP tree (SMS, USSD, VOICE, DATA, custom)
 - Multiple rating groups and service identifiers per session (multi-MSCC)
 - Multiple concurrent sessions per subscriber (multi-session)
 
@@ -51,13 +51,14 @@ against any Diameter Gy endpoint.
 - Configurable result code handlers (retry, terminate, pause, continue)
 - Value extraction from CCA responses into scenario context variables
 - Guards and assertions evaluated against responses using expression evaluator
-- Derived values fed back into subsequent requests via template placeholders
+- Derived values fed back into subsequent requests via placeholder substitution
 
 ### Configuration
 
 - Runtime-configurable Diameter peer endpoints (no restart required)
 - Multiple concurrent peer connections with independent identities
-- AVP templates with placeholder substitution (user input, predefined, generated)
+- Scenarios authored as self-contained AVP trees with placeholder substitution
+  (user input, predefined, generated)
 - Subscriber management (MSISDN, ICCID, optional IMEI)
 - Scenario definitions as ordered step lists (the intermediate representation)
 
@@ -77,9 +78,9 @@ against any Diameter Gy endpoint.
 
 The application follows an API-first design:
 
-- **REST API** — configuration CRUD, template management, scenario control
+- **REST API** — configuration CRUD, scenario authoring, execution control
 - **SSE** — real-time streaming of responses, session state, connection status
-- **Core library** — Diameter stack, execution engine, template engine (no HTTP dependency)
+- **Core library** — Diameter stack, execution engine, AVP rendering engine (no HTTP dependency)
 
 See `docs/ARCHITECTURE.md` for the full architectural design.
 
@@ -97,7 +98,7 @@ See `docs/ARCHITECTURE.md` for the full architectural design.
 - Multiple concurrent Diameter peer connections (N independent peers)
 - TCP transport, plaintext default (TLS configurable)
 - Interactive step mode and continuous mode
-- AVP template system with placeholder substitution
+- Self-contained scenarios with placeholder substitution
 - Scenario step lists with extraction, guards, assertions
 - Subscriber table (MSISDN, ICCID, IMEI)
 - PostgreSQL persistence

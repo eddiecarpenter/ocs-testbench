@@ -34,7 +34,7 @@ Row 3 (y=2248)    Executions + Execution Debugger states
 
 | # | Name | Node ID | Grid (x, y) | Screenshot | Purpose |
 |---|---|---|---|---|---|
-| 1 | Dashboard | `1:55` | (0, 0) | [`screens/01-dashboard.png`](./screens/01-dashboard.png) | Landing page. 4 KPI tiles (Peers, Subscribers, Scenarios, Active executions) + Peer status card + Recent executions card + Response-time chart. Templates KPI **removed** in the v2 refactor. |
+| 1 | Dashboard | `1:55` | (0, 0) | [`screens/01-dashboard.png`](./screens/01-dashboard.png) | Landing page. 4 KPI tiles (Peers, Subscribers, Scenarios, Active executions) + Peer status card + Recent executions card + Response-time chart. |
 | 2 | Peers | `30:2` | (1540, 0) | [`screens/02-peers.png`](./screens/02-peers.png) | Peer registry list with inline row actions (RowActions popover at `45:2`). |
 | 3 | Peers — Edit | `50:2` | (3080, 0) | [`screens/03-peers-edit.png`](./screens/03-peers-edit.png) | Peers page with the Edit drawer (`52:2`) open. |
 | 4 | Subscribers | `65:2` | (4620, 0) | [`screens/04-subscribers.png`](./screens/04-subscribers.png) | Subscriber registry list with row-actions popover (`69:2`). |
@@ -47,7 +47,7 @@ Row 3 (y=2248)    Executions + Execution Debugger states
 
 | # | Name | Node ID | Grid (x, y) | Screenshot | Purpose |
 |---|---|---|---|---|---|
-| 7 | Scenarios | `123:2` | (0, 1124) | [`screens/07-scenarios.png`](./screens/07-scenarios.png) | Flat list of scenarios, **grouped by unit type** (OCTET / TIME / UNITS section headers). Search, peer filter, New-scenario CTA. Template column removed in v2 refactor. |
+| 7 | Scenarios | `123:2` | (0, 1124) | [`screens/07-scenarios.png`](./screens/07-scenarios.png) | Flat list of scenarios, **grouped by unit type** (OCTET / TIME / UNITS section headers). Search, peer filter, New-scenario CTA. |
 | 8 | Scenario Builder — Steps | `252:2` | (1540, 1124) | [`screens/08-builder-steps.png`](./screens/08-builder-steps.png) | Step list + step editor. Root frame for the builder shell; other builder frames share the same shell and differ only in the right-pane tab. |
 | 9 | Scenario Builder — Frame | `263:2` | (3080, 1124) | [`screens/09-builder-frame.png`](./screens/09-builder-frame.png) | Frame tab — preview of the CCR AVP tree. Shows `Multiple-Services-Indicator (455)` as engine-managed (dimmed `1 · managed` value). AVP tree is structurally frozen at runtime (invariant 1, §8). |
 | 10 | Scenario Builder — Services (multi-mscc) | `270:2` | (4620, 1124) | [`screens/10-builder-services-multi-mscc.png`](./screens/10-builder-services-multi-mscc.png) | Services tab, `serviceModel = multi-mscc`. Segmented control: Root / Single MSCC / Multi MSCC. Hint: *MSI=1 · one MSCC per selected service*. Left pane "SERVICES" (was "MSCC CATALOGUE"), right pane Service editor (was MSCC editor). |
@@ -95,7 +95,7 @@ Row 3 (y=2248)    Executions + Execution Debugger states
 
 | Decision | Screens affected | Notes |
 |---|---|---|
-| Templates concept removed | Dashboard, Scenarios | Dashboard KPI tile gone; Scenarios list column gone |
+| Scenario is the sole authoring unit | All shell screens | No separate authoring resource; users duplicate starters |
 | Scenarios grouped by unit type | Scenarios list (`123:2`) | Section headers: OCTET / TIME / UNITS |
 | serviceModel is a per-scenario choice | Builder Services tab (`270:2`, `285:2`) | Drives MSI, variable naming, AVP tree shape |
 | MSI is engine-managed, not authored | Builder Frame tab (`263:2`) | Shown as dimmed read-only row in AVP tree |
