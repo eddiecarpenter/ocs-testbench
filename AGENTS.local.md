@@ -1,7 +1,7 @@
-5# AGENTS.local.md — Local Overrides
+# AGENTS.local.md — Local Overrides
 
 This file contains project-specific rules and overrides that extend or
-supersede the global protocol defined in `base/AGENTS.md`.
+supersede the global protocol defined in `.ai/RULEBOOK.md`.
 
 This file is never overwritten by a template sync.
 
@@ -25,5 +25,5 @@ On session initialisation, also read:
 
 ## Skills
 
-The `skills/` directory is for local project-specific skills that extend
-or override template skills in `base/skills/`.
+The `skills/` directory at the repo root is for local project-specific skills
+that extend or override framework skills in `.ai/skills/`.
