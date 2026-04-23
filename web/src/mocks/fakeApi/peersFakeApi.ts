@@ -1,3 +1,4 @@
+import type { components } from '../../api/schema';
 import type {
   Peer,
   PeerInput,
@@ -5,6 +6,9 @@ import type {
 } from '../../api/resources/peers';
 import { peerFixtures } from '../data/peers';
 import { mock } from '../MockAdapter';
+
+/** RFC 7807 problem shape per OpenAPI v0.2. */
+type ProblemBody = components['schemas']['Problem'];
 
 /** Working copy so POST/PUT/DELETE survive across calls within a session. */
 const peers: Peer[] = peerFixtures.map((p) => ({ ...p }));
@@ -52,9 +56,7 @@ function validate(input: Partial<PeerInput> | undefined): FieldErrors | null {
   return Object.keys(errors).length > 0 ? errors : null;
 }
 
-function validationProblem(
-  errors: FieldErrors,
-): [number, Record<string, unknown>] {
+function validationProblem(errors: FieldErrors): [number, ProblemBody] {
   return [
     422,
     {
@@ -63,6 +65,18 @@ function validationProblem(
       status: 422,
       detail: 'One or more fields are invalid',
       errors,
+    },
+  ];
+}
+
+function notFound(id: string): [number, ProblemBody] {
+  return [
+    404,
+    {
+      type: 'about:blank',
+      title: 'Peer not found',
+      status: 404,
+      detail: `No peer with id "${id}"`,
     },
   ];
 }
@@ -88,24 +102,14 @@ function applyInput(base: Partial<Peer>, input: PeerInput): Peer {
 mock
   .onGet(/\/peers$/)
   .withDelayInMs(250)
-  .reply(() => [200, peers]);
+  .reply((): [number, Peer[]] => [200, peers]);
 
 // Detail
-mock.onGet(/\/peers\/[^/]+$/).reply((config) => {
+mock.onGet(/\/peers\/[^/]+$/).reply((config): [number, Peer | ProblemBody] => {
   const m = /\/peers\/([^/]+)$/.exec(config.url ?? '');
   const id = m ? decodeURIComponent(m[1]) : '';
   const peer = peers.find((p) => p.id === id);
-  if (!peer) {
-    return [
-      404,
-      {
-        type: 'about:blank',
-        title: 'Peer not found',
-        status: 404,
-        detail: `No peer with id "${id}"`,
-      },
-    ];
-  }
+  if (!peer) return notFound(id);
   return [200, peer];
 });
 
@@ -113,7 +117,7 @@ mock.onGet(/\/peers\/[^/]+$/).reply((config) => {
 mock
   .onPost(/\/peers$/)
   .withDelayInMs(300)
-  .reply((config) => {
+  .reply((config): [number, Peer | ProblemBody] => {
     const input = safeParse<PeerInput>(config.data);
     const errors = validate(input);
     if (errors) return validationProblem(errors);
@@ -140,7 +144,7 @@ mock
 mock
   .onPost(/\/peers\/test$/)
   .withDelayInMs(600)
-  .reply((config): [number, PeerTestResult | Record<string, unknown>] => {
+  .reply((config): [number, PeerTestResult | ProblemBody] => {
     const input = safeParse<PeerInput>(config.data);
     const errors = validate(input);
     if (errors) return validationProblem(errors);
@@ -172,21 +176,11 @@ mock
 mock
   .onPut(/\/peers\/[^/]+$/)
   .withDelayInMs(300)
-  .reply((config) => {
+  .reply((config): [number, Peer | ProblemBody] => {
     const m = /\/peers\/([^/]+)$/.exec(config.url ?? '');
     const id = m ? decodeURIComponent(m[1]) : '';
     const idx = peers.findIndex((p) => p.id === id);
-    if (idx === -1) {
-      return [
-        404,
-        {
-          type: 'about:blank',
-          title: 'Peer not found',
-          status: 404,
-          detail: `No peer with id "${id}"`,
-        },
-      ];
-    }
+    if (idx === -1) return notFound(id);
 
     const input = safeParse<PeerInput>(config.data);
     const errors = validate(input);
@@ -212,21 +206,12 @@ mock
   // Held long enough that the `connecting` transient is visibly on screen
   // — a few hundred ms flickers past too fast to read.
   .withDelayInMs(10_000)
-  .reply((config) => {
+  .reply((config): [number, Peer | ProblemBody] => {
     const m = /\/peers\/([^/]+)\/start$/.exec(config.url ?? '');
     const id = m ? decodeURIComponent(m[1]) : '';
     const peer = peers.find((p) => p.id === id);
-    if (!peer) {
-      return [
-        404,
-        {
-          type: 'about:blank',
-          title: 'Peer not found',
-          status: 404,
-          detail: `No peer with id "${id}"`,
-        },
-      ];
-    }
+    if (!peer) return notFound(id);
+
     // Contrived: hosts in 10.0.99.x cannot connect (same rule as the test
     // probe) so the failure path is exercisable.
     if (peer.host.startsWith('10.0.99.')) {
@@ -245,21 +230,12 @@ mock
 mock
   .onPost(/\/peers\/[^/]+\/stop$/)
   .withDelayInMs(10_000)
-  .reply((config) => {
+  .reply((config): [number, Peer | ProblemBody] => {
     const m = /\/peers\/([^/]+)\/stop$/.exec(config.url ?? '');
     const id = m ? decodeURIComponent(m[1]) : '';
     const peer = peers.find((p) => p.id === id);
-    if (!peer) {
-      return [
-        404,
-        {
-          type: 'about:blank',
-          title: 'Peer not found',
-          status: 404,
-          detail: `No peer with id "${id}"`,
-        },
-      ];
-    }
+    if (!peer) return notFound(id);
+
     peer.status = 'stopped';
     peer.statusDetail = 'Administratively stopped';
     peer.lastChangeAt = new Date().toISOString();
@@ -270,23 +246,14 @@ mock
 mock
   .onDelete(/\/peers\/[^/]+$/)
   .withDelayInMs(200)
-  .reply((config) => {
+  .reply((config): [number, void | ProblemBody] => {
     const m = /\/peers\/([^/]+)$/.exec(config.url ?? '');
     const id = m ? decodeURIComponent(m[1]) : '';
     const idx = peers.findIndex((p) => p.id === id);
-    if (idx === -1) {
-      return [
-        404,
-        {
-          type: 'about:blank',
-          title: 'Peer not found',
-          status: 404,
-          detail: `No peer with id "${id}"`,
-        },
-      ];
-    }
+    if (idx === -1) return notFound(id);
+
     peers.splice(idx, 1);
-    return [204];
+    return [204, undefined];
   });
 
 function safeParse<T>(data: unknown): T | undefined {

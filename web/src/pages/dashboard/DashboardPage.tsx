@@ -76,10 +76,10 @@ export function DashboardPage() {
         </Text>
       </Stack>
 
-      {/* KPI tiles */}
-      <SimpleGrid cols={{ base: 1, xs: 2, md: 5 }} spacing="md">
+      {/* KPI tiles — 4 tiles per Figma 01-dashboard.png. */}
+      <SimpleGrid cols={{ base: 1, xs: 2, md: 4 }} spacing="md">
         {kpis.isLoading || !kpis.data
-          ? Array.from({ length: 5 }).map((_, i) => (
+          ? Array.from({ length: 4 }).map((_, i) => (
               <CardSkeleton key={i} height={120} />
             ))
           : toKpiStats(kpis.data).map((stat) => (

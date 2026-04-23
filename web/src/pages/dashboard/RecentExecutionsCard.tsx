@@ -1,8 +1,14 @@
 import { Card, Group, Stack, Text, ThemeIcon, Title } from '@mantine/core';
-import { IconCheck, IconPlayerPlay, IconX } from '@tabler/icons-react';
+import {
+  IconCheck,
+  IconCircle,
+  IconPlayerPause,
+  IconPlayerPlay,
+  IconX,
+} from '@tabler/icons-react';
 
 import type {
-  ExecutionResult,
+  ExecutionState,
   ExecutionSummary,
 } from '../../api/resources/executions';
 import { relativeTime } from '../../utils/relativeTime';
@@ -11,17 +17,29 @@ interface RecentExecutionsCardProps {
   executions: ExecutionSummary[];
 }
 
-const resultColor: Record<ExecutionResult, string> = {
+const stateColor: Record<ExecutionState, string> = {
+  pending: 'gray',
+  running: 'blue',
+  paused: 'yellow',
   success: 'teal',
   failure: 'red',
-  running: 'blue',
+  aborted: 'orange',
+  error: 'red',
 };
 
-function ResultIcon({ result }: { result: ExecutionResult }) {
+function StateIcon({ state }: { state: ExecutionState }) {
   const Icon =
-    result === 'success' ? IconCheck : result === 'failure' ? IconX : IconPlayerPlay;
+    state === 'success'
+      ? IconCheck
+      : state === 'failure' || state === 'error'
+        ? IconX
+        : state === 'paused'
+          ? IconPlayerPause
+          : state === 'running'
+            ? IconPlayerPlay
+            : IconCircle;
   return (
-    <ThemeIcon color={resultColor[result]} variant="subtle" size="sm">
+    <ThemeIcon color={stateColor[state]} variant="subtle" size="sm">
       <Icon size={14} stroke={2.5} />
     </ThemeIcon>
   );
@@ -47,7 +65,7 @@ export function RecentExecutionsCard({ executions }: RecentExecutionsCardProps) 
               wrap="nowrap"
             >
               <Group gap="sm" wrap="nowrap">
-                <ResultIcon result={exec.result} />
+                <StateIcon state={exec.state} />
                 <Stack gap={0}>
                   <Text size="sm" fw={500}>
                     {exec.scenarioName}

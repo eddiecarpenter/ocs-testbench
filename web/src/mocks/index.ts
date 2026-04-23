@@ -13,7 +13,6 @@
 import './fakeApi/dashboardFakeApi';
 import './fakeApi/peersFakeApi';
 import './fakeApi/subscribersFakeApi';
-import './fakeApi/templatesFakeApi';
 import './fakeApi/scenariosFakeApi';
 import './fakeApi/executionsFakeApi';
 import './fakeApi/metricsFakeApi';

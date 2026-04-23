@@ -1,4 +1,6 @@
+import type { components } from '../api/schema';
 import type { ExecutionSummary } from '../api/resources/executions';
+import type { DashboardKpis } from '../api/resources/dashboard';
 import type { Peer } from '../api/resources/peers';
 import type { EventStreamLike } from '../api/sse/transport';
 import { setEventStreamFactory } from '../api/sse/transport';
@@ -7,7 +9,21 @@ import { executionFixtures } from './data/executions';
 import { peerFixtures } from './data/peers';
 import { scenarioFixtures } from './data/scenarios';
 import { subscriberFixtures } from './data/subscribers';
-import { templateFixtures } from './data/templates';
+
+/**
+ * Maps SSE event names to their v0.2 payload shapes. Mirrors the table on
+ * `GET /events` in `api/openapi.yaml`. Used to typecheck every dispatch
+ * and broadcast so shape drift fails the build.
+ */
+type SseEventMap = {
+  'peer.updated': components['schemas']['Peer'];
+  'dashboard.kpi': components['schemas']['DashboardKpis'];
+  'execution.created': components['schemas']['ExecutionSummary'];
+  'execution.progress': components['schemas']['Execution'];
+  'execution.paused': components['schemas']['ExecutionPaused'];
+  'execution.resumed': components['schemas']['ExecutionResumed'];
+  'execution.completed': components['schemas']['Execution'];
+};
 
 /** Tick cadence — fast enough to see the UI breathe, slow enough to read. */
 const EXECUTION_TICK_MS = 2_000;
@@ -65,6 +81,8 @@ class MockEventSource implements EventStreamLike {
   }
 
   /** Called by the emitter to push a typed event to this subscriber. */
+  dispatch<K extends keyof SseEventMap>(type: K, data: SseEventMap[K]): void;
+  dispatch(type: 'open', data: undefined): void;
   dispatch(type: string, data: unknown): void {
     const set = this.listeners.get(type);
     if (!set || set.size === 0) return;
@@ -132,7 +150,10 @@ class MockSseEmitter {
     this.peerTimer = this.execTimer = this.kpiTimer = undefined;
   }
 
-  private broadcast(type: string, data: unknown): void {
+  private broadcast<K extends keyof SseEventMap>(
+    type: K,
+    data: SseEventMap[K],
+  ): void {
     for (const sub of this.subscribers) sub.dispatch(type, data);
   }
 
@@ -151,14 +172,14 @@ class MockSseEmitter {
   /** Advance every running execution by one step; terminate at TOTAL_STEPS. */
   private tickExecutions(): void {
     for (const exec of this.executions) {
-      if (exec.result !== 'running') continue;
+      if (exec.state !== 'running') continue;
       const soFar = this.execProgress.get(exec.id) ?? 0;
       const next = soFar + 1;
 
       if (next >= TOTAL_STEPS) {
         // Terminal transition — mark success and emit a final progress
         // event carrying the completed state.
-        exec.result = 'success';
+        exec.state = 'success';
         exec.finishedAt = new Date().toISOString();
         this.execProgress.set(exec.id, TOTAL_STEPS);
         const detail = buildExecutionDetail(exec.id, TOTAL_STEPS);
@@ -176,14 +197,14 @@ class MockSseEmitter {
     this.broadcast('dashboard.kpi', this.computeKpis());
   }
 
-  private computeKpis() {
+  private computeKpis(): DashboardKpis {
     const connected = this.peers.filter((p) => p.status === 'connected').length;
-    const activeRuns = this.executions.filter((e) => e.result === 'running')
-      .length;
+    const activeRuns = this.executions.filter(
+      (e) => e.state === 'running' || e.state === 'paused',
+    ).length;
     return {
       peers: { connected, total: this.peers.length },
       subscribers: subscriberFixtures.length,
-      templates: templateFixtures.length,
       scenarios: scenarioFixtures.length,
       activeRuns,
     };

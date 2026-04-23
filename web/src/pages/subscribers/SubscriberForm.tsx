@@ -363,17 +363,28 @@ export function SubscriberForm({
                 </ActionIcon>
               )
             }
-            styles={{ input: { backgroundColor: 'var(--mantine-color-gray-0)' } }}
+            styles={{
+              input: {
+                backgroundColor:
+                  'light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))',
+              },
+            }}
           />
         </Stack>
       </Stack>
 
-      {/* Footer */}
+      {/* Footer — Delete on left (edit mode only), Update|Create on right.
+          Matches `docs/design/screens/05-subscribers-edit.png`. Cancel
+          collapses into the left slot in create mode (where Delete is
+          absent). Border switches via light-dark() for dark-mode. */}
       <Group
         justify="space-between"
         pt="md"
         mt="md"
-        style={{ borderTop: '1px solid var(--mantine-color-gray-3)' }}
+        style={{
+          borderTop:
+            '1px solid light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-4))',
+        }}
       >
         {mode === 'edit' && onDelete ? (
           <Button
@@ -386,20 +397,17 @@ export function SubscriberForm({
             Delete
           </Button>
         ) : (
-          <span />
-        )}
-        <Group gap="xs">
-          <Button variant="default" onClick={onCancel} disabled={submitting}>
+          <Button variant="subtle" color="gray" onClick={onCancel} disabled={submitting}>
             Cancel
           </Button>
-          <Button
-            type="submit"
-            loading={submitting}
-            disabled={!form.isValid() || deleting}
-          >
-            {mode === 'edit' ? 'Update' : 'Create'}
-          </Button>
-        </Group>
+        )}
+        <Button
+          type="submit"
+          loading={submitting}
+          disabled={!form.isValid() || deleting}
+        >
+          {mode === 'edit' ? 'Update' : 'Create'}
+        </Button>
       </Group>
     </form>
   );
