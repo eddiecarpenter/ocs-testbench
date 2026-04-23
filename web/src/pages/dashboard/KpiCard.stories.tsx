@@ -33,12 +33,12 @@ export const SubscribersStat: Story = {
   },
 };
 
-export const AllFive: Story = {
+export const AllFour: Story = {
   args: {
     stat: sampleStats[0],
   },
   render: () => (
-    <SimpleGrid cols={5} spacing="md" maw={1100}>
+    <SimpleGrid cols={4} spacing="md" maw={1100}>
       {sampleStats.map((stat) => (
         <KpiCard key={stat.label} stat={stat} />
       ))}

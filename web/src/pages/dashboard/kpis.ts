@@ -31,7 +31,7 @@ export function toKpiStats(kpis: DashboardKpis): KpiStat[] {
       to: '/scenarios',
     },
     {
-      label: 'Active runs',
+      label: 'Active executions',
       value: String(kpis.activeRuns),
       subtitle: 'in progress',
       to: '/executions',
