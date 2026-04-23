@@ -4,15 +4,15 @@
 |---------------------|------------------------------------|
 | Feature issue       | #22                                |
 | Branch              | feature/22-frontend-v2-realign     |
-| Last commit         | 8dfe2cc                            |
+| Last commit         | e4f6051                            |
 | Total tasks         | 9                                  |
-| Last updated        | 2026-04-23T12:56:30Z               |
+| Last updated        | 2026-04-23T12:58:30Z               |
 
 ## Completed Tasks
 
 ### #66 — Remove AVP Templates from frontend
 - **Implemented:** Deleted templates resource/mock/fake-API; removed nav, KPI tile, routes.
-- **Files changed:** web/src/api/resources/templates.ts (deleted), web/src/mocks/data/templates.ts (deleted), web/src/mocks/fakeApi/templatesFakeApi.ts (deleted), plus references in mocks/index.ts, sse.ts, dashboardFakeApi.ts, kpis.ts, KpiCard.stories.tsx, AppShell.tsx, AppShell.stories.tsx, App.tsx.
+- **Files changed:** web/src/api/resources/templates.ts, web/src/mocks/data/templates.ts, web/src/mocks/fakeApi/templatesFakeApi.ts (all deleted) + references updated across mocks, dashboard KPIs, AppShell, App, stories.
 - **Decisions:** Intentional intermediate build break on DashboardKpis; fixed by #67.
 
 ### #67 — Regenerate TypeScript types from OpenAPI v0.2 and align Execution types
@@ -21,19 +21,21 @@
 - **Decisions:** Scenario fixture aligned minimally here because it blocked the v0.2 build.
 
 ### #68 — Align MSW mock handlers and fixtures with OpenAPI v0.2
-- **Implemented:** Added explicit return-type annotations on every fake-API reply body (Peer/Subscriber/Scenario/Execution/ExecutionPage/TacEntry/DashboardKpis/ResponseTimeSeries/PeerTestResult) + a shared ProblemBody alias for error branches. SseEventMap links event names to v0.2 payload schemas; dispatch/broadcast narrowed via generics and overloads. Execution detail 404 now emits a full RFC 7807 Problem.
+- **Implemented:** Added explicit return-type annotations on every fake-API reply body + a shared ProblemBody alias for error branches. SseEventMap links event names to v0.2 payload schemas; dispatch/broadcast narrowed via generics and overloads. Execution detail 404 now emits a full RFC 7807 Problem.
 - **Files changed:** web/src/mocks/fakeApi/peersFakeApi.ts, subscribersFakeApi.ts, scenariosFakeApi.ts, executionsFakeApi.ts, metricsFakeApi.ts, web/src/mocks/sse.ts
-- **Decisions:** ProblemBody alias duplicated locally in each fakeApi file (no shared wrapper module); SseEventMap is new because OpenAPI SseEventPayload is an unnamed union.
+- **Decisions:** ProblemBody duplicated locally; SseEventMap is new because OpenAPI SseEventPayload is unnamed.
 
 ### #69 — Realign shell (nav, theme, layout chrome, dark mode) with current Figma
-- **Implemented:** Nav label "Execution" → "Executions" (matches v2 Figma and /executions API path). Route path updated across App.tsx, AppShell.stories.tsx, and the dashboard KPI tile. Chrome borders and main background switch via CSS light-dark() so dark mode renders cleanly (previous gray-0 hex was light-only). Theme gained primaryShade for dark, explicit font/heading/line-height scales, and an Input radius default.
+- **Implemented:** Nav label "Execution" → "Executions" with path /executions. Chrome borders and main bg switch via CSS light-dark() for dark-mode. Theme gained primaryShade for dark, explicit font/heading/line-height scales, and Input radius default.
 - **Files changed:** web/src/layout/AppShell.tsx, web/src/layout/AppShell.stories.tsx, web/src/App.tsx, web/src/pages/dashboard/kpis.ts, web/src/theme/theme.ts
-- **Decisions:** Routes keep placeholders for /scenarios and /executions (shell links them; per-screen features are out of this feature's scope).
+
+### #70 — Realign Dashboard screen with current Figma (01-dashboard.png)
+- **Implemented:** KPI grid shrunk from 5 columns to 4 to match the Figma (Peers, Subscribers, Scenarios, Active executions). Renamed the fourth tile "Active runs" → "Active executions" to match the Figma. Skeleton count now tracks the real tile count. KpiCard story AllFive → AllFour.
+- **Files changed:** web/src/pages/dashboard/kpis.ts, web/src/pages/dashboard/DashboardPage.tsx, web/src/pages/dashboard/KpiCard.stories.tsx
 
 ## Remaining Tasks
 
-- [ ] #70 — Realign Dashboard screen with current Figma (01-dashboard.png) ← current
-- [ ] #71 — Realign Peers screen (list + edit drawer) with current Figma
+- [ ] #71 — Realign Peers screen (list + edit drawer) with current Figma ← current
 - [ ] #72 — Realign Subscribers screen (list + edit drawer) with current Figma
 - [ ] #73 — Realign Settings screen with current Figma
 - [ ] #74 — Verification — build, lint, tests, dev-server proxy, go:embed
