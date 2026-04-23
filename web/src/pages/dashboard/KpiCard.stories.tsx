@@ -7,7 +7,6 @@ import { toKpiStats } from './kpis';
 const sampleStats = toKpiStats({
   peers: { connected: 3, total: 5 },
   subscribers: 142,
-  templates: 8,
   scenarios: 24,
   activeRuns: 2,
 });

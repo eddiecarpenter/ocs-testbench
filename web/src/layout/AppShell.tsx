@@ -22,7 +22,6 @@ import {
   IconSearch,
   IconSettings,
   IconSun,
-  IconTemplate,
   IconUsers,
 } from '@tabler/icons-react';
 import { NavLink as RouterLink, Outlet, useLocation } from 'react-router';
@@ -37,7 +36,6 @@ const primaryNav: NavEntry[] = [
   { label: 'Dashboard', to: '/', icon: IconDashboard },
   { label: 'Peers', to: '/peers', icon: IconRouter },
   { label: 'Subscribers', to: '/subscribers', icon: IconUsers },
-  { label: 'Templates', to: '/templates', icon: IconTemplate },
   { label: 'Scenarios', to: '/scenarios', icon: IconLayoutGrid },
   { label: 'Execution', to: '/execution', icon: IconPlayerPlay },
 ];

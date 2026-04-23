@@ -7,7 +7,6 @@ import { executionFixtures } from './data/executions';
 import { peerFixtures } from './data/peers';
 import { scenarioFixtures } from './data/scenarios';
 import { subscriberFixtures } from './data/subscribers';
-import { templateFixtures } from './data/templates';
 
 /** Tick cadence — fast enough to see the UI breathe, slow enough to read. */
 const EXECUTION_TICK_MS = 2_000;
@@ -183,7 +182,6 @@ class MockSseEmitter {
     return {
       peers: { connected, total: this.peers.length },
       subscribers: subscriberFixtures.length,
-      templates: templateFixtures.length,
       scenarios: scenarioFixtures.length,
       activeRuns,
     };

@@ -31,10 +31,6 @@ export function App() {
               <Route path="peers" element={<PeersPage />} />
               <Route path="subscribers" element={<SubscribersPage />} />
               <Route
-                path="templates"
-                element={<PlaceholderPage title="AVP Templates" />}
-              />
-              <Route
                 path="scenarios"
                 element={<PlaceholderPage title="Scenarios" />}
               />

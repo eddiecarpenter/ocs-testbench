@@ -40,10 +40,6 @@ export const WithDashboard: Story = {
               element={<PlaceholderPage title="Subscribers" />}
             />
             <Route
-              path="templates"
-              element={<PlaceholderPage title="AVP Templates" />}
-            />
-            <Route
               path="scenarios"
               element={<PlaceholderPage title="Scenarios" />}
             />
