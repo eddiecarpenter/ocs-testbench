@@ -3,7 +3,7 @@ import {
   Divider,
   Group,
   NumberInput,
-  SegmentedControl,
+  Select,
   Stack,
   Switch,
   Text,
@@ -215,20 +215,17 @@ export function PeerForm({
               {...form.getInputProps('port')}
             />
           </Group>
-          <div>
-            <Text size="sm" fw={500} mb={4}>
-              Transport
-            </Text>
-            <SegmentedControl
-              fullWidth
-              data={[
-                { label: 'TCP', value: 'TCP' },
-                { label: 'TLS', value: 'TLS' },
-              ]}
-              key={form.key('transport')}
-              {...form.getInputProps('transport')}
-            />
-          </div>
+          <Select
+            label="Transport"
+            data={[
+              { label: 'TCP', value: 'TCP' },
+              { label: 'TLS', value: 'TLS' },
+            ]}
+            allowDeselect={false}
+            checkIconPosition="right"
+            key={form.key('transport')}
+            {...form.getInputProps('transport')}
+          />
           <NumberInput
             label="Watchdog interval"
             suffix=" seconds"
@@ -249,13 +246,10 @@ export function PeerForm({
           <Group justify="space-between" align="flex-start" wrap="nowrap">
             <Stack gap={2}>
               <Text size="sm" fw={500}>
-                Auto-start on server boot
+                Auto-connect on startup
               </Text>
               <Text size="xs" c="dimmed">
-                Start this peer automatically when the server boots. Has no
-                effect on the current status — a peer with this flag on can
-                still be Stopped by the operator, and this setting won&apos;t
-                start it now. Use the Start action for that.
+                Automatically connect this peer when the application starts.
               </Text>
             </Stack>
             <Switch
@@ -266,8 +260,18 @@ export function PeerForm({
         </Stack>
       </Stack>
 
-      {/* Footer */}
-      <Group justify="space-between" pt="md" mt="md" style={{ borderTop: '1px solid var(--mantine-color-gray-3)' }}>
+      {/* Footer — Delete on left (edit mode only), Test + Update|Create on
+          right. Matches `docs/design/screens/03-peers-edit.png`. Border
+          switches via CSS light-dark() so it stays visible in dark mode. */}
+      <Group
+        justify="space-between"
+        pt="md"
+        mt="md"
+        style={{
+          borderTop:
+            '1px solid light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-4))',
+        }}
+      >
         {mode === 'edit' && onDelete ? (
           <Button
             variant="subtle"
@@ -279,12 +283,11 @@ export function PeerForm({
             Delete
           </Button>
         ) : (
-          <span />
-        )}
-        <Group gap="xs">
-          <Button variant="default" onClick={onCancel} disabled={submitting}>
+          <Button variant="subtle" color="gray" onClick={onCancel} disabled={submitting}>
             Cancel
           </Button>
+        )}
+        <Group gap="xs">
           {onTest && (
             <Button
               variant="default"
