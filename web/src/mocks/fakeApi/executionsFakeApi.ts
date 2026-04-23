@@ -1,7 +1,7 @@
 import type {
   Execution,
   ExecutionPage,
-  ExecutionResult,
+  ExecutionState,
 } from '../../api/resources/executions';
 import { buildExecutionDetail } from '../data/executionDetails';
 import { executionFixtures } from '../data/executions';
@@ -12,12 +12,12 @@ mock
   .onGet(/\/executions(\?|$)/)
   .withDelayInMs(250)
   .reply((config): [number, ExecutionPage] => {
-    const statusFilter = config.params?.status as ExecutionResult | undefined;
+    const stateFilter = config.params?.state as ExecutionState | undefined;
     const limit = Math.min(500, Math.max(1, Number(config.params?.limit ?? 50)));
     const offset = Math.max(0, Number(config.params?.offset ?? 0));
 
-    const filtered = statusFilter
-      ? executionFixtures.filter((e) => e.result === statusFilter)
+    const filtered = stateFilter
+      ? executionFixtures.filter((e) => e.state === stateFilter)
       : executionFixtures;
 
     const items = filtered.slice(offset, offset + limit);

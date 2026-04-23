@@ -150,14 +150,14 @@ class MockSseEmitter {
   /** Advance every running execution by one step; terminate at TOTAL_STEPS. */
   private tickExecutions(): void {
     for (const exec of this.executions) {
-      if (exec.result !== 'running') continue;
+      if (exec.state !== 'running') continue;
       const soFar = this.execProgress.get(exec.id) ?? 0;
       const next = soFar + 1;
 
       if (next >= TOTAL_STEPS) {
         // Terminal transition — mark success and emit a final progress
         // event carrying the completed state.
-        exec.result = 'success';
+        exec.state = 'success';
         exec.finishedAt = new Date().toISOString();
         this.execProgress.set(exec.id, TOTAL_STEPS);
         const detail = buildExecutionDetail(exec.id, TOTAL_STEPS);
@@ -177,8 +177,9 @@ class MockSseEmitter {
 
   private computeKpis() {
     const connected = this.peers.filter((p) => p.status === 'connected').length;
-    const activeRuns = this.executions.filter((e) => e.result === 'running')
-      .length;
+    const activeRuns = this.executions.filter(
+      (e) => e.state === 'running' || e.state === 'paused',
+    ).length;
     return {
       peers: { connected, total: this.peers.length },
       subscribers: subscriberFixtures.length,

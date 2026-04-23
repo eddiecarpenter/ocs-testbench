@@ -6,12 +6,17 @@ import type { components } from '../schema';
 export type ExecutionSummary = components['schemas']['ExecutionSummary'];
 export type ExecutionPage = components['schemas']['ExecutionPage'];
 export type ExecutionMode = components['schemas']['ExecutionMode'];
-export type ExecutionResult = components['schemas']['ExecutionResult'];
+export type ExecutionState = components['schemas']['ExecutionState'];
 export type Execution = components['schemas']['Execution'];
-export type ExecutionStep = components['schemas']['ExecutionStep'];
+export type StepRecord = components['schemas']['StepRecord'];
+export type PauseReason = components['schemas']['PauseReason'];
+export type ExecutionContextSnapshot =
+  components['schemas']['ExecutionContextSnapshot'];
 
 export interface ListExecutionsParams {
-  status?: ExecutionResult;
+  state?: ExecutionState;
+  scenarioId?: string;
+  batchId?: string;
   limit?: number;
   offset?: number;
 }

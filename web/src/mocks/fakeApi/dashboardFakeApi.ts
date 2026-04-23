@@ -10,7 +10,9 @@ mock
   .withDelayInMs(200)
   .reply((): [number, DashboardKpis] => {
     const connected = peerFixtures.filter((p) => p.status === 'connected').length;
-    const activeRuns = executionFixtures.filter((e) => e.result === 'running').length;
+    const activeRuns = executionFixtures.filter(
+      (e) => e.state === 'running' || e.state === 'paused',
+    ).length;
 
     return [
       200,
