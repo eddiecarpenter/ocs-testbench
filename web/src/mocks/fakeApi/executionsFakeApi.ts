@@ -1,3 +1,4 @@
+import type { components } from '../../api/schema';
 import type {
   Execution,
   ExecutionPage,
@@ -6,6 +7,9 @@ import type {
 import { buildExecutionDetail } from '../data/executionDetails';
 import { executionFixtures } from '../data/executions';
 import { mock } from '../MockAdapter';
+
+/** RFC 7807 problem shape per OpenAPI v0.2. */
+type ProblemBody = components['schemas']['Problem'];
 
 // List endpoint — note regex anchors so /executions/:id doesn't match here.
 mock
@@ -34,7 +38,7 @@ mock
 mock
   .onGet(/\/executions\/[^/]+$/)
   .withDelayInMs(200)
-  .reply((config): [number, Execution | { title: string; status: number }] => {
+  .reply((config): [number, Execution | ProblemBody] => {
     const url = config.url ?? '';
     const id = decodeURIComponent(url.split('/').pop() ?? '');
     const detail = buildExecutionDetail(id);
@@ -42,8 +46,10 @@ mock
       return [
         404,
         {
+          type: 'about:blank',
           title: 'Execution not found',
           status: 404,
+          detail: `No execution with id "${id}"`,
         },
       ];
     }

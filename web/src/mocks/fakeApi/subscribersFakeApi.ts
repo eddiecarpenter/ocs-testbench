@@ -1,3 +1,4 @@
+import type { components } from '../../api/schema';
 import type {
   Subscriber,
   SubscriberInput,
@@ -7,6 +8,9 @@ import { isValidImei } from '../../api/imei';
 import { subscriberFixtures } from '../data/subscribers';
 import tacCatalogDoc from '../data/tacCatalog.json';
 import { mock } from '../MockAdapter';
+
+/** RFC 7807 problem shape per OpenAPI v0.2. */
+type ProblemBody = components['schemas']['Problem'];
 
 /** Working copy so POST/PUT/DELETE survive across calls within a session. */
 const subscribers: Subscriber[] = subscriberFixtures.map((s) => ({ ...s }));
@@ -74,9 +78,7 @@ function validate(
   return Object.keys(errors).length > 0 ? errors : null;
 }
 
-function validationProblem(
-  errors: FieldErrors,
-): [number, Record<string, unknown>] {
+function validationProblem(errors: FieldErrors): [number, ProblemBody] {
   return [
     422,
     {
@@ -85,6 +87,18 @@ function validationProblem(
       status: 422,
       detail: 'One or more fields are invalid',
       errors,
+    },
+  ];
+}
+
+function notFound(id: string): [number, ProblemBody] {
+  return [
+    404,
+    {
+      type: 'about:blank',
+      title: 'Subscriber not found',
+      status: 404,
+      detail: `No subscriber with id "${id}"`,
     },
   ];
 }
@@ -103,32 +117,24 @@ function applyInput(base: Partial<Subscriber>, input: SubscriberInput): Subscrib
 mock
   .onGet(/\/subscribers$/)
   .withDelayInMs(250)
-  .reply(() => [200, subscribers]);
+  .reply((): [number, Subscriber[]] => [200, subscribers]);
 
 // Detail
-mock.onGet(/\/subscribers\/[^/]+$/).reply((config) => {
-  const m = /\/subscribers\/([^/]+)$/.exec(config.url ?? '');
-  const id = m ? decodeURIComponent(m[1]) : '';
-  const sub = subscribers.find((s) => s.id === id);
-  if (!sub) {
-    return [
-      404,
-      {
-        type: 'about:blank',
-        title: 'Subscriber not found',
-        status: 404,
-        detail: `No subscriber with id "${id}"`,
-      },
-    ];
-  }
-  return [200, sub];
-});
+mock.onGet(/\/subscribers\/[^/]+$/).reply(
+  (config): [number, Subscriber | ProblemBody] => {
+    const m = /\/subscribers\/([^/]+)$/.exec(config.url ?? '');
+    const id = m ? decodeURIComponent(m[1]) : '';
+    const sub = subscribers.find((s) => s.id === id);
+    if (!sub) return notFound(id);
+    return [200, sub];
+  },
+);
 
 // Create
 mock
   .onPost(/\/subscribers$/)
   .withDelayInMs(300)
-  .reply((config) => {
+  .reply((config): [number, Subscriber | ProblemBody] => {
     const input = safeParse<SubscriberInput>(config.data);
     const errors = validate(input, subscribers);
     if (errors) return validationProblem(errors);
@@ -143,21 +149,11 @@ mock
 mock
   .onPut(/\/subscribers\/[^/]+$/)
   .withDelayInMs(300)
-  .reply((config) => {
+  .reply((config): [number, Subscriber | ProblemBody] => {
     const m = /\/subscribers\/([^/]+)$/.exec(config.url ?? '');
     const id = m ? decodeURIComponent(m[1]) : '';
     const idx = subscribers.findIndex((s) => s.id === id);
-    if (idx === -1) {
-      return [
-        404,
-        {
-          type: 'about:blank',
-          title: 'Subscriber not found',
-          status: 404,
-          detail: `No subscriber with id "${id}"`,
-        },
-      ];
-    }
+    if (idx === -1) return notFound(id);
 
     const input = safeParse<SubscriberInput>(config.data);
     const errors = validate(input, subscribers, id);
@@ -172,30 +168,20 @@ mock
 mock
   .onDelete(/\/subscribers\/[^/]+$/)
   .withDelayInMs(200)
-  .reply((config) => {
+  .reply((config): [number, void | ProblemBody] => {
     const m = /\/subscribers\/([^/]+)$/.exec(config.url ?? '');
     const id = m ? decodeURIComponent(m[1]) : '';
     const idx = subscribers.findIndex((s) => s.id === id);
-    if (idx === -1) {
-      return [
-        404,
-        {
-          type: 'about:blank',
-          title: 'Subscriber not found',
-          status: 404,
-          detail: `No subscriber with id "${id}"`,
-        },
-      ];
-    }
+    if (idx === -1) return notFound(id);
     subscribers.splice(idx, 1);
-    return [204];
+    return [204, undefined];
   });
 
 // TAC catalogue — immutable; served directly from the bundled JSON.
 mock
   .onGet(/\/tac-catalog$/)
   .withDelayInMs(100)
-  .reply(() => [200, tacCatalog]);
+  .reply((): [number, TacEntry[]] => [200, tacCatalog]);
 
 function safeParse<T>(data: unknown): T | undefined {
   if (typeof data === 'string') {
