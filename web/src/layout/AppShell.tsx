@@ -32,13 +32,26 @@ type NavEntry = {
   icon: React.ComponentType<{ size?: number | string; stroke?: number }>;
 };
 
+/**
+ * Primary navigation — order, labels and routes mirror the v2 Figma shell
+ * (`docs/design/screens/01-dashboard.png`). Executions is the v2 plural
+ * label and matches the `/executions` path used by the v0.2 API.
+ */
 const primaryNav: NavEntry[] = [
   { label: 'Dashboard', to: '/', icon: IconDashboard },
   { label: 'Peers', to: '/peers', icon: IconRouter },
   { label: 'Subscribers', to: '/subscribers', icon: IconUsers },
   { label: 'Scenarios', to: '/scenarios', icon: IconLayoutGrid },
-  { label: 'Execution', to: '/execution', icon: IconPlayerPlay },
+  { label: 'Executions', to: '/executions', icon: IconPlayerPlay },
 ];
+
+/** Light/dark aware border so chrome dividers remain visible in dark mode. */
+const CHROME_BORDER =
+  'light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-4))';
+
+/** Content surface — subtle off-body in both light and dark. */
+const CONTENT_BG =
+  'light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-8))';
 
 function ThemeToggle() {
   const { colorScheme, toggleColorScheme } = useMantineColorScheme();
@@ -55,6 +68,21 @@ function ThemeToggle() {
   );
 }
 
+function navItemStyles(isActive: boolean) {
+  return {
+    root: {
+      borderRadius: 'var(--mantine-radius-sm)',
+      borderLeft: isActive
+        ? '3px solid var(--mantine-color-brand-6)'
+        : '3px solid transparent',
+      paddingLeft: 'calc(var(--mantine-spacing-sm) - 3px)',
+    },
+    label: {
+      fontWeight: isActive ? 600 : 500,
+    },
+  } as const;
+}
+
 export function AppShell() {
   const { pathname } = useLocation();
 
@@ -64,11 +92,7 @@ export function AppShell() {
       navbar={{ width: 240, breakpoint: 'sm' }}
       padding="md"
     >
-      <MantineAppShell.Header
-        style={{
-          borderBottom: '1px solid var(--mantine-color-gray-3)',
-        }}
-      >
+      <MantineAppShell.Header style={{ borderBottom: `1px solid ${CHROME_BORDER}` }}>
         <Group h="100%" px="md" justify="space-between" wrap="nowrap">
           <UnstyledButton
             component={RouterLink}
@@ -115,9 +139,7 @@ export function AppShell() {
       <MantineAppShell.Navbar
         p="sm"
         bg="var(--mantine-color-body)"
-        style={{
-          borderRight: '1px solid var(--mantine-color-gray-3)',
-        }}
+        style={{ borderRight: `1px solid ${CHROME_BORDER}` }}
       >
         <Stack gap={2} h="100%">
           {primaryNav.map((entry) => {
@@ -136,18 +158,7 @@ export function AppShell() {
                 active={isActive}
                 variant="light"
                 color="brand"
-                styles={{
-                  root: {
-                    borderRadius: 'var(--mantine-radius-sm)',
-                    borderLeft: isActive
-                      ? '3px solid var(--mantine-color-brand-6)'
-                      : '3px solid transparent',
-                    paddingLeft: 'calc(var(--mantine-spacing-sm) - 3px)',
-                  },
-                  label: {
-                    fontWeight: isActive ? 600 : 500,
-                  },
-                }}
+                styles={navItemStyles(isActive)}
               />
             );
           })}
@@ -162,27 +173,15 @@ export function AppShell() {
               active={pathname.startsWith('/settings')}
               variant="light"
               color="brand"
-              styles={{
-                root: {
-                  borderRadius: 'var(--mantine-radius-sm)',
-                  borderLeft: pathname.startsWith('/settings')
-                    ? '3px solid var(--mantine-color-brand-6)'
-                    : '3px solid transparent',
-                  paddingLeft: 'calc(var(--mantine-spacing-sm) - 3px)',
-                },
-                label: {
-                  fontWeight: pathname.startsWith('/settings') ? 600 : 500,
-                },
-              }}
+              styles={navItemStyles(pathname.startsWith('/settings'))}
             />
           </Box>
         </Stack>
       </MantineAppShell.Navbar>
 
-      <MantineAppShell.Main bg="var(--mantine-color-gray-0)">
+      <MantineAppShell.Main style={{ backgroundColor: CONTENT_BG }}>
         <Outlet />
       </MantineAppShell.Main>
     </MantineAppShell>
   );
 }
-

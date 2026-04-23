@@ -34,7 +34,7 @@ export function toKpiStats(kpis: DashboardKpis): KpiStat[] {
       label: 'Active runs',
       value: String(kpis.activeRuns),
       subtitle: 'in progress',
-      to: '/execution',
+      to: '/executions',
     },
   ];
 }

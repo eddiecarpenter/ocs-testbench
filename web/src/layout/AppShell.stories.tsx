@@ -44,7 +44,7 @@ export const WithDashboard: Story = {
               element={<PlaceholderPage title="Scenarios" />}
             />
             <Route
-              path="execution"
+              path="executions"
               element={<PlaceholderPage title="Executions" />}
             />
             <Route
