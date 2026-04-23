@@ -9,9 +9,25 @@ import { storybookTest } from '@storybook/addon-vitest/vitest-plugin';
 import { playwright } from '@vitest/browser-playwright';
 const dirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url));
 
+// Go backend dev port — override with VITE_BACKEND_URL when your local
+// server listens elsewhere. Defaults to http://localhost:8080 (the
+// common convention for Go HTTP dev servers). Used for the `/api`
+// dev-server proxy below; production builds are embedded into the
+// binary via `go:embed` and served from the same origin, so the proxy
+// is a dev-time-only concern.
+const BACKEND_URL = process.env.VITE_BACKEND_URL ?? 'http://localhost:8080';
+
 // More info at: https://storybook.js.org/docs/next/writing-tests/integrations/vitest-addon
 export default defineConfig({
   plugins: [react()],
+  server: {
+    proxy: {
+      '/api': {
+        target: BACKEND_URL,
+        changeOrigin: true,
+      },
+    },
+  },
   test: {
     projects: [{
       extends: true,
