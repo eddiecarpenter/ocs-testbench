@@ -22,7 +22,7 @@ on:
 
 jobs:
   pipeline:
-    uses: eddiecarpenter/gh-agentic/.github/workflows/agentic-pipeline-reusable.yml@v2.2.4
+    uses: eddiecarpenter/gh-agentic/.github/workflows/agentic-pipeline-reusable.yml@v2.2.5
     secrets: inherit
     permissions:
       contents: write
