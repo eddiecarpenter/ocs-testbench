@@ -33,20 +33,12 @@ import {
   useRunScenario,
   useScenarios,
 } from '../api/scenarios';
-import type { ScenarioSummary, UnitType } from '../store/types';
-
-const UNIT_GROUP_ORDER: UnitType[] = ['OCTET', 'TIME', 'UNITS'];
-
-/** Stable group order — independent of the order rows arrive in. */
-function groupByUnit(rows: ScenarioSummary[]): Record<UnitType, ScenarioSummary[]> {
-  const out: Record<UnitType, ScenarioSummary[]> = {
-    OCTET: [],
-    TIME: [],
-    UNITS: [],
-  };
-  for (const r of rows) out[r.unitType].push(r);
-  return out;
-}
+import {
+  UNIT_GROUP_ORDER,
+  filterScenarios,
+  groupByUnit,
+} from '../list/listSelectors';
+import type { ScenarioSummary } from '../store/types';
 
 /**
  * Scenarios listing — replaces the legacy `/scenarios` placeholder.
@@ -75,19 +67,15 @@ export function ScenariosListPage() {
     return m;
   }, [peersQuery.data]);
 
-  const filtered = useMemo(() => {
-    const rows = scenariosQuery.data ?? [];
-    const needle = search.trim().toLowerCase();
-    return rows.filter((row) => {
-      if (peerFilter && row.peerId !== peerFilter) return false;
-      if (!needle) return true;
-      const peerName = (row.peerId && peerMap.get(row.peerId)) ?? '';
-      return (
-        row.name.toLowerCase().includes(needle) ||
-        peerName.toLowerCase().includes(needle)
-      );
-    });
-  }, [scenariosQuery.data, search, peerFilter, peerMap]);
+  const filtered = useMemo(
+    () =>
+      filterScenarios(scenariosQuery.data ?? [], {
+        search,
+        peerFilter,
+        peerNameById: peerMap,
+      }),
+    [scenariosQuery.data, search, peerFilter, peerMap],
+  );
 
   const grouped = useMemo(() => groupByUnit(filtered), [filtered]);
 
