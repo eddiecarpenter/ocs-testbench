@@ -65,6 +65,13 @@ const DRAWER_STYLES = {
  *
  * No status filter and no lifecycle actions — a Subscriber is pure
  * configuration with no runtime state.
+ *
+ * The v2 Figma surfaces a `NAME` column. The v0.2 OpenAPI `Subscriber`
+ * schema has no such field — the identifier is `msisdn`. Per the Contract
+ * Rules (see .ai/RULEBOOK.md), a new field on a shared schema requires
+ * explicit human approval, so the Name column is deliberately omitted
+ * here. If/when the contract grows a `name` field, the column slots in
+ * between actions and MSISDN.
  */
 export function SubscribersPage() {
   const subs = useSubscribers();

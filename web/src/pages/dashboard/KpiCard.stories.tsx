@@ -7,7 +7,6 @@ import { toKpiStats } from './kpis';
 const sampleStats = toKpiStats({
   peers: { connected: 3, total: 5 },
   subscribers: 142,
-  templates: 8,
   scenarios: 24,
   activeRuns: 2,
 });
@@ -34,12 +33,12 @@ export const SubscribersStat: Story = {
   },
 };
 
-export const AllFive: Story = {
+export const AllFour: Story = {
   args: {
     stat: sampleStats[0],
   },
   render: () => (
-    <SimpleGrid cols={5} spacing="md" maw={1100}>
+    <SimpleGrid cols={4} spacing="md" maw={1100}>
       {sampleStats.map((stat) => (
         <KpiCard key={stat.label} stat={stat} />
       ))}

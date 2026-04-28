@@ -11,12 +11,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * This OpenAPI spec, served as YAML
-         * @description Returns the spec the running server was built against. Useful for
-         *     clients that want to introspect the live contract (Postman,
-         *     contract-diff checks in CI, etc.).
-         */
+        /** This OpenAPI spec, served as YAML */
         get: operations["getOpenApiYaml"];
         put?: never;
         post?: never;
@@ -33,10 +28,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * This OpenAPI spec, served as JSON
-         * @description JSON-converted copy of `/openapi.yaml` for tools that only speak JSON.
-         */
+        /** This OpenAPI spec, served as JSON */
         get: operations["getOpenApiJson"];
         put?: never;
         post?: never;
@@ -53,11 +45,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Browsable API reference (Redoc / Swagger UI)
-         * @description HTML page that renders `/openapi.yaml` using Redoc (or Swagger UI).
-         *     Intended for humans — point a browser at it.
-         */
+        /** Browsable API reference (Redoc / Swagger UI) */
         get: operations["getApiDocs"];
         put?: never;
         post?: never;
@@ -141,16 +129,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Start this peer (enable supervision + connect)
-         * @description Enables the supervision loop for this peer and triggers a CER/CEA
-         *     exchange. Moves the peer from `stopped` through `connecting` to
-         *     `connected` (or `error` / `disconnected` with ongoing retries if
-         *     the handshake fails). Returns the updated `Peer` immediately —
-         *     the status may still be `connecting` when the response is
-         *     returned; clients should react to subsequent `peer.updated` SSE
-         *     events for the final outcome.
-         */
+        /** Start this peer (enable supervision + connect) */
         post: operations["startPeer"];
         delete?: never;
         options?: never;
@@ -170,15 +149,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Stop this peer (disable supervision + disconnect)
-         * @description Administratively stops this peer: disables the supervision loop
-         *     and closes the Diameter transport. The peer transitions to
-         *     `stopped` and will not retry. This is distinct from the
-         *     transport-level `disconnected` state (where supervision is still
-         *     active and will redial on its own). Use `POST /peers/{id}/start`
-         *     to resume.
-         */
+        /** Stop this peer (disable supervision + disconnect) */
         post: operations["stopPeer"];
         delete?: never;
         options?: never;
@@ -197,11 +168,9 @@ export interface paths {
         put?: never;
         /**
          * Dry-run a CER/CEA probe against a candidate peer config
-         * @description Performs a synchronous capability exchange probe using the
-         *     `PeerInput` in the request body. The probe does **not** read from
-         *     or write to persistent state — it is intentionally stateless so
-         *     the UI can validate configuration changes before they are saved
-         *     (including for brand-new peers that have no id yet).
+         * @description Stateless synchronous capability exchange against the `PeerInput` in
+         *     the body. Neither reads nor writes persistent state — valid for
+         *     brand-new peers that have no id yet.
          */
         post: operations["testPeerConfig"];
         delete?: never;
@@ -219,9 +188,9 @@ export interface paths {
         };
         /**
          * List subscribers
-         * @description Returns every configured subscriber. The testbench is expected to
-         *     hold at most a few thousand subscribers so the list is returned
-         *     unpaginated — the UI does client-side search/filter.
+         * @description Returns every configured subscriber unpaginated — the testbench is
+         *     expected to hold at most a few thousand subscribers and the UI does
+         *     client-side search/filter.
          */
         get: operations["listSubscribers"];
         put?: never;
@@ -264,41 +233,11 @@ export interface paths {
         };
         /**
          * Curated TAC (Type Allocation Code) catalogue
-         * @description Returns the curated list of device manufacturer/model combinations
-         *     supported by this testbench, each with its 8-digit TAC prefix.
-         *     The catalogue covers roughly the last 10 years of popular handsets
-         *     across major OEMs — it is intentionally a small curated set rather
-         *     than the full GSMA TAC database.
-         *
-         *     The UI uses this to:
-         *     - populate cascading Manufacturer → Model selects on the
-         *       subscriber edit drawer
-         *     - derive the TAC prefix used when generating an IMEI
-         *     - display the canonical "Device" label on the subscribers list
-         *       (e.g. `iPhone 14 Pro` is reconstructed from the `tac` on a
-         *       `Subscriber` by looking it up here)
-         *
-         *     Returned items are immutable on the server side and may be cached
-         *     aggressively by clients (`ETag` / `Cache-Control: public`).
+         * @description Immutable server-side catalogue of manufacturer/model combinations
+         *     with their 8-digit TAC prefix. Used to populate Manufacturer → Model
+         *     cascading selects and derive IMEI generation. Cache aggressively.
          */
         get: operations["listTacCatalog"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/templates": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List AVP templates */
-        get: operations["listTemplates"];
         put?: never;
         post?: never;
         delete?: never;
@@ -314,10 +253,78 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List scenarios */
+        /**
+         * List scenarios (system starters + user scenarios)
+         * @description Returns both system starters (`origin: "system"`, immutable) and
+         *     user scenarios (`origin: "user"`). UI groups by `unitType` in the
+         *     list view (OCTET / TIME / UNITS). Client-side filtering expected;
+         *     no server-side pagination.
+         */
         get: operations["listScenarios"];
         put?: never;
+        /**
+         * Create a new scenario from scratch
+         * @description Creates a user scenario. Most users will reach for
+         *     `POST /scenarios/{id}/duplicate` instead to start from a system
+         *     starter; this endpoint is for advanced flows that bring their own
+         *     full scenario body.
+         */
+        post: operations["createScenario"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/scenarios/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** Get a single scenario by id */
+        get: operations["getScenario"];
+        /**
+         * Replace a scenario
+         * @description Full replacement. System starters (`origin: "system"`) are
+         *     immutable and return `409 Conflict` on write — duplicate first.
+         */
+        put: operations["updateScenario"];
         post?: never;
+        /**
+         * Delete a scenario
+         * @description User scenarios only. System starters cannot be deleted (returns
+         *     `409 Conflict`).
+         */
+        delete: operations["deleteScenario"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/scenarios/{id}/duplicate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Duplicate a scenario into a new user scenario
+         * @description Creates a new scenario with `origin: "user"` carrying a deep copy
+         *     of the source's AVP tree, services, variables, and steps. There is
+         *     no lineage tracking — the duplicate is fully independent.
+         */
+        post: operations["duplicateScenario"];
         delete?: never;
         options?: never;
         head?: never;
@@ -334,7 +341,29 @@ export interface paths {
         /** List past and in-progress executions */
         get: operations["listExecutions"];
         put?: never;
-        post?: never;
+        /**
+         * Start a scenario — single run or batched
+         * @description Creates one or more executions of a scenario. With defaults
+         *     (`concurrency: 1`, `repeats: 1`) a single execution is returned in
+         *     `items`. With higher values the engine spawns `concurrency`
+         *     parallel workers, each running the scenario `repeats` times; all
+         *     executions share a common `batchId` and are returned in `items`.
+         *
+         *     `mode` controls runtime behaviour:
+         *     - `interactive` — honours `pause` steps and runtime breakpoints.
+         *       Typical when a user starts from the Scenario Builder.
+         *     - `continuous` — ignores pauses and breakpoints; runs straight
+         *       through. Required for batched runs.
+         *
+         *     Optional `overrides` apply to every spawned execution:
+         *     - `subscriberIds` — pool, round-robin across iterations
+         *     - `peerId` — overrides the scenario's default peer binding for
+         *       this run only
+         *
+         *     `concurrency` and `repeats` only apply to `continuous` mode and
+         *     are ignored (rejected with 422) for `interactive` runs.
+         */
+        post: operations["startExecution"];
         delete?: never;
         options?: never;
         head?: never;
@@ -353,13 +382,192 @@ export interface paths {
         };
         /**
          * Get a single execution with its full step-by-step detail
-         * @description Returns the full execution detail including every completed step so
-         *     far. For running executions this represents a point-in-time
-         *     snapshot; subsequent state is delivered via the SSE
-         *     `execution.progress` event which carries the same shape.
+         * @description Returns the full execution detail including every completed step
+         *     and a live snapshot of the variables map. For running executions
+         *     this is a point-in-time snapshot; subsequent state is delivered
+         *     via the SSE `execution.progress` event which carries the same shape.
          */
         get: operations["getExecution"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request a pause at the next safe point
+         * @description Requests the engine to pause the execution at the next safe point
+         *     (between steps, or between consume-loop rounds). Returns the
+         *     current execution; the transition to `paused` is delivered via
+         *     the SSE `execution.paused` event when it actually happens.
+         */
+        post: operations["pauseExecution"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume a paused execution
+         * @description Continues normal execution from the paused step. Only valid when
+         *     the execution is in `paused` state; returns `409` otherwise.
+         */
+        post: operations["resumeExecution"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{id}/step": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Advance exactly one step, then pause again
+         * @description Only valid from `paused` state. Executes exactly one scenario step
+         *     and returns to `paused`. Consume steps advance one round per call.
+         */
+        post: operations["stepExecution"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{id}/abort": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Abort a running or paused execution
+         * @description Terminates the execution immediately, transitioning it to
+         *     `aborted`. Sends a best-effort CCR-TERMINATE if the scenario is
+         *     in `sessionMode: session` and has an active session.
+         */
+        post: operations["abortExecution"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{id}/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Context override — permanent mutation of live variables
+         * @description Writes the given variable values into the execution's live context
+         *     map. Affects this send and every subsequent send. Only valid from
+         *     `paused` state. The server applies the override compatibility
+         *     matrix (see `docs/ARCHITECTURE.md §5`) and rejects updates to
+         *     engine-reserved system variables with `422`.
+         */
+        post: operations["applyContextOverride"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{id}/payload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Payload override — one-shot values for the next send
+         * @description Writes the given variable values into a one-shot payload override
+         *     map. These values shadow the live context for the **next send
+         *     only** and are then discarded. Only valid from `paused` state.
+         *     Repeated calls overwrite the pending payload override.
+         */
+        post: operations["applyPayloadOverride"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{id}/breakpoints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** List runtime breakpoints on this execution */
+        get: operations["listBreakpoints"];
+        /**
+         * Replace the set of runtime breakpoints
+         * @description Breakpoints are stored on the execution, not the scenario, so they
+         *     don't pollute the scenario definition. The engine honours them at
+         *     the start of each step when the execution is in `interactive`
+         *     mode.
+         */
+        put: operations["setBreakpoints"];
         post?: never;
         delete?: never;
         options?: never;
@@ -376,32 +584,31 @@ export interface paths {
         };
         /**
          * Server-Sent Events stream of live updates
-         * @description Opens a long-lived SSE stream of server → client events. The
-         *     connection stays open; the server pushes `text/event-stream`
-         *     records as state changes.
+         * @description Opens a long-lived SSE stream of server → client events.
          *
          *     ### Contract
          *
          *     Every event carries the **full current state** of the resource it
          *     concerns. Clients can treat each event as a last-write-wins
-         *     replacement — missed events do not need to be replayed because the
-         *     next event for the same resource supersedes them. Reconnection is
-         *     automatic (the browser `EventSource` does this natively); on
-         *     reconnect the client should invalidate its caches so the next
-         *     paint reads truth from REST.
+         *     replacement — missed events do not need to be replayed because
+         *     the next event for the same resource supersedes them. Reconnection
+         *     is automatic; on reconnect clients should invalidate their caches
+         *     so the next paint reads truth from REST.
          *
          *     ### Event types
          *
          *     | `event:` field | Payload schema | Notes |
          *     |---|---|---|
-         *     | `peer.updated` | `Peer` | Any status transition, rename, etc. |
-         *     | `execution.created` | `ExecutionSummary` | A new execution has started. |
-         *     | `execution.progress` | `Execution` | A running execution advanced. Includes *all* completed steps so far. Terminal events carry `result: success\|failure`. |
+         *     | `peer.updated` | `Peer` | Any status transition, config change. |
          *     | `dashboard.kpi` | `DashboardKpis` | Aggregate counters changed. |
+         *     | `execution.created` | `ExecutionSummary` | A new execution has started. |
+         *     | `execution.progress` | `Execution` | A running execution advanced. Includes all completed steps so far. |
+         *     | `execution.paused` | `ExecutionPaused` | Execution entered `paused` state (pause step, breakpoint, or user). |
+         *     | `execution.resumed` | `ExecutionResumed` | Execution left `paused` state. |
+         *     | `execution.completed` | `Execution` | Execution reached a terminal state (`success` / `failure` / `aborted` / `error`). |
          *
-         *     OpenAPI does not model SSE richly, so this operation documents the
-         *     connection point only; per-event payload shapes are the referenced
-         *     component schemas above.
+         *     OpenAPI does not model SSE richly; this operation documents the
+         *     connection point only.
          */
         get: operations["subscribeEvents"];
         put?: never;
@@ -437,33 +644,25 @@ export interface components {
         Problem: {
             /**
              * Format: uri
-             * @description A URI reference that identifies the problem type
              * @default about:blank
              */
             type: string;
-            /** @description A short, human-readable summary of the problem */
             title: string;
-            /** @description The HTTP status code */
             status: number;
-            /** @description A human-readable explanation specific to this occurrence */
             detail?: string;
-            /**
-             * Format: uri
-             * @description A URI that identifies the specific occurrence
-             */
+            /** Format: uri */
             instance?: string;
             /**
              * @description Optional field-level validation errors. Keys are JSON Pointer
-             *     references into the request body (e.g. `/name`, `/endpoint`);
-             *     values are arrays of human-readable error messages for that
-             *     field. Present on `422` responses and ignorable otherwise.
+             *     references into the request body (e.g. `/name`, `/services/0/ratingGroup`);
+             *     values are arrays of human-readable error messages. Present on
+             *     `422` responses and ignorable otherwise.
              */
             errors?: {
                 [key: string]: string[];
             };
         };
         PageMeta: {
-            /** @description Total number of matching items */
             total: number;
             limit: number;
             offset: number;
@@ -473,35 +672,23 @@ export interface components {
                 connected: number;
                 total: number;
             };
-            /** @description Total registered subscribers */
             subscribers: number;
-            /** @description Total AVP templates */
-            templates: number;
-            /** @description Total defined scenarios */
             scenarios: number;
-            /** @description Number of executions currently in progress */
+            /** @description Executions currently in `running` or `paused` state */
             activeRuns: number;
         };
         /**
          * @description Current runtime state of a peer.
          *
-         *     - `stopped`       — Administratively down. Supervision is off; no
-         *                         reconnect attempts will be made. This is the
-         *                         default state for a freshly created peer.
-         *     - `disconnected`  — Supervision is on but the transport is down.
-         *                         The server will redial automatically.
+         *     - `stopped`       — Administratively down; no reconnect attempts.
+         *     - `disconnected`  — Supervision on, transport down; auto-redials.
          *     - `connecting`    — CER/CEA exchange in progress.
          *     - `connected`     — Session established.
-         *     - `disconnecting` — Graceful teardown in progress (admin-initiated).
-         *     - `restarting`    — Admin-initiated stop followed by start so a
-         *                         config change can take effect.
-         *     - `error`         — Supervision is on but the peer is in a
-         *                         persistent failure state (exponential backoff).
+         *     - `disconnecting` — Graceful teardown in progress.
+         *     - `restarting`    — Admin-initiated stop+start for a config change.
+         *     - `error`         — Supervision on, persistent failure, exp. backoff.
          *
-         *     The distinction between `stopped` and `disconnected` is
-         *     deliberate: the former means "admin does not want this up"; the
-         *     latter means "admin wants this up but the transport is
-         *     currently down".
+         *     `stopped` vs `disconnected`: admin intent vs transport health.
          * @enum {string}
          */
         PeerStatus: "stopped" | "disconnected" | "connecting" | "connected" | "disconnecting" | "restarting" | "error";
@@ -513,213 +700,527 @@ export interface components {
         Peer: {
             id: string;
             name: string;
-            /**
-             * @description Peer hostname or IP address
-             * @example 10.0.1.5
-             */
+            /** @example 10.0.1.5 */
             host: string;
-            /**
-             * @description TCP/TLS port
-             * @example 3868
-             */
+            /** @example 3868 */
             port: number;
-            /**
-             * @description Diameter Origin-Host identity
-             * @example ctf-01.test.local
-             */
+            /** @example ctf-01.test.local */
             originHost: string;
-            /**
-             * @description Diameter Origin-Realm identity
-             * @example test.local
-             */
-            originRealm: string;
-            transport: components["schemas"]["PeerTransport"];
-            /**
-             * @description Device-Watchdog interval (seconds)
-             * @default 30
-             */
-            watchdogIntervalSeconds: number;
-            /**
-             * @description Pure server-boot flag. When the server starts, peers with
-             *     `autoConnect: true` are automatically started (equivalent to
-             *     `POST /peers/{id}/start`); peers with `autoConnect: false`
-             *     remain `stopped` until the operator starts them.
-             *
-             *     This flag has **no bearing on current status**. A peer can
-             *     be `autoConnect: true` and `stopped` (the operator stopped
-             *     it after boot), or `autoConnect: false` and `connected`
-             *     (started manually during this run).
-             * @default true
-             */
-            autoConnect: boolean;
-            status: components["schemas"]["PeerStatus"];
-            /** @description Optional human-readable status detail (e.g. 'CER/CEA timeout') */
-            statusDetail?: string;
-            /**
-             * Format: date-time
-             * @description Timestamp of the most recent status change
-             */
-            lastChangeAt?: string;
-        };
-        /**
-         * @description Writable subset of `Peer`. Used for both create (POST /peers) and
-         *     replace (PUT /peers/{id}). Live-state fields (`status`,
-         *     `statusDetail`, `lastChangeAt`) are computed server-side and
-         *     rejected on write.
-         */
-        PeerInput: {
-            name: string;
-            /**
-             * @description Peer hostname or IP address
-             * @example 10.0.1.5
-             */
-            host: string;
-            /**
-             * @description TCP/TLS port
-             * @example 3868
-             */
-            port: number;
-            /**
-             * @description Diameter Origin-Host identity
-             * @example ctf-01.test.local
-             */
-            originHost: string;
-            /**
-             * @description Diameter Origin-Realm identity
-             * @example test.local
-             */
+            /** @example test.local */
             originRealm: string;
             transport: components["schemas"]["PeerTransport"];
             /** @default 30 */
             watchdogIntervalSeconds: number;
             /**
-             * @description If true, the server connects this peer at server startup.
+             * @description Pure server-boot flag. When the server starts, peers with
+             *     `autoConnect: true` are started automatically; peers with
+             *     `autoConnect: false` remain `stopped` until operator action.
              * @default true
              */
             autoConnect: boolean;
+            status: components["schemas"]["PeerStatus"];
+            /** @description Optional human-readable status detail */
+            statusDetail?: string;
+            /** Format: date-time */
+            lastChangeAt?: string;
         };
         /**
-         * @description Outcome of a synchronous CER/CEA probe against a configured peer.
-         *     Useful for validating configuration changes before saving.
+         * @description Writable subset of `Peer`. Used for both create and replace.
+         *     Live-state fields are computed server-side and rejected on write.
          */
+        PeerInput: {
+            name: string;
+            host: string;
+            port: number;
+            originHost: string;
+            originRealm: string;
+            transport: components["schemas"]["PeerTransport"];
+            /** @default 30 */
+            watchdogIntervalSeconds: number;
+            /** @default true */
+            autoConnect: boolean;
+        };
         PeerTestResult: {
-            /** @description True when a CEA was received without error */
             ok: boolean;
-            /** @description Round-trip time of the probe in milliseconds */
             durationMs: number;
-            /** @description Human-readable detail (e.g. 'CER/CEA timeout', 'handshake OK') */
             detail?: string;
         };
-        /**
-         * @description A subscriber identity used by test scenarios. Carries the SIM
-         *     credentials (MSISDN + ICCID), an optional device binding
-         *     (Manufacturer + Model, expressed server-side as a TAC prefix), and
-         *     an optional IMEI (only meaningful when a device is bound).
-         */
         Subscriber: {
             id: string;
             /**
-             * @description E.164-style MSISDN, digits only (no `+` prefix). The primary
-             *     identifier of a subscriber; unique across subscribers.
+             * @description E.164 MSISDN, digits only; primary identifier.
              * @example 27821234567
              */
             msisdn: string;
             /**
-             * @description Integrated Circuit Card Identifier (SIM serial), 19 or 20
-             *     digits. Unique across subscribers.
+             * @description SIM serial, 19 or 20 digits. Unique across subscribers.
              * @example 89270100001234567890
              */
             iccid: string;
-            /**
-             * @description 8-digit Type Allocation Code identifying the device
-             *     manufacturer + model. When present, the server recognises it
-             *     as one of the catalogue entries at `GET /tac-catalog` and
-             *     the UI looks up Manufacturer/Model labels from there.
-             * @example 35398506
-             */
+            /** @description 8-digit Type Allocation Code, from `GET /tac-catalog`. */
             tac?: string;
-            /**
-             * @description 15-digit IMEI (TAC + 6 serial + Luhn check digit). Only
-             *     present when a device is bound (`tac` is set). Not unique —
-             *     the same physical device can legitimately be paired with
-             *     multiple test subscribers.
-             * @example 353985067894321
-             */
+            /** @description 15-digit IMEI; present only when a device is bound. */
             imei?: string;
         };
-        /**
-         * @description Writable subset of `Subscriber`. Used for both create
-         *     (POST /subscribers) and replace (PUT /subscribers/{id}).
-         */
         SubscriberInput: {
             msisdn: string;
             iccid: string;
-            /**
-             * @description Optional 8-digit TAC. When set, must match an entry in
-             *     `GET /tac-catalog` — the server will reject unknown TACs with
-             *     a 422.
-             */
             tac?: string;
-            /**
-             * @description Optional 15-digit IMEI. Must be Luhn-valid and, when `tac`
-             *     is also set, must share the same 8-digit prefix as `tac`.
-             *     Rejected with 422 otherwise.
-             */
             imei?: string;
         };
-        /**
-         * @description One entry in the curated TAC catalogue. Identifies a single
-         *     manufacturer/model combination by its 8-digit TAC prefix.
-         */
         TacEntry: {
-            /**
-             * @description 8-digit Type Allocation Code
-             * @example 35398506
-             */
             tac: string;
             /** @example Apple */
             manufacturer: string;
             /** @example iPhone 14 Pro */
             model: string;
-            /** @description Release year (informational) */
             year?: number;
         };
-        TemplateSummary: {
-            id: string;
-            name: string;
-            description?: string;
-            /** @description Number of AVPs defined on this template */
-            avpCount?: number;
-            /** Format: date-time */
-            updatedAt?: string;
+        /**
+         * @description Service unit type. Drives which CC-* inner AVP the engine places
+         *     into RSU/USU/GSU.
+         * @enum {string}
+         */
+        UnitType: "OCTET" | "TIME" | "UNITS";
+        /**
+         * @description Session-based vs event-based charging model.
+         *     - `session` — INITIAL → UPDATE(s) → TERMINATE lifecycle.
+         *     - `event`   — one-shot CCR-EVENT, no lifecycle.
+         * @enum {string}
+         */
+        SessionMode: "session" | "event";
+        /**
+         * @description Where service-unit AVPs live in the CCR.
+         *     - `root`        — RSU/USU under the CCR root; no MSCC; MSI omitted.
+         *     - `single-mscc` — exactly one MSCC block; MSI = 0.
+         *     - `multi-mscc`  — one-to-many MSCC blocks; MSI = 1; OCTET only.
+         *     See compatibility matrix in docs/ARCHITECTURE.md §4.
+         * @enum {string}
+         */
+        ServiceModel: "root" | "single-mscc" | "multi-mscc";
+        /**
+         * @description - `system` — ships with the product; immutable; can only be duplicated.
+         *     - `user`   — created/owned by the user.
+         * @enum {string}
+         */
+        ScenarioOrigin: "system" | "user";
+        /** @enum {string} */
+        RequestType: "INITIAL" | "UPDATE" | "TERMINATE" | "EVENT";
+        /**
+         * @description Variable reference. In `avpTree` leaf values the form `{{NAME}}`
+         *     is used; in step configuration and expressions the bare `NAME`
+         *     is used. Both forms resolve to the same variable.
+         */
+        VarRef: string;
+        /**
+         * @description Typed variable value. The engine normalises per the inner AVP's
+         *     Diameter data type at send time; JSON `number` is used for
+         *     Unsigned32/Unsigned64/Integer32 AVPs and for CC-Time.
+         */
+        VarValue: string | number | boolean | null;
+        /**
+         * @description User-available generator strategies. System-reserved strategies
+         *     (session-id, charging-id, request-number, etc.) are only used for
+         *     implicit system variables; they cannot be assigned to user-authored
+         *     variables.
+         * @enum {string}
+         */
+        GeneratorStrategy: "literal" | "uuid" | "incrementer" | "random-int" | "random-string" | "random-choice";
+        /**
+         * @description - `once`     — value fixed at execution start.
+         *     - `per-send` — recomputed for every CCR.
+         * @enum {string}
+         */
+        GeneratorRefresh: "once" | "per-send";
+        VariableSourceGenerator: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "generator";
+            strategy: components["schemas"]["GeneratorStrategy"];
+            refresh: components["schemas"]["GeneratorRefresh"];
+            /**
+             * @description Strategy-dependent parameters. Shape varies by `strategy`:
+             *     - `literal`       — `{ value: <VarValue> }`
+             *     - `incrementer`   — `{ start?: number, step?: number }`
+             *     - `random-int`    — `{ min?: number, max?: number }`
+             *     - `random-string` — `{ length: number, charset: "alpha"|"numeric"|"alphanumeric"|"hex" }`
+             *     - `random-choice` — `{ options: string[] }`
+             *     - `uuid`          — no params.
+             */
+            params?: {
+                [key: string]: unknown;
+            };
         };
+        VariableSourceBound: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "bound";
+            /** @enum {string} */
+            from: "subscriber" | "peer" | "config" | "step";
+            /**
+             * @description Name of the field on the source resource, e.g. `msisdn` /
+             *     `originHost` / `service-context` / `requestType`.
+             */
+            field: string;
+        };
+        VariableSourceExtracted: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "extracted";
+            /**
+             * @description Path into the CCA response AVP tree, in dot/bracket notation
+             *     (e.g. `MSCC[100].Granted-Service-Unit.CC-Total-Octets`).
+             */
+            path: string;
+            /**
+             * @description Optional expression applied to the extracted value before
+             *     assignment (see docs/ARCHITECTURE.md §19).
+             */
+            transform?: string;
+        };
+        /** @description Discriminated union identifying where a variable's value comes from. */
+        VariableSource: components["schemas"]["VariableSourceGenerator"] | components["schemas"]["VariableSourceBound"] | components["schemas"]["VariableSourceExtracted"];
+        /**
+         * @description A user-declared variable. System variables (SESSION_ID, MSISDN,
+         *     RG<rg>_GRANTED, etc.) are auto-provisioned at run time and do not
+         *     appear in `scenario.variables`.
+         */
+        Variable: {
+            /**
+             * @description Unique within the scenario. Convention — `SCREAMING_SNAKE_CASE`.
+             *     In `multi-mscc` mode, per-service variables are prefixed
+             *     `RG<rg>_` (engine-provisioned — not authored here).
+             */
+            name: string;
+            source: components["schemas"]["VariableSource"];
+            description?: string;
+        };
+        /**
+         * @description One node in the CCR envelope. Either a grouped AVP (has `children`)
+         *     or a leaf AVP (has `valueRef`). The `avpTree` is the CCR *minus*
+         *     the service-unit AVPs — those are modelled separately in
+         *     `scenario.services` and spliced in at send time by the engine
+         *     (see docs/ARCHITECTURE.md §4 and §7).
+         */
+        AvpNode: {
+            /** @description AVP name from the Diameter dictionary (e.g. `Origin-Host`). */
+            name: string;
+            /** @description AVP code (e.g. 264 for Origin-Host). */
+            code: number;
+            /** @description Vendor-Id, omitted for base-protocol AVPs. */
+            vendorId?: number;
+            /** @description Grouped AVP body. Present iff this is a grouped AVP. */
+            children?: components["schemas"]["AvpNode"][];
+            valueRef?: components["schemas"]["VarRef"];
+        };
+        /**
+         * @description One service entry on a scenario. Controls how the engine
+         *     constructs RSU/USU (and MSCC wrapping) at send time. See §4
+         *     for how `serviceModel` picks between root / single-mscc /
+         *     multi-mscc placement.
+         */
+        Service: {
+            /**
+             * @description Stable key for this service. In `multi-mscc` mode, typically
+             *     the Rating-Group as a decimal string (e.g. `"100"`) since it
+             *     doubles as the catalogue key and feeds `RG<rg>_` variable
+             *     naming.
+             */
+            id: string;
+            /**
+             * @description Rating-Group AVP (432). Required for `single-mscc` and
+             *     `multi-mscc`; omitted for `root`.
+             */
+            ratingGroup?: components["schemas"]["VarRef"];
+            /**
+             * @description Service-Identifier AVP (439). Optional for MSCC-based service
+             *     models; omitted for `root`.
+             */
+            serviceIdentifier?: components["schemas"]["VarRef"];
+            /**
+             * @description Variable carrying the requested-service-units quantity. Engine
+             *     applies the §7 presence rules to decide whether RSU is emitted.
+             */
+            requestedUnits: components["schemas"]["VarRef"];
+            /**
+             * @description Variable carrying used-service-units quantity. Engine applies
+             *     the §7 presence rules to decide whether USU is emitted.
+             */
+            usedUnits?: components["schemas"]["VarRef"];
+        };
+        /**
+         * @description How a step picks which services (`scenario.services` entries) to
+         *     include. Required in `multi-mscc` scenarios; omitted otherwise.
+         */
+        ServiceSelection: {
+            /** @constant */
+            mode: "fixed";
+            serviceIds: string[];
+        } | {
+            /** @constant */
+            mode: "random";
+            from: string[];
+            count: number | {
+                min: number;
+                max: number;
+            };
+        };
+        ServiceSelectionFixed: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            mode: "fixed";
+            serviceIds: string[];
+        };
+        ServiceSelectionRandom: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            mode: "random";
+            from: string[];
+            count: number | {
+                min: number;
+                max: number;
+            };
+        };
+        /**
+         * @description Declarative reaction to a specific outcome. Evaluated after
+         *     assertions; action drives the scheduler.
+         */
+        ResultHandler: {
+            /** @description Expression evaluated against the live context (see §10). */
+            when: string;
+            /** @enum {string} */
+            action: "continue" | "stop" | "retry";
+        };
+        RequestStep: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "request";
+            requestType: components["schemas"]["RequestType"];
+            /**
+             * @description Required in `multi-mscc` scenarios. Omitted in `root` and
+             *     `single-mscc` (the single service is implicit).
+             */
+            services?: components["schemas"]["ServiceSelection"];
+            /**
+             * @description Per-step transient map of variable-name → value, shadowing
+             *     scenario defaults for this step only. Keys must be declared
+             *     variables.
+             */
+            overrides?: {
+                [key: string]: components["schemas"]["VarValue"];
+            };
+            /**
+             * @description Post-receive predicates. On failure the step is marked failed
+             *     and the first matching result handler decides what to do
+             *     next (default: stop).
+             */
+            assertions?: string[];
+            /** @description Pre-send predicates. On failure the step is skipped. */
+            guards?: string[];
+            resultHandlers?: components["schemas"]["ResultHandler"][];
+        };
+        /**
+         * @description Only legal in `sessionMode: session`. Expands at run time into an
+         *     auto-generated sequence of CCR-UPDATEs, re-rolling random service
+         *     selections each round, until `terminateWhen` fires or every
+         *     selected service becomes `exhausted` / `error`.
+         */
+        ConsumeStep: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "consume";
+            services?: components["schemas"]["ServiceSelection"];
+            windowMs: number;
+            maxRounds?: number;
+            /** @description Expression; when true, exits the consume loop. */
+            terminateWhen?: string;
+            overrides?: {
+                [key: string]: components["schemas"]["VarValue"];
+            };
+            assertions?: string[];
+        };
+        WaitStep: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "wait";
+            durationMs: number;
+        };
+        /**
+         * @description Authored breakpoint. Suspends execution until resumed. Honoured
+         *     only in `interactive` execution mode; ignored in `continuous`.
+         */
+        PauseStep: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "pause";
+            label?: string;
+            prompt?: string;
+        };
+        /** @description Discriminated union by `kind`. */
+        ScenarioStep: components["schemas"]["RequestStep"] | components["schemas"]["ConsumeStep"] | components["schemas"]["WaitStep"] | components["schemas"]["PauseStep"];
+        /** @description Row-level shape for the scenarios list view. */
         ScenarioSummary: {
             id: string;
             name: string;
             description?: string;
+            unitType: components["schemas"]["UnitType"];
+            sessionMode: components["schemas"]["SessionMode"];
+            serviceModel: components["schemas"]["ServiceModel"];
+            origin: components["schemas"]["ScenarioOrigin"];
+            favourite?: boolean;
+            subscriberId?: string;
+            peerId?: string;
             stepCount: number;
             /** Format: date-time */
-            updatedAt?: string;
+            updatedAt: string;
         };
-        /** @enum {string} */
+        /** @description Full scenario body. */
+        Scenario: components["schemas"]["ScenarioSummary"] & {
+            /**
+             * @description Root-level AVPs of the CCR envelope, minus the service-unit
+             *     AVPs. Structure is frozen at execution start.
+             */
+            avpTree: components["schemas"]["AvpNode"][];
+            /**
+             * @description Service entries. Exactly one in `root` / `single-mscc`;
+             *     one or more in `multi-mscc`.
+             */
+            services: components["schemas"]["Service"][];
+            /**
+             * @description User-declared variables. System variables are implicit
+             *     and auto-provisioned at run time.
+             */
+            variables: components["schemas"]["Variable"][];
+            steps: components["schemas"]["ScenarioStep"][];
+        };
+        /**
+         * @description Writable subset of `Scenario`. Used for create (POST /scenarios)
+         *     and replace (PUT /scenarios/{id}). Server-owned fields (`id`,
+         *     `origin`, `updatedAt`, `stepCount`) are ignored on write —
+         *     `origin` is always `user` on create/replace; system starters
+         *     cannot be updated.
+         */
+        ScenarioInput: {
+            name: string;
+            description?: string;
+            unitType: components["schemas"]["UnitType"];
+            sessionMode: components["schemas"]["SessionMode"];
+            serviceModel: components["schemas"]["ServiceModel"];
+            /** @default false */
+            favourite: boolean;
+            subscriberId: string;
+            peerId: string;
+            avpTree: components["schemas"]["AvpNode"][];
+            services: components["schemas"]["Service"][];
+            variables: components["schemas"]["Variable"][];
+            steps: components["schemas"]["ScenarioStep"][];
+        };
+        /**
+         * @description Optional body for `POST /scenarios/{id}/duplicate`. When omitted,
+         *     the server picks a name by suffixing ` (copy)` to the source.
+         */
+        ScenarioDuplicateInput: {
+            name?: string;
+        };
+        /**
+         * @description Runtime behaviour of an execution — independent of the scenario's
+         *     `sessionMode`.
+         *
+         *     - `interactive` — honours pause steps and runtime breakpoints;
+         *                        UI presents a debugger.
+         *     - `continuous`  — ignores pauses and breakpoints; runs through.
+         *                        Required for batched runs (`concurrency > 1`
+         *                        or `repeats > 1`).
+         * @enum {string}
+         */
         ExecutionMode: "interactive" | "continuous";
-        /** @enum {string} */
-        ExecutionResult: "running" | "success" | "failure";
+        /**
+         * @description Execution state machine. See docs/ARCHITECTURE.md §6.
+         *
+         *     Non-terminal: `pending`, `running`, `paused`.
+         *     Terminal: `success`, `failure`, `aborted`, `error`.
+         * @enum {string}
+         */
+        ExecutionState: "pending" | "running" | "paused" | "success" | "failure" | "aborted" | "error";
+        /**
+         * @description Why an execution entered `paused`:
+         *     - `pause-step` — the scenario contains an explicit `pause` step.
+         *     - `breakpoint` — a runtime breakpoint fired.
+         *     - `user`       — the user clicked Pause (or called /pause).
+         * @enum {string}
+         */
+        PauseReason: "pause-step" | "breakpoint" | "user";
+        StartExecutionInput: {
+            scenarioId: string;
+            mode: components["schemas"]["ExecutionMode"];
+            /** @description Per-run overrides of the scenario's default bindings. */
+            overrides?: {
+                /**
+                 * @description Subscriber pool. When multiple ids are supplied and
+                 *     `repeats > 1`, the engine round-robins across iterations.
+                 */
+                subscriberIds?: string[];
+                /** @description Overrides the scenario's bound peer for this run only. */
+                peerId?: string;
+            };
+            /**
+             * @description Parallel workers. Only legal with `mode: continuous`; values
+             *     other than 1 with `interactive` return 422.
+             * @default 1
+             */
+            concurrency: number;
+            /**
+             * @description Iterations per worker. Only legal with `mode: continuous`.
+             * @default 1
+             */
+            repeats: number;
+        };
+        StartExecutionResult: {
+            /**
+             * @description Present when `concurrency * repeats > 1`. Groups the spawned
+             *     executions for the batch view.
+             */
+            batchId?: string;
+            /** @description One entry per spawned execution. */
+            items: components["schemas"]["ExecutionSummary"][];
+        };
         ExecutionSummary: {
             id: string;
-            /** @description Name of the scenario at execution time */
+            /** @description The scenario this execution was started from. */
+            scenarioId: string;
+            /** @description Name at execution time (denormalised). */
             scenarioName: string;
             mode: components["schemas"]["ExecutionMode"];
-            /** @description Peer used for this execution */
-            peerId: string;
-            /** @description Peer display name at execution time (denormalised) */
+            peerId?: string;
             peerName?: string;
-            result: components["schemas"]["ExecutionResult"];
+            subscriberId?: string;
+            subscriberMsisdn?: string;
+            /** @description Present on executions spawned from a batched Run. */
+            batchId?: string;
+            state: components["schemas"]["ExecutionState"];
             /** Format: date-time */
             startedAt: string;
             /**
              * Format: date-time
-             * @description Present only when the execution has completed
+             * @description Present only for terminal states.
              */
             finishedAt?: string;
         };
@@ -727,65 +1228,152 @@ export interface components {
             items: components["schemas"]["ExecutionSummary"][];
             page: components["schemas"]["PageMeta"];
         };
-        /** @description One step of a scenario execution. */
-        ExecutionStep: {
-            /** @description 1-based sequence number of the step */
+        /**
+         * @description One completed (or in-progress) step of an execution. Matches
+         *     `ScenarioStep` by index; carries the wire-level request/response
+         *     and per-step timing.
+         */
+        StepRecord: {
+            /** @description 1-based step index. */
             n: number;
-            /** @description Short step name (e.g. 'CCR-I', 'CCR-U') */
-            name: string;
-            result: components["schemas"]["ExecutionResult"];
+            /** @enum {string} */
+            kind: "request" | "consume" | "wait" | "pause";
+            /** @description Present for `request` steps. */
+            requestType?: components["schemas"]["RequestType"];
+            /** @description Short human label (e.g. `CCR-I`, `pause top-up`). */
+            label?: string;
+            /**
+             * @description - `pending` — not yet started.
+             *     - `running` — this step is currently executing (includes a
+             *                   paused debugger sitting on it).
+             *     - `success` — completed without assertion or engine failure.
+             *     - `failure` — completed with an assertion failure.
+             *     - `error`   — engine fault (transport loss, dictionary miss).
+             *     - `skipped` — guard returned false.
+             * @enum {string}
+             */
+            state: "pending" | "running" | "success" | "failure" | "error" | "skipped";
             /** Format: date-time */
             startedAt?: string;
-            /**
-             * Format: date-time
-             * @description Present only when the step has completed
-             */
+            /** Format: date-time */
             finishedAt?: string;
-            /** @description Wall-clock duration in milliseconds (present when finished) */
             durationMs?: number;
-            /** @description Human-readable error when `result=failure` */
             errorDetail?: string;
+            /**
+             * @description Wire-level CCR snapshot after variable resolution. Present
+             *     for `request` steps and for each round of `consume` steps.
+             */
+            request?: {
+                [key: string]: unknown;
+            };
+            /** @description Wire-level CCA snapshot. */
+            response?: {
+                [key: string]: unknown;
+            };
+            assertionResults?: {
+                expression: string;
+                passed: boolean;
+                message?: string;
+            }[];
         };
         /**
-         * @description Full execution detail. Extends `ExecutionSummary` with step-by-step
-         *     progress. This is the payload returned by `GET /executions/{id}`
-         *     and carried by every SSE `execution.progress` event.
+         * @description Full execution detail. Extends `ExecutionSummary` with the live
+         *     context snapshot and step-by-step history. This is the payload
+         *     returned by `GET /executions/{id}` and carried by every SSE
+         *     `execution.progress` event.
          */
         Execution: components["schemas"]["ExecutionSummary"] & {
             /**
-             * @description 0-based index of the step currently executing, or equal to
-             *     `totalSteps` when the execution has completed.
+             * @description 0-based index of the step currently executing (or
+             *     paused on), or equal to `totalSteps` when terminal.
              */
             currentStep: number;
             totalSteps: number;
+            /** @description Present when `state == paused`. */
+            pauseReason?: components["schemas"]["PauseReason"];
+            /** @description Runtime breakpoints set on this execution. */
+            breakpoints?: number[];
             /**
-             * @description All steps completed so far. For running executions this
-             *     grows as the scenario advances; terminal executions contain
-             *     every step in the scenario.
+             * @description All steps completed or in progress so far. Grows over
+             *     time for running executions; full scenario for terminal.
              */
-            steps: components["schemas"]["ExecutionStep"][];
+            steps: components["schemas"]["StepRecord"][];
+            context: components["schemas"]["ExecutionContextSnapshot"];
         };
-        ResponseTimePoint: {
+        /**
+         * @description Point-in-time snapshot of the live variables map, partitioned by
+         *     scope for UI convenience. Each map is keyed by variable name.
+         */
+        ExecutionContextSnapshot: {
+            /** @description System variables (SESSION_ID, MSISDN, CC_REQUEST_NUMBER, …). */
+            system: {
+                [key: string]: components["schemas"]["VarValue"];
+            };
+            /** @description User-declared variables. */
+            user: {
+                [key: string]: components["schemas"]["VarValue"];
+            };
             /**
-             * Format: date-time
-             * @description Bucket timestamp (end of bucket)
+             * @description Variables whose source is `extracted`, including the auto-
+             *     provisioned per-RG state variables (`RG<rg>_GRANTED`,
+             *     `RG<rg>_STATE`, …).
              */
+            extracted: {
+                [key: string]: components["schemas"]["VarValue"];
+            };
+        };
+        /**
+         * @description Variable-name → value map, applied permanently to the live context.
+         *     Rejected with 422 for engine-reserved system variables.
+         */
+        ContextOverrideInput: {
+            variables: {
+                [key: string]: components["schemas"]["VarValue"];
+            };
+        };
+        /**
+         * @description Variable-name → value map, applied to the next send only. Repeated
+         *     calls overwrite the pending payload override.
+         */
+        PayloadOverrideInput: {
+            variables: {
+                [key: string]: components["schemas"]["VarValue"];
+            };
+        };
+        BreakpointSet: {
+            /** @description 0-based step indices at which to pause. */
+            stepIndices: number[];
+        };
+        ExecutionPaused: {
+            executionId: string;
+            atStepIndex: number;
+            reason: components["schemas"]["PauseReason"];
+            /** Format: date-time */
+            at: string;
+        };
+        ExecutionResumed: {
+            executionId: string;
+            fromStepIndex: number;
+            /** Format: date-time */
+            at: string;
+        };
+        /**
+         * @description Union of every JSON payload carried in the `data:` field of an SSE
+         *     record emitted by `GET /events`. The `event:` field disambiguates;
+         *     see the table on `/events` for the mapping.
+         */
+        SseEventPayload: components["schemas"]["Peer"] | components["schemas"]["DashboardKpis"] | components["schemas"]["ExecutionSummary"] | components["schemas"]["Execution"] | components["schemas"]["ExecutionPaused"] | components["schemas"]["ExecutionResumed"];
+        ResponseTimePoint: {
+            /** Format: date-time */
             t: string;
-            /** @description 50th percentile response time in milliseconds */
             p50: number;
             p95: number;
             p99: number;
         };
         ResponseTimeSeries: {
-            /**
-             * @description The window that was returned, as ISO 8601 duration
-             * @example PT1H
-             */
+            /** @example PT1H */
             window: string;
-            /**
-             * @description Size of each bucket, as ISO 8601 duration
-             * @example PT2M
-             */
+            /** @example PT2M */
             bucketSize?: string;
             points: components["schemas"]["ResponseTimePoint"][];
         };
@@ -814,6 +1402,19 @@ export interface components {
          *     keyed by JSON Pointer references into the request body.
          */
         ValidationProblem: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /**
+         * @description The requested operation is not legal from the execution's current
+         *     state. For example: resuming an execution that is not `paused`,
+         *     or aborting one that has already reached a terminal state.
+         */
+        IllegalStateProblem: {
             headers: {
                 [name: string]: unknown;
             };
@@ -1268,30 +1869,16 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
-    listTemplates: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Template list */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TemplateSummary"][];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
     listScenarios: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Filter by origin */
+                origin?: components["schemas"]["ScenarioOrigin"];
+                /** @description Filter by unit type */
+                unitType?: components["schemas"]["UnitType"];
+                /** @description Filter by bound peer */
+                peerId?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1310,11 +1897,166 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    createScenario: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScenarioInput"];
+            };
+        };
+        responses: {
+            /** @description Scenario created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Scenario"];
+                };
+            };
+            422: components["responses"]["ValidationProblem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    getScenario: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Scenario detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Scenario"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    updateScenario: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScenarioInput"];
+            };
+        };
+        responses: {
+            /** @description Scenario updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Scenario"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            /** @description Scenario is a system starter and cannot be modified */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            422: components["responses"]["ValidationProblem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    deleteScenario: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Scenario deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            /** @description Scenario is a system starter and cannot be deleted */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    duplicateScenario: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ScenarioDuplicateInput"];
+            };
+        };
+        responses: {
+            /** @description Scenario duplicated */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Scenario"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationProblem"];
+            default: components["responses"]["Problem"];
+        };
+    };
     listExecutions: {
         parameters: {
             query?: {
-                /** @description Filter by execution result/status */
-                status?: components["schemas"]["ExecutionResult"];
+                /** @description Filter by execution state */
+                state?: components["schemas"]["ExecutionState"];
+                scenarioId?: string;
+                /** @description Group executions started together by a batched Run */
+                batchId?: string;
                 /** @description Maximum number of items to return */
                 limit?: components["parameters"]["LimitQuery"];
                 /** @description Number of items to skip */
@@ -1335,6 +2077,32 @@ export interface operations {
                     "application/json": components["schemas"]["ExecutionPage"];
                 };
             };
+            default: components["responses"]["Problem"];
+        };
+    };
+    startExecution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartExecutionInput"];
+            };
+        };
+        responses: {
+            /** @description Execution(s) started */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StartExecutionResult"];
+                };
+            };
+            422: components["responses"]["ValidationProblem"];
             default: components["responses"]["Problem"];
         };
     };
@@ -1363,6 +2131,227 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    pauseExecution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pause requested */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Execution"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["IllegalStateProblem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    resumeExecution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Execution resumed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Execution"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["IllegalStateProblem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    stepExecution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Step executed; back in paused state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Execution"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["IllegalStateProblem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    abortExecution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Execution aborted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Execution"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["IllegalStateProblem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    applyContextOverride: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContextOverrideInput"];
+            };
+        };
+        responses: {
+            /** @description Overrides applied; returns the updated execution */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Execution"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["IllegalStateProblem"];
+            422: components["responses"]["ValidationProblem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    applyPayloadOverride: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PayloadOverrideInput"];
+            };
+        };
+        responses: {
+            /** @description Payload override applied */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Execution"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["IllegalStateProblem"];
+            422: components["responses"]["ValidationProblem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    listBreakpoints: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Breakpoint indices */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BreakpointSet"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    setBreakpoints: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BreakpointSet"];
+            };
+        };
+        responses: {
+            /** @description Breakpoints updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BreakpointSet"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationProblem"];
+            default: components["responses"]["Problem"];
+        };
+    };
     subscribeEvents: {
         parameters: {
             query?: never;
@@ -1379,6 +2368,7 @@ export interface operations {
                 };
                 content: {
                     "text/event-stream": string;
+                    "application/json": components["schemas"]["SseEventPayload"];
                 };
             };
         };

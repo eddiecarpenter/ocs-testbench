@@ -25,22 +25,16 @@ export function toKpiStats(kpis: DashboardKpis): KpiStat[] {
       to: '/subscribers',
     },
     {
-      label: 'Templates',
-      value: String(kpis.templates),
-      subtitle: 'AVP templates',
-      to: '/templates',
-    },
-    {
       label: 'Scenarios',
       value: String(kpis.scenarios),
       subtitle: 'defined scenarios',
       to: '/scenarios',
     },
     {
-      label: 'Active runs',
+      label: 'Active executions',
       value: String(kpis.activeRuns),
       subtitle: 'in progress',
-      to: '/execution',
+      to: '/executions',
     },
   ];
 }

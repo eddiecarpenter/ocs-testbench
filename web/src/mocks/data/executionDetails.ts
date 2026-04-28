@@ -1,13 +1,14 @@
 import type {
   Execution,
-  ExecutionStep,
+  ExecutionContextSnapshot,
+  StepRecord,
 } from '../../api/resources/executions';
 import { executionFixtures } from './executions';
 
 /**
  * Canonical 12-step Diameter scenario template. Real scenarios would vary
  * per-execution, but for MVP every execution uses the same outline and
- * failures are injected by swapping one step's result to `failure`.
+ * failures are injected by swapping one step's `state` to `failure`.
  */
 const STEP_TEMPLATE = [
   'CER',
@@ -24,23 +25,31 @@ const STEP_TEMPLATE = [
   'CCA-T',
 ];
 
+/** Empty context snapshot — mock executions do not populate live variables. */
+const EMPTY_CONTEXT: ExecutionContextSnapshot = {
+  system: {},
+  user: {},
+  extracted: {},
+};
+
 function buildCompletedSteps(
   startedAtMs: number,
   finishedAtMs: number,
   outcome: 'success' | 'failure',
-): ExecutionStep[] {
+): StepRecord[] {
   const total = STEP_TEMPLATE.length;
   const span = Math.max(1, finishedAtMs - startedAtMs);
   const bucket = Math.floor(span / total);
   // For failures, flip the last step to failure so the step list reads naturally.
-  return STEP_TEMPLATE.map((name, i): ExecutionStep => {
+  return STEP_TEMPLATE.map((label, i): StepRecord => {
     const started = startedAtMs + i * bucket;
     const finished = i === total - 1 ? finishedAtMs : started + bucket;
     const isTerminalFail = outcome === 'failure' && i === total - 1;
     return {
       n: i + 1,
-      name,
-      result: isTerminalFail ? 'failure' : 'success',
+      kind: 'request',
+      label,
+      state: isTerminalFail ? 'failure' : 'success',
       startedAt: new Date(started).toISOString(),
       finishedAt: new Date(finished).toISOString(),
       durationMs: finished - started,
@@ -54,8 +63,8 @@ function buildCompletedSteps(
 function buildRunningSteps(
   startedAtMs: number,
   completedSoFar: number,
-): ExecutionStep[] {
-  const out: ExecutionStep[] = [];
+): StepRecord[] {
+  const out: StepRecord[] = [];
   let cursor = startedAtMs;
   for (let i = 0; i < completedSoFar; i++) {
     const duration = 20 + ((i * 7) % 35); // deterministic-ish jitter
@@ -63,8 +72,9 @@ function buildRunningSteps(
     const finished = cursor + duration;
     out.push({
       n: i + 1,
-      name: STEP_TEMPLATE[i],
-      result: 'success',
+      kind: 'request',
+      label: STEP_TEMPLATE[i],
+      state: 'success',
       startedAt: new Date(started).toISOString(),
       finishedAt: new Date(finished).toISOString(),
       durationMs: duration,
@@ -88,7 +98,7 @@ export function buildExecutionDetail(
   const summary = executionFixtures.find((e) => e.id === id);
   if (!summary) return undefined;
 
-  if (summary.result === 'running') {
+  if (summary.state === 'running') {
     const startedAtMs = Date.parse(summary.startedAt);
     const completed = completedStepsForRunning ?? defaultRunningProgress(id);
     const steps = buildRunningSteps(startedAtMs, completed);
@@ -97,6 +107,7 @@ export function buildExecutionDetail(
       currentStep: completed,
       totalSteps: STEP_TEMPLATE.length,
       steps,
+      context: EMPTY_CONTEXT,
     };
   }
 
@@ -109,8 +120,9 @@ export function buildExecutionDetail(
     steps: buildCompletedSteps(
       startedAtMs,
       finishedAtMs,
-      summary.result === 'failure' ? 'failure' : 'success',
+      summary.state === 'failure' ? 'failure' : 'success',
     ),
+    context: EMPTY_CONTEXT,
   };
 }
 
