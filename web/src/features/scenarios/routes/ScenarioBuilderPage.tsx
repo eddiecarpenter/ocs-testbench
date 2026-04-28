@@ -37,6 +37,11 @@ import { BuilderHeader } from '../builder/BuilderHeader';
 import { BuilderTabs } from '../builder/BuilderTabs';
 import { DirtyGuard } from '../builder/DirtyGuard';
 import { makeNewScenarioDraft, toScenarioInput } from '../builder/defaults';
+import { exportScenarioAsFile } from '../io/exportScenario';
+import {
+  type ImportError,
+  parseAndValidateScenarioJson,
+} from '../io/importScenario';
 
 export function ScenarioBuilderPage() {
   const { id: routeId } = useParams<{ id?: string }>();
@@ -178,6 +183,69 @@ export function ScenarioBuilderPage() {
   }
 
   const [discardOpen, setDiscardOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importError, setImportError] = useState<ImportError | null>(null);
+
+  function handleExport() {
+    if (!draft) return;
+    exportScenarioAsFile(draft);
+  }
+
+  function handleImportClick() {
+    setImportError(null);
+    fileInputRef.current?.click();
+  }
+
+  async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-uploading the same file
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const result = parseAndValidateScenarioJson(text);
+      if (!result.ok) {
+        setImportError(result.error);
+        notifications.show({
+          color: 'red',
+          title: 'Import failed',
+          message:
+            result.error.kind === 'parse'
+              ? result.error.message
+              : `${result.error.errors.length} schema error(s) — see Builder.`,
+        });
+        return;
+      }
+      // Strip server-owned fields and create a fresh scenario.
+      const { id: _omitId, origin: _omitOrigin, stepCount: _omitStepCount, updatedAt: _omitUpdatedAt, ...rest } = result.value;
+      void _omitId; void _omitOrigin; void _omitStepCount; void _omitUpdatedAt;
+      const created = await create.mutateAsync({
+        name: rest.name,
+        description: rest.description,
+        unitType: rest.unitType,
+        sessionMode: rest.sessionMode,
+        serviceModel: rest.serviceModel,
+        favourite: rest.favourite ?? false,
+        subscriberId: rest.subscriberId ?? '',
+        peerId: rest.peerId ?? '',
+        avpTree: rest.avpTree,
+        services: rest.services,
+        variables: rest.variables,
+        steps: rest.steps,
+      });
+      notifications.show({
+        color: 'green',
+        title: 'Scenario imported',
+        message: `Opened "${created.name}".`,
+      });
+      navigate(`/scenarios/${encodeURIComponent(created.id)}`);
+    } catch (err) {
+      notifications.show({
+        color: 'red',
+        title: 'Import failed',
+        message: (err as Error).message,
+      });
+    }
+  }
 
   function handleDiscardRequest() {
     if (!dirty) return;
@@ -270,8 +338,41 @@ export function ScenarioBuilderPage() {
           onSaveAndRun={handleSaveAndRun}
           onDiscard={handleDiscardRequest}
           onDuplicate={handleDuplicate}
+          onExport={handleExport}
+          onImport={handleImportClick}
+        />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/json"
+          style={{ display: 'none' }}
+          onChange={handleImportFile}
+          data-testid="builder-import-input"
         />
       </Card>
+
+      {importError && (
+        <Alert
+          icon={<IconAlertTriangle size={16} />}
+          color="red"
+          title="Import failed"
+          withCloseButton
+          onClose={() => setImportError(null)}
+          data-testid="builder-import-error"
+        >
+          {importError.kind === 'parse' ? (
+            <Text size="sm">{importError.message}</Text>
+          ) : (
+            <Stack gap={4}>
+              {importError.errors.map((e, i) => (
+                <Text key={i} size="sm">
+                  <strong>{e.path}</strong>: {e.message}
+                </Text>
+              ))}
+            </Stack>
+          )}
+        </Alert>
+      )}
 
       {Object.keys(fieldErrors).length > 0 && (
         <Alert

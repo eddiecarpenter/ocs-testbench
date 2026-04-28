@@ -13,12 +13,19 @@ import {
   Badge,
   Button,
   Group,
+  Menu,
   Select,
   Stack,
   Title,
   Tooltip,
 } from '@mantine/core';
-import { IconArrowBackUp, IconArrowForwardUp } from '@tabler/icons-react';
+import {
+  IconArrowBackUp,
+  IconArrowForwardUp,
+  IconDots,
+  IconDownload,
+  IconUpload,
+} from '@tabler/icons-react';
 
 import { useScenarioDraftStore } from '../store/scenarioDraftStore';
 import type {
@@ -53,6 +60,8 @@ interface BuilderHeaderProps {
   onSaveAndRun: () => void;
   onDiscard: () => void;
   onDuplicate: () => void;
+  onExport: () => void;
+  onImport: () => void;
 }
 
 export function BuilderHeader({
@@ -63,6 +72,8 @@ export function BuilderHeader({
   onSaveAndRun,
   onDiscard,
   onDuplicate,
+  onExport,
+  onImport,
 }: BuilderHeaderProps) {
   const draft = useScenarioDraftStore((s) => s.draft);
   const setName = useScenarioDraftStore((s) => s.setName);
@@ -134,6 +145,34 @@ export function BuilderHeader({
           >
             Duplicate
           </Button>
+          <Menu position="bottom-end" withinPortal>
+            <Menu.Target>
+              <ActionIcon
+                variant="default"
+                aria-label="More actions"
+                data-testid="builder-more"
+              >
+                <IconDots size={16} />
+              </ActionIcon>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item
+                leftSection={<IconDownload size={14} />}
+                onClick={onExport}
+                disabled={isNew}
+                data-testid="builder-export"
+              >
+                Export JSON
+              </Menu.Item>
+              <Menu.Item
+                leftSection={<IconUpload size={14} />}
+                onClick={onImport}
+                data-testid="builder-import"
+              >
+                Import JSON
+              </Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
           <Button
             onClick={onSave}
             loading={isSaving}
