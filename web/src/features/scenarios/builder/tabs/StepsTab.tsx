@@ -1,9 +1,581 @@
-import { Text } from '@mantine/core';
-
 /**
- * Builder — Steps tab. Placeholder until Task 4 lands the ordered list,
- * drag-reorder, add/remove, and step editor.
+ * Builder — Steps tab.
+ *
+ * Two-column layout: ordered list on the left (drag + arrow reorder, add /
+ * remove), step editor on the right. Lifecycle of the steps array lives
+ * in the Zustand draft store; this tab is a controlled view onto
+ * `draft.steps` plus a `selectedIndex` local state.
+ *
+ * Drag-reorder is wired through `@dnd-kit/sortable`; the same array
+ * mutation is used by the up/down arrow controls.
  */
+import {
+  ActionIcon,
+  Badge,
+  Card,
+  Group,
+  NumberInput,
+  Select,
+  Stack,
+  Table,
+  Text,
+  Textarea,
+  Title,
+} from '@mantine/core';
+import {
+  IconArrowDown,
+  IconArrowUp,
+  IconGripVertical,
+  IconPlus,
+  IconTrash,
+} from '@tabler/icons-react';
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { useMemo, useState } from 'react';
+
+import { useScenarioDraftStore } from '../../store/scenarioDraftStore';
+import type {
+  ConsumeStep,
+  PauseStep,
+  RequestStep,
+  RequestType,
+  ScenarioStep,
+  SessionMode,
+  VarValue,
+  WaitStep,
+} from '../../store/types';
+import { isLegalRequestType, legalRequestTypes } from './stepsValidation';
+
+/** Default kind / requestType for a freshly-added step. */
+function defaultStep(mode: SessionMode): ScenarioStep {
+  const requestType: RequestType = mode === 'session' ? 'UPDATE' : 'EVENT';
+  const step: RequestStep = { kind: 'request', requestType };
+  return step;
+}
+
+// ---------------------------------------------------------------------------
+// Sortable row
+// ---------------------------------------------------------------------------
+
+interface SortableRowProps {
+  step: ScenarioStep;
+  index: number;
+  total: number;
+  selected: boolean;
+  legalRequestType: boolean;
+  onSelect: (i: number) => void;
+  onMoveUp: (i: number) => void;
+  onMoveDown: (i: number) => void;
+  onRemove: (i: number) => void;
+}
+
+function SortableRow({
+  step,
+  index,
+  total,
+  selected,
+  legalRequestType,
+  onSelect,
+  onMoveUp,
+  onMoveDown,
+  onRemove,
+}: SortableRowProps) {
+  const { attributes, listeners, setNodeRef, transform, transition } =
+    useSortable({ id: index.toString() });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    backgroundColor: selected ? 'var(--mantine-color-blue-light)' : undefined,
+    cursor: 'pointer',
+  } as const;
+
+  const stepLabel = step.kind === 'request' ? step.requestType : step.kind.toUpperCase();
+  const overrideCount =
+    step.kind === 'request' || step.kind === 'consume'
+      ? Object.keys(step.overrides ?? {}).length
+      : 0;
+
+  return (
+    <Table.Tr
+      ref={setNodeRef}
+      style={style}
+      onClick={() => onSelect(index)}
+      data-testid={`steps-row-${index}`}
+    >
+      <Table.Td onClick={(e) => e.stopPropagation()}>
+        <ActionIcon
+          variant="subtle"
+          aria-label="Drag to reorder"
+          {...attributes}
+          {...listeners}
+        >
+          <IconGripVertical size={14} />
+        </ActionIcon>
+      </Table.Td>
+      <Table.Td>{index + 1}</Table.Td>
+      <Table.Td>
+        <Group gap={4}>
+          <Badge color={legalRequestType ? 'blue' : 'red'} variant="light">
+            {stepLabel}
+          </Badge>
+          {!legalRequestType && (
+            <Badge color="red" variant="filled" size="xs">
+              invalid
+            </Badge>
+          )}
+          {overrideCount > 0 && (
+            <Badge color="orange" variant="outline" size="xs">
+              {overrideCount} override{overrideCount === 1 ? '' : 's'}
+            </Badge>
+          )}
+        </Group>
+      </Table.Td>
+      <Table.Td onClick={(e) => e.stopPropagation()}>
+        <Group gap={2} justify="flex-end">
+          <ActionIcon
+            variant="subtle"
+            aria-label="Move up"
+            disabled={index === 0}
+            onClick={() => onMoveUp(index)}
+            data-testid={`steps-up-${index}`}
+          >
+            <IconArrowUp size={14} />
+          </ActionIcon>
+          <ActionIcon
+            variant="subtle"
+            aria-label="Move down"
+            disabled={index === total - 1}
+            onClick={() => onMoveDown(index)}
+            data-testid={`steps-down-${index}`}
+          >
+            <IconArrowDown size={14} />
+          </ActionIcon>
+          <ActionIcon
+            variant="subtle"
+            color="red"
+            aria-label="Remove step"
+            onClick={() => onRemove(index)}
+            data-testid={`steps-remove-${index}`}
+          >
+            <IconTrash size={14} />
+          </ActionIcon>
+        </Group>
+      </Table.Td>
+    </Table.Tr>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Step editor (right pane)
+// ---------------------------------------------------------------------------
+
+interface StepEditorProps {
+  step: ScenarioStep;
+  index: number;
+  sessionMode: SessionMode;
+  variableNames: string[];
+  onChange: (step: ScenarioStep) => void;
+}
+
+function StepEditor({
+  step,
+  index,
+  sessionMode,
+  variableNames,
+  onChange,
+}: StepEditorProps) {
+  return (
+    <Stack gap="md">
+      <Title order={5}>Step {index + 1}</Title>
+
+      <Select
+        label="Step kind"
+        data={[
+          { value: 'request', label: 'Request' },
+          { value: 'consume', label: 'Consume' },
+          { value: 'wait', label: 'Wait' },
+          { value: 'pause', label: 'Pause' },
+        ]}
+        value={step.kind}
+        onChange={(v) => {
+          if (!v || v === step.kind) return;
+          if (v === 'request') {
+            const fresh: RequestStep = {
+              kind: 'request',
+              requestType:
+                sessionMode === 'session' ? 'UPDATE' : 'EVENT',
+            };
+            onChange(fresh);
+          } else if (v === 'consume') {
+            const fresh: ConsumeStep = { kind: 'consume', windowMs: 1000 };
+            onChange(fresh);
+          } else if (v === 'wait') {
+            const fresh: WaitStep = { kind: 'wait', durationMs: 1000 };
+            onChange(fresh);
+          } else if (v === 'pause') {
+            const fresh: PauseStep = { kind: 'pause' };
+            onChange(fresh);
+          }
+        }}
+        allowDeselect={false}
+      />
+
+      {step.kind === 'request' && (
+        <RequestFields
+          step={step}
+          sessionMode={sessionMode}
+          variableNames={variableNames}
+          onChange={onChange}
+        />
+      )}
+
+      {step.kind === 'consume' && (
+        <ConsumeFields
+          step={step}
+          variableNames={variableNames}
+          onChange={onChange}
+        />
+      )}
+
+      {step.kind === 'wait' && (
+        <NumberInput
+          label="Duration (ms)"
+          min={0}
+          value={step.durationMs}
+          onChange={(v) =>
+            onChange({ ...step, durationMs: typeof v === 'number' ? v : 0 })
+          }
+        />
+      )}
+
+      {step.kind === 'pause' && (
+        <Stack gap="xs">
+          <Textarea
+            label="Pause prompt (optional)"
+            value={step.prompt ?? ''}
+            onChange={(e) =>
+              onChange({ ...step, prompt: e.currentTarget.value })
+            }
+          />
+        </Stack>
+      )}
+    </Stack>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Per-kind field clusters
+// ---------------------------------------------------------------------------
+
+interface RequestFieldsProps {
+  step: RequestStep;
+  sessionMode: SessionMode;
+  variableNames: string[];
+  onChange: (step: ScenarioStep) => void;
+}
+
+function RequestFields({ step, sessionMode, variableNames, onChange }: RequestFieldsProps) {
+  const legal = legalRequestTypes(sessionMode);
+  const requestTypeError = !isLegalRequestType(sessionMode, step.requestType)
+    ? `Request type ${step.requestType} is not legal under sessionMode ${sessionMode}`
+    : null;
+
+  return (
+    <Stack gap="md">
+      <Select
+        label="Request type"
+        data={(['INITIAL', 'UPDATE', 'TERMINATE', 'EVENT'] as RequestType[]).map(
+          (rt) => ({
+            value: rt,
+            label: rt,
+            disabled: !legal.includes(rt),
+          }),
+        )}
+        value={step.requestType}
+        onChange={(v) =>
+          v && onChange({ ...step, requestType: v as RequestType })
+        }
+        error={requestTypeError}
+        allowDeselect={false}
+        data-testid="step-request-type"
+      />
+
+      <OverridesEditor
+        overrides={step.overrides ?? {}}
+        variableNames={variableNames}
+        onChange={(overrides) => onChange({ ...step, overrides })}
+      />
+    </Stack>
+  );
+}
+
+interface ConsumeFieldsProps {
+  step: ConsumeStep;
+  variableNames: string[];
+  onChange: (step: ScenarioStep) => void;
+}
+
+function ConsumeFields({ step, variableNames, onChange }: ConsumeFieldsProps) {
+  return (
+    <Stack gap="md">
+      <NumberInput
+        label="Window (ms)"
+        min={0}
+        value={step.windowMs}
+        onChange={(v) =>
+          onChange({ ...step, windowMs: typeof v === 'number' ? v : 0 })
+        }
+      />
+      <NumberInput
+        label="Max rounds (optional)"
+        min={0}
+        value={step.maxRounds ?? ''}
+        onChange={(v) =>
+          onChange({
+            ...step,
+            maxRounds: typeof v === 'number' ? v : undefined,
+          })
+        }
+      />
+      <OverridesEditor
+        overrides={step.overrides ?? {}}
+        variableNames={variableNames}
+        onChange={(overrides) => onChange({ ...step, overrides })}
+      />
+    </Stack>
+  );
+}
+
+type OverridesMap = { [key: string]: VarValue };
+
+interface OverridesEditorProps {
+  overrides: OverridesMap;
+  variableNames: string[];
+  onChange: (overrides: OverridesMap) => void;
+}
+
+function OverridesEditor({
+  overrides,
+  variableNames,
+  onChange,
+}: OverridesEditorProps) {
+  const entries = Object.entries(overrides);
+  const remaining = variableNames.filter((n) => !(n in overrides));
+
+  return (
+    <Stack gap="xs">
+      <Text size="sm" fw={500}>
+        Variable overrides
+      </Text>
+      {entries.length === 0 ? (
+        <Text size="sm" c="dimmed">
+          No overrides — step will use scenario defaults.
+        </Text>
+      ) : (
+        <Stack gap={4}>
+          {entries.map(([name, value]) => (
+            <Group key={name} gap="xs" wrap="nowrap">
+              <Badge color="orange" variant="light">
+                OVERRIDE
+              </Badge>
+              <Text style={{ flex: 1 }}>{name}</Text>
+              <input
+                value={String(value ?? '')}
+                onChange={(e) =>
+                  onChange({ ...overrides, [name]: e.currentTarget.value })
+                }
+                aria-label={`Override value for ${name}`}
+                style={{ flex: 1 }}
+              />
+              <ActionIcon
+                variant="subtle"
+                color="red"
+                aria-label={`Remove override ${name}`}
+                onClick={() => {
+                  const next = { ...overrides };
+                  delete next[name];
+                  onChange(next);
+                }}
+              >
+                <IconTrash size={14} />
+              </ActionIcon>
+            </Group>
+          ))}
+        </Stack>
+      )}
+      {remaining.length > 0 && (
+        <Select
+          placeholder="Add override for variable…"
+          data={remaining.map((n) => ({ value: n, label: n }))}
+          value={null}
+          onChange={(v) => v && onChange({ ...overrides, [v]: '' })}
+          searchable
+          clearable
+        />
+      )}
+    </Stack>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tab body
+// ---------------------------------------------------------------------------
+
 export function StepsTab() {
-  return <Text c="dimmed">Steps tab — implementation lands in Task 4.</Text>;
+  const draft = useScenarioDraftStore((s) => s.draft);
+  const setSteps = useScenarioDraftStore((s) => s.setSteps);
+
+  const sessionMode = draft?.sessionMode ?? 'session';
+  const steps = useMemo(() => draft?.steps ?? [], [draft?.steps]);
+  const variableNames = useMemo(
+    () => (draft?.variables ?? []).map((v) => v.name),
+    [draft?.variables],
+  );
+
+  const [selectedIndex, setSelectedIndex] = useState<number>(0);
+
+  // Clamp the selection if the list shrunk underneath us.
+  // Computed during render, not in an effect — `react-hooks/set-state-in-effect`.
+  const clamped =
+    steps.length === 0
+      ? 0
+      : Math.min(selectedIndex, Math.max(0, steps.length - 1));
+  const effectiveIndex = clamped;
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+
+  function moveTo(from: number, to: number) {
+    if (from === to || to < 0 || to >= steps.length) return;
+    setSteps(arrayMove(steps, from, to));
+    if (effectiveIndex === from) setSelectedIndex(to);
+  }
+
+  function handleDragEnd(e: DragEndEvent) {
+    const from = Number(e.active.id);
+    const to = Number(e.over?.id ?? from);
+    if (Number.isNaN(from) || Number.isNaN(to)) return;
+    moveTo(from, to);
+  }
+
+  function addStep() {
+    const next = [...steps, defaultStep(sessionMode)];
+    setSteps(next);
+    setSelectedIndex(next.length - 1);
+  }
+
+  function removeStep(i: number) {
+    const next = steps.filter((_, idx) => idx !== i);
+    setSteps(next);
+    if (effectiveIndex >= next.length) {
+      setSelectedIndex(Math.max(0, next.length - 1));
+    }
+  }
+
+  function updateStep(i: number, step: ScenarioStep) {
+    const next = steps.map((s, idx) => (idx === i ? step : s));
+    setSteps(next);
+  }
+
+  if (!draft) return null;
+  const selected = steps[effectiveIndex];
+
+  return (
+    <Group align="flex-start" gap="lg" wrap="nowrap">
+      <Card withBorder padding="sm" style={{ flex: 1, minWidth: 0 }}>
+        <Stack gap="xs">
+          <Group justify="space-between">
+            <Title order={5}>Steps</Title>
+            <ActionIcon
+              variant="filled"
+              aria-label="Add step"
+              onClick={addStep}
+              data-testid="steps-add"
+            >
+              <IconPlus size={16} />
+            </ActionIcon>
+          </Group>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={steps.map((_, i) => i.toString())}
+              strategy={verticalListSortingStrategy}
+            >
+              <Table>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th aria-label="Drag" />
+                    <Table.Th>#</Table.Th>
+                    <Table.Th>Type</Table.Th>
+                    <Table.Th aria-label="Actions" />
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {steps.map((step, i) => (
+                    <SortableRow
+                      key={i}
+                      step={step}
+                      index={i}
+                      total={steps.length}
+                      selected={i === effectiveIndex}
+                      legalRequestType={
+                        step.kind !== 'request' ||
+                        isLegalRequestType(sessionMode, step.requestType)
+                      }
+                      onSelect={setSelectedIndex}
+                      onMoveUp={(idx) => moveTo(idx, idx - 1)}
+                      onMoveDown={(idx) => moveTo(idx, idx + 1)}
+                      onRemove={removeStep}
+                    />
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </SortableContext>
+          </DndContext>
+          {steps.length === 0 && (
+            <Text c="dimmed" ta="center">
+              No steps yet — click + to add one.
+            </Text>
+          )}
+        </Stack>
+      </Card>
+
+      <Card withBorder padding="md" style={{ flex: 2, minWidth: 320 }}>
+        {selected ? (
+          <StepEditor
+            step={selected}
+            index={effectiveIndex}
+            sessionMode={sessionMode}
+            variableNames={variableNames}
+            onChange={(s) => updateStep(effectiveIndex, s)}
+          />
+        ) : (
+          <Text c="dimmed">Select a step to edit it.</Text>
+        )}
+      </Card>
+    </Group>
+  );
 }
