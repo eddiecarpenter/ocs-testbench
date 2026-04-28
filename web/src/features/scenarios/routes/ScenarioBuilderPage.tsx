@@ -17,6 +17,7 @@ import {
   Stack,
   Text,
 } from '@mantine/core';
+import { useHotkeys } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { IconAlertTriangle } from '@tabler/icons-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -47,6 +48,22 @@ export function ScenarioBuilderPage() {
   const load = useScenarioDraftStore((s) => s.load);
   const reset = useScenarioDraftStore((s) => s.reset);
   const markSaved = useScenarioDraftStore((s) => s.markSaved);
+  const undo = useScenarioDraftStore((s) => s.undo);
+  const redo = useScenarioDraftStore((s) => s.redo);
+
+  // Shell-scope hotkeys for undo / redo. `useHotkeys` listens at the
+  // window level — the third element `["INPUT", "TEXTAREA"]` would
+  // skip the listener inside text inputs, but we want undo/redo to
+  // work everywhere, including within form controls. Empty list of
+  // tag exclusions keeps the listener active everywhere.
+  useHotkeys(
+    [
+      ['mod+z', () => undo()],
+      ['mod+shift+z', () => redo()],
+      ['mod+y', () => redo()], // Windows convention
+    ],
+    [],
+  );
 
   // ---------------------------------------------------------------------------
   // Load: hydrate the draft from the API (or seed a fresh one for /new)

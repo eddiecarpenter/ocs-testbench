@@ -15,8 +15,6 @@ import {
   Group,
   Select,
   Stack,
-  Textarea,
-  TextInput,
   Title,
   Tooltip,
 } from '@mantine/core';
@@ -28,6 +26,7 @@ import type {
   SessionMode,
   UnitType,
 } from '../store/types';
+import { DebouncedTextInput, DebouncedTextarea } from './DebouncedTextInput';
 
 const UNIT_OPTIONS: { value: UnitType; label: string }[] = [
   { value: 'OCTET', label: 'Octet' },
@@ -155,10 +154,10 @@ export function BuilderHeader({
       </Group>
 
       <Group grow align="flex-start">
-        <TextInput
+        <DebouncedTextInput
           label="Name"
           value={draft.name}
-          onChange={(e) => setName(e.currentTarget.value)}
+          onCommit={setName}
           data-testid="builder-name"
         />
         <Select
@@ -187,13 +186,12 @@ export function BuilderHeader({
         />
       </Group>
 
-      <Textarea
+      <DebouncedTextarea
         label="Description"
-        autosize
         minRows={2}
         maxRows={4}
         value={draft.description ?? ''}
-        onChange={(e) => setDescription(e.currentTarget.value)}
+        onCommit={setDescription}
         data-testid="builder-description"
       />
     </Stack>
