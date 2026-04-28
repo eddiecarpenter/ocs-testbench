@@ -9,6 +9,7 @@ import { SseProvider } from './api/sse/SseProvider';
 import { ErrorProvider } from './context/error/ErrorProvider';
 import { theme } from './theme/theme';
 import { AppShell } from './layout/AppShell';
+import { ScenariosListPage } from './features/scenarios/routes/ScenariosListPage';
 import { DashboardPage } from './pages/dashboard/DashboardPage';
 import { PeersPage } from './pages/peers/PeersPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
@@ -30,9 +31,14 @@ export function App() {
               <Route index element={<DashboardPage />} />
               <Route path="peers" element={<PeersPage />} />
               <Route path="subscribers" element={<SubscribersPage />} />
+              <Route path="scenarios" element={<ScenariosListPage />} />
               <Route
-                path="scenarios"
-                element={<PlaceholderPage title="Scenarios" />}
+                path="scenarios/new"
+                element={<PlaceholderPage title="Builder (Task 3)" />}
+              />
+              <Route
+                path="scenarios/:id"
+                element={<PlaceholderPage title="Builder (Task 3)" />}
               />
               <Route
                 path="executions"
