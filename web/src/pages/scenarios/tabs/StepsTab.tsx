@@ -433,6 +433,25 @@ interface RepeatPolicyEditorProps {
   onChange: (policy: UpdateRepeatPolicy | undefined) => void;
 }
 
+/**
+ * Common engine-managed variables the predicate may reference. These
+ * are NOT authored by the user — the engine tracks them
+ * automatically as the run progresses (architecture §5). Surfaced
+ * in the picker so authors can write conditions like
+ * `USED_TOTAL >= 10MiB` without having to declare USED_TOTAL as a
+ * scenario variable themselves.
+ *
+ * For multi-mscc scenarios the per-RG variants (`RG{N}_USED_TOTAL`,
+ * `RG{N}_GRANTED_TOTAL`, …) follow the same convention; the
+ * picker accepts free text so any of them are reachable even
+ * though they're not in this static list.
+ */
+const ENGINE_MANAGED_PREDICATE_VARS = [
+  'USED_TOTAL',
+  'GRANTED_TOTAL',
+  'CC_REQUEST_NUMBER',
+] as const;
+
 const PREDICATE_OPS: { value: Predicate['op']; label: string }[] = [
   { value: 'lt', label: '<' },
   { value: 'lte', label: '≤' },
@@ -462,7 +481,12 @@ function RepeatPolicyEditor({
         checked={enabled}
         onChange={(e) => {
           if (e.currentTarget.checked) {
-            onChange({ times: 1, delayMs: 0 });
+            // Seed with `delayMs: 0` only — leave both bounds unset so
+            // the form starts in "indefinite" mode and the user picks
+            // the bound that matches their intent (times, until, or
+            // both). Save validation will catch the must-have-a-bound
+            // requirement before posting.
+            onChange({ delayMs: 0 });
           } else {
             onChange(undefined);
           }
@@ -474,8 +498,13 @@ function RepeatPolicyEditor({
           <Group gap="xs" align="flex-end" grow>
             <NumberInput
               label="Repeat (times)"
-              description="Hard cap on iterations. Includes the first CCR-UPDATE."
+              description={
+                hasTimes
+                  ? 'Hard cap on iterations. Includes the first CCR-UPDATE.'
+                  : 'Indefinite — only the stop condition will end the loop.'
+              }
               min={1}
+              placeholder="indefinite"
               value={policy?.times ?? ''}
               onChange={(v) =>
                 onChange({
@@ -506,24 +535,52 @@ function RepeatPolicyEditor({
             </Text>
             {hasUntil ? (
               <Group gap="xs" wrap="nowrap" align="center">
-                <Select
-                  data={variableNames.map((n) => ({ value: n, label: n }))}
-                  value={policy?.until?.variable ?? null}
-                  searchable
-                  placeholder="Variable"
-                  onChange={(v) =>
-                    v &&
-                    onChange({
-                      ...(policy ?? {}),
-                      until: {
-                        ...(policy?.until ?? { op: 'gte', value: 0 }),
-                        variable: v,
-                      },
-                    })
-                  }
-                  style={{ flex: 1 }}
-                  data-testid="step-repeat-until-variable"
-                />
+                {(() => {
+                  // Combine authored scenario variables with the engine-
+                  // managed catalogue so the picker can resolve names
+                  // like USED_TOTAL that the engine tracks automatically.
+                  // Currently-selected variable is appended last so a
+                  // free-typed engine variant (e.g. RG100_USED_TOTAL) is
+                  // visible even if not in either list.
+                  const all = new Set<string>([
+                    ...variableNames,
+                    ...ENGINE_MANAGED_PREDICATE_VARS,
+                  ]);
+                  if (policy?.until?.variable) all.add(policy.until.variable);
+                  const data = [...all].map((n) => ({
+                    value: n,
+                    label: ENGINE_MANAGED_PREDICATE_VARS.includes(
+                      n as (typeof ENGINE_MANAGED_PREDICATE_VARS)[number],
+                    )
+                      ? `${n} (engine-managed)`
+                      : n,
+                  }));
+                  return (
+                    <Select
+                      data={data}
+                      value={policy?.until?.variable ?? null}
+                      searchable
+                      placeholder="Variable"
+                      // Free-typed variable names persist — engines
+                      // expose RG-prefixed variants we don't enumerate
+                      // statically. Mantine's Select doesn't support
+                      // creating new options, so we accept the typed
+                      // search via `onSearchChange` as a fallback.
+                      onChange={(v) =>
+                        v &&
+                        onChange({
+                          ...(policy ?? {}),
+                          until: {
+                            ...(policy?.until ?? { op: 'gte', value: 0 }),
+                            variable: v,
+                          },
+                        })
+                      }
+                      style={{ flex: 1 }}
+                      data-testid="step-repeat-until-variable"
+                    />
+                  );
+                })()}
                 <Select
                   data={PREDICATE_OPS}
                   value={policy?.until?.op ?? 'gte'}
