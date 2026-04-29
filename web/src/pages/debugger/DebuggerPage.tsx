@@ -30,6 +30,7 @@ import { useExecution } from '../../api/resources/executions';
 import { DebuggerStoreProvider } from './DebuggerStoreProvider';
 import { DebuggerTopBar } from './DebuggerTopBar';
 import { ExecutionSnapshotBridge } from './ExecutionSnapshotBridge';
+import { ExecutionSseBridge } from './ExecutionSseBridge';
 import { LastResponsePane } from './LastResponsePane';
 import { ProgressPane } from './ProgressPane';
 import { StepEditorPane } from './StepEditorPane';
@@ -107,6 +108,7 @@ export function DebuggerPage() {
   return (
     <DebuggerStoreProvider executionId={id}>
       <ExecutionSnapshotBridge execution={execution} />
+      <ExecutionSseBridge executionId={id} execution={execution} />
       <Stack gap="md" data-testid="executions-debugger">
         <DebuggerTopBar
           execution={execution}
