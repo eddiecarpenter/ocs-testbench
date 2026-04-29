@@ -10,10 +10,44 @@ function iso(msAgo: number): string {
 }
 
 /**
- * 30 recent executions, newest first. 2 are still running — matches the
+ * 32 recent executions, newest first. 2 are still running — matches the
  * "Active runs: 2" KPI on the dashboard.
+ *
+ * Coverage: at least one execution per (state × mode) combination the
+ * Executions list filter chips and Mode column need to surface — see
+ * Task #96 acceptance criteria for the canonical six cells:
+ *
+ *   running     × interactive    → id 44
+ *   running     × continuous     → id 43
+ *   success     × interactive    → ids 41, 39
+ *   success     × continuous     → ids 42, 38
+ *   failure     × interactive    → id 45
+ *   failure     × continuous     → id 40
+ *   aborted     × continuous     → id 46  (user-stopped run)
  */
 export const executionFixtures: ExecutionSummary[] = [
+  {
+    id: '46',
+    scenarioId: 'scn-005',
+    scenarioName: 'SMS burst load',
+    mode: 'continuous',
+    peerId: 'peer-02',
+    peerName: 'peer-02',
+    state: 'aborted',
+    startedAt: iso(45 * sec),
+    finishedAt: iso(20 * sec),
+  },
+  {
+    id: '45',
+    scenarioId: 'scn-007',
+    scenarioName: 'FUI-TERMINATE compliance',
+    mode: 'interactive',
+    peerId: 'peer-02',
+    peerName: 'peer-02',
+    state: 'failure',
+    startedAt: iso(2 * min),
+    finishedAt: iso(90 * sec),
+  },
   {
     id: '42',
     scenarioId: 'scn-001',
@@ -112,3 +146,10 @@ export const executionFixtures: ExecutionSummary[] = [
     };
   }),
 ];
+
+/**
+ * Reserved scenario-id prefix used by `POST /executions` to exercise
+ * the failure path. Any start with `scenarioId.startsWith('error-')`
+ * returns 5xx — see `executionsFakeApi.ts`.
+ */
+export const FORCE_FAILURE_SCENARIO_PREFIX = 'error-';
