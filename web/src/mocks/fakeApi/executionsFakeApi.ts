@@ -341,6 +341,48 @@ mock
   });
 
 // ---------------------------------------------------------------------------
+// PAUSE / RESUME / STEP / SKIP — Debugger imperative actions.
+// All four are 204-No-Content endpoints; the live state transition is
+// driven by the SSE event stream (per-execution mock driver in Task 2).
+// The fake handlers exist so the client-side mutations resolve cleanly
+// during MVP — the real engine will own the server-side transitions.
+// ---------------------------------------------------------------------------
+
+function transitionAction(
+  action: 'pause' | 'resume' | 'step' | 'skip',
+  pattern: RegExp,
+): void {
+  mock
+    .onPost(pattern)
+    .withDelayInMs(120)
+    .reply((config): [number, void | ProblemBody] => {
+      const m = pattern.exec(config.url ?? '');
+      const id = m ? decodeURIComponent(m[1]) : '';
+      const idx = executions.findIndex((e) => e.id === id);
+      if (idx === -1) return notFound(id);
+      // Mirror the server's transition contract loosely. The Debugger
+      // listens to its per-execution SSE driver for the authoritative
+      // transition; the working-copy nudge here keeps the list view
+      // in sync after a refetch.
+      const cur = executions[idx];
+      let nextState: ExecutionSummary['state'] | undefined;
+      if (action === 'pause' && cur.state === 'running') nextState = 'paused';
+      if (action === 'resume' && cur.state === 'paused') nextState = 'running';
+      if (action === 'step' && cur.state === 'paused') nextState = 'paused';
+      if (action === 'skip' && cur.state === 'paused') nextState = 'paused';
+      if (nextState) {
+        executions[idx] = { ...cur, state: nextState };
+      }
+      return [204, undefined];
+    });
+}
+
+transitionAction('pause', /\/executions\/([^/]+)\/pause$/);
+transitionAction('resume', /\/executions\/([^/]+)\/resume$/);
+transitionAction('step', /\/executions\/([^/]+)\/step$/);
+transitionAction('skip', /\/executions\/([^/]+)\/skip$/);
+
+// ---------------------------------------------------------------------------
 // Test seam — exposed only to the unit tests so they can reseed the
 // working copy between cases. Must NOT be imported from production code.
 // ---------------------------------------------------------------------------

@@ -9,7 +9,7 @@ import type {
   ExecutionState,
   ExecutionSummary,
 } from '../../api/resources/executions';
-import { TOTAL_STEPS } from '../../mocks/data/executionDetails';
+import { defaultTotalStepsForScenario } from '../../mocks/data/executionDetails';
 
 /** Mantine palette key per execution state — matches the dashboard card. */
 export const STATE_COLOR: Record<ExecutionState, string> = {
@@ -169,9 +169,8 @@ export function formatProgress(
   runsByBatch: Map<string, ExecutionSummary[]>,
 ): string {
   if (row.mode === 'interactive') {
-    return isTerminal(row.state)
-      ? `${TOTAL_STEPS} / ${TOTAL_STEPS}`
-      : `… / ${TOTAL_STEPS}`;
+    const total = defaultTotalStepsForScenario(row.scenarioId);
+    return isTerminal(row.state) ? `${total} / ${total}` : `… / ${total}`;
   }
   // Continuous
   if (row.batchId) {

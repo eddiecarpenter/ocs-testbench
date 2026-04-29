@@ -58,22 +58,25 @@ describe('groupByBatch', () => {
 });
 
 describe('formatProgress', () => {
-  it('renders interactive terminal as 12 / 12', () => {
+  // Default `scn-a` is not in the fixture set so the lookup falls
+  // back to the first scenario (session-mode → 3 steps). Tests below
+  // pin that contract.
+  it('renders interactive terminal as 3 / 3 (session-mode default)', () => {
     expect(
       formatProgress(
         exec({ mode: 'interactive', state: 'success' }),
         new Map(),
       ),
-    ).toBe('12 / 12');
+    ).toBe('3 / 3');
   });
 
-  it('renders interactive running as `… / 12`', () => {
+  it('renders interactive running as `… / 3` (session-mode default)', () => {
     expect(
       formatProgress(
         exec({ mode: 'interactive', state: 'running' }),
         new Map(),
       ),
-    ).toBe('… / 12');
+    ).toBe('… / 3');
   });
 
   it('renders continuous standalone (no batch) terminal as 1 / 1', () => {
