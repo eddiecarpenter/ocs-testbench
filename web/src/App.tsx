@@ -11,8 +11,9 @@ import { theme } from './theme/theme';
 import { AppShell } from './layout/AppShell';
 import { ScenariosListPage } from './pages/scenarios/ScenariosPage';
 import { DashboardPage } from './pages/dashboard/DashboardPage';
+import { ExecutionsPage } from './pages/executions/ExecutionsPage';
+import { ExecutionDebuggerStubPage } from './pages/executions/ExecutionDebuggerStubPage';
 import { PeersPage } from './pages/peers/PeersPage';
-import { PlaceholderPage } from './pages/PlaceholderPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
 import { SubscribersPage } from './pages/subscribers/SubscribersPage';
 
@@ -34,9 +35,10 @@ export function App() {
               <Route path="scenarios" element={<ScenariosListPage />} />
               <Route path="scenarios/new" element={<ScenariosListPage />} />
               <Route path="scenarios/:id" element={<ScenariosListPage />} />
+              <Route path="executions" element={<ExecutionsPage />} />
               <Route
-                path="executions"
-                element={<PlaceholderPage title="Executions" />}
+                path="executions/:id"
+                element={<ExecutionDebuggerStubPage />}
               />
               <Route path="settings" element={<SettingsPage />} />
             </Route>
