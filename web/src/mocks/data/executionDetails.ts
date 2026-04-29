@@ -78,7 +78,8 @@ function labelForExpanded(slot: ExpandedStep): string {
  * expansion. Used by the executions list to render `n / total`.
  */
 export function defaultTotalStepsForScenario(scenarioId: string): number {
-  return expandScenarioSteps(scenarioFor(scenarioId).steps).length;
+  const sc = scenarioFor(scenarioId);
+  return expandScenarioSteps(sc.steps, sc).length;
 }
 
 // ---------------------------------------------------------------------------
@@ -226,7 +227,7 @@ function buildCompletedSteps(
   finishedAtMs: number,
   outcome: 'success' | 'failure',
 ): StepRecord[] {
-  const expanded = expandScenarioSteps(scenario.steps);
+  const expanded = expandScenarioSteps(scenario.steps, scenario);
   const total = expanded.length;
   const span = Math.max(1, finishedAtMs - startedAtMs);
   const bucket = Math.max(1, Math.floor(span / total));
@@ -252,7 +253,7 @@ function buildRunningSteps(
   startedAtMs: number,
   completedSoFar: number,
 ): StepRecord[] {
-  const expanded = expandScenarioSteps(scenario.steps);
+  const expanded = expandScenarioSteps(scenario.steps, scenario);
   const out: StepRecord[] = [];
   let cursor = startedAtMs;
   const limit = Math.min(completedSoFar, expanded.length);
@@ -293,7 +294,7 @@ export function buildExecutionDetail(
   const scenario = scenarioFor(summary.scenarioId);
   // Total reflects the post-expansion timeline so a repeating UPDATE
   // counts each round.
-  const total = expandScenarioSteps(scenario.steps).length;
+  const total = expandScenarioSteps(scenario.steps, scenario).length;
 
   if (summary.state === 'running') {
     const startedAtMs = Date.parse(summary.startedAt);

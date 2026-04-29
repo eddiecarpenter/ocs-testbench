@@ -249,7 +249,10 @@ export function buildPlan(input: BuildPlanInput): DriverEvent[] {
   // timeline slot per round. Both the step-event indices and the
   // terminal `totalSteps` count off this expanded length, so the
   // Progress pane and the cursor stay coherent.
-  const expanded = expandScenarioSteps(input.scenario.steps);
+  const expanded = expandScenarioSteps(
+    input.scenario.steps,
+    input.scenario,
+  );
 
   // 1. Always lead with `execution.started` (paced[0] — fired
   //    synchronously by `installExecutionSse`).

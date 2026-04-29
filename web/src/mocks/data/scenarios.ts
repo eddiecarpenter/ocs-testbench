@@ -64,6 +64,22 @@ const variableLib = {
       params: { value },
     },
   }),
+  /**
+   * Used-units that varies per CCR (refresh: per-send) — the engine
+   * regenerates the value before every UPDATE round. Used by
+   * "consume up to N bytes" scenarios where each round's actual
+   * consumption is jittered.
+   */
+  usuTotalRandom: (name: string, min: number, max: number): Variable => ({
+    name,
+    description: `Used service-units (random ${min}..${max} bytes per round).`,
+    source: {
+      kind: 'generator',
+      strategy: 'random-int',
+      refresh: 'per-send',
+      params: { min, max },
+    },
+  }),
   ratingGroup: (name: string, value: number): Variable => ({
     name,
     description: 'Rating-Group AVP value.',
@@ -180,6 +196,39 @@ export const scenarioFixtures: Scenario[] = [
     ],
   }),
   makeScenario({
+    id: 'scn-octet-consume10mb-001',
+    name: 'OCTET × root — consume 10 MB in 1 MB chunks',
+    description:
+      'Voice/data session that asks for 1 MB at a time and reports a random ' +
+      '500 KB..1 MB used per round. Loop terminates when total used ≥ 10 MB ' +
+      '(predicate-bound, no `times` cap) — or earlier if the OCS stops ' +
+      'granting units.',
+    unitType: 'OCTET',
+    sessionMode: 'session',
+    serviceModel: 'root',
+    services: [rootService()],
+    variables: [
+      variableLib.msisdn(),
+      // Ask for 1 MB on every CCR-UPDATE.
+      variableLib.rsuTotal('RSU_TOTAL', 1_048_576),
+      // Report a random 500 KB..1 MB used each round (refresh: per-send).
+      variableLib.usuTotalRandom('USU_TOTAL', 524_288, 1_048_576),
+    ],
+    // UPDATE repeats with a 10s sleep between rounds, exiting when the
+    // synthetic `USED_TOTAL` (cumulative across rounds) reaches 10 MB.
+    // No `times` cap — the predicate is the only design-time bound.
+    // The architecture's auto-termination on RG exhaustion (§6) covers
+    // the "OCS stopped granting" case implicitly.
+    updateRepeat: {
+      delayMs: 10_000,
+      until: {
+        variable: 'USED_TOTAL',
+        op: 'gte',
+        value: 10_485_760, // 10 MB
+      },
+    },
+  }),
+  makeScenario({
     id: 'scn-octet-multi-001',
     name: 'OCTET × multi-MSCC — multi rating group',
     description: 'Two MSCCs (RG 100 and RG 200) sharing a session.',
@@ -200,8 +249,7 @@ export const scenarioFixtures: Scenario[] = [
   makeScenario({
     id: 'scn-time-root-001',
     name: 'TIME × root — voice-call CC-Time at root',
-    description:
-      'Legacy root-level RSU/USU using CC-Time. UPDATE repeats 4× to demo the per-round Debugger.',
+    description: 'Legacy root-level RSU/USU using CC-Time.',
     unitType: 'TIME',
     sessionMode: 'session',
     serviceModel: 'root',
@@ -211,8 +259,6 @@ export const scenarioFixtures: Scenario[] = [
       variableLib.rsuTotal('RSU_TOTAL', 600),
       variableLib.usuTotal('USU_TOTAL', 300),
     ],
-    // Demo: repeat the UPDATE 4 times with a 60s inter-round delay.
-    updateRepeat: { times: 4, delayMs: 60_000 },
   }),
   makeScenario({
     id: 'scn-time-single-001',

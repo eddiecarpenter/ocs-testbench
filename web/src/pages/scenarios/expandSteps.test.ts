@@ -8,10 +8,36 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_UNTIL_ROUNDS,
+  MAX_SIMULATED_ROUNDS,
   expandScenarioSteps,
   totalRoundsFor,
 } from './expandSteps';
-import type { ScenarioStep } from './types';
+import type { Scenario, ScenarioStep, Variable } from './types';
+
+/** A scenario shape just rich enough for the simulator to sample. */
+function scenarioWith(variables: Variable[]): Pick<Scenario, 'variables'> {
+  return { variables };
+}
+
+const literalVar = (name: string, value: number): Variable => ({
+  name,
+  source: {
+    kind: 'generator',
+    strategy: 'literal',
+    refresh: 'once',
+    params: { value },
+  },
+});
+
+const randomVar = (name: string, min: number, max: number): Variable => ({
+  name,
+  source: {
+    kind: 'generator',
+    strategy: 'random-int',
+    refresh: 'per-send',
+    params: { min, max },
+  },
+});
 
 const initial: ScenarioStep = { kind: 'request', requestType: 'INITIAL' };
 const update: ScenarioStep = { kind: 'request', requestType: 'UPDATE' };
@@ -40,13 +66,97 @@ describe('totalRoundsFor', () => {
     ).toBe(5);
   });
 
-  it('UPDATE with only `until` falls back to DEFAULT_UNTIL_ROUNDS', () => {
+  it('UPDATE with only `until` and no scenario context falls back to DEFAULT_UNTIL_ROUNDS', () => {
     expect(
       totalRoundsFor({
         ...update,
         repeat: { until: { variable: 'X', op: 'gte', value: 0 } },
       }),
     ).toBe(DEFAULT_UNTIL_ROUNDS);
+  });
+
+  it('UPDATE with `until` and scenario context simulates rounds — literal USU', () => {
+    // 1 MB literal USU per round; predicate fires when cumulative ≥ 10 MB.
+    // Should take exactly 10 rounds.
+    const sc = scenarioWith([literalVar('USU_TOTAL', 1_048_576)]);
+    expect(
+      totalRoundsFor(
+        {
+          ...update,
+          repeat: {
+            until: { variable: 'USED_TOTAL', op: 'gte', value: 10_485_760 },
+          },
+        },
+        sc,
+      ),
+    ).toBe(10);
+  });
+
+  it('UPDATE with `until` simulates rounds with a seeded random USU', () => {
+    // Random 500 KB..1 MB. Use a deterministic rng that returns 0.5 — that
+    // yields the midpoint sample (~786 KB), so 10 MB / 786 KB ≈ 14 rounds.
+    const sc = scenarioWith([randomVar('USU_TOTAL', 524_288, 1_048_576)]);
+    const rounds = totalRoundsFor(
+      {
+        ...update,
+        repeat: {
+          until: { variable: 'USED_TOTAL', op: 'gte', value: 10_485_760 },
+        },
+      },
+      sc,
+      { rng: () => 0.5 },
+    );
+    expect(rounds).toBeGreaterThanOrEqual(13);
+    expect(rounds).toBeLessThanOrEqual(15);
+  });
+
+  it('simulator falls back to DEFAULT_UNTIL_ROUNDS when the per-round variable is missing', () => {
+    const sc = scenarioWith([]);
+    expect(
+      totalRoundsFor(
+        {
+          ...update,
+          repeat: {
+            until: { variable: 'USED_TOTAL', op: 'gte', value: 10_485_760 },
+          },
+        },
+        sc,
+      ),
+    ).toBe(DEFAULT_UNTIL_ROUNDS);
+  });
+
+  it('simulator caps a runaway predicate at MAX_SIMULATED_ROUNDS', () => {
+    // Per-round 1 byte, target 10 MB → would take 10 million rounds.
+    // Should hit the safety cap.
+    const sc = scenarioWith([literalVar('USU_TOTAL', 1)]);
+    expect(
+      totalRoundsFor(
+        {
+          ...update,
+          repeat: {
+            until: { variable: 'USED_TOTAL', op: 'gte', value: 10_485_760 },
+          },
+        },
+        sc,
+      ),
+    ).toBe(MAX_SIMULATED_ROUNDS);
+  });
+
+  it('`times` truncates simulation when both bounds are present', () => {
+    // Simulator would naturally do 10 rounds, but `times: 3` caps it.
+    const sc = scenarioWith([literalVar('USU_TOTAL', 1_048_576)]);
+    expect(
+      totalRoundsFor(
+        {
+          ...update,
+          repeat: {
+            times: 3,
+            until: { variable: 'USED_TOTAL', op: 'gte', value: 10_485_760 },
+          },
+        },
+        sc,
+      ),
+    ).toBe(3);
   });
 
   it('UPDATE with both honours `times` (the hard cap)', () => {
