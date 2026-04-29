@@ -50,6 +50,7 @@ import { ExecutionsFilterBar } from './ExecutionsFilterBar';
 import { ExecutionsSidebar } from './ExecutionsSidebar';
 import { ExecutionsTable } from './ExecutionsTable';
 import { RerunConfirmModal } from './RerunConfirmModal';
+import { StartRunModal } from './StartRunModal';
 import {
   applyTableFilters,
   countByStatusFilter,
@@ -80,6 +81,7 @@ export function ExecutionsPage() {
   const [pendingRerun, setPendingRerun] = useState<ExecutionSummary | null>(
     null,
   );
+  const [startRunFor, setStartRunFor] = useState<ScenarioSummary | null>(null);
 
   const peerNameById = useMemo(() => {
     const m = new Map<string, string>();
@@ -196,13 +198,30 @@ export function ExecutionsPage() {
   }, [launchRerun, latestRunForSelected]);
 
   const handleStartRun = useCallback(() => {
-    // Task 6 / 7 wires the Start-Run dialog. For now, surface the
-    // intent so QA can see the CTA is reachable.
+    if (selectedScenario) {
+      setStartRunFor(selectedScenario);
+      return;
+    }
+    // No scenario picked in the sidebar: the dialog must be pre-filled,
+    // so prompt the operator to choose one first.
+    notifications.show({
+      color: 'yellow',
+      title: 'Pick a scenario first',
+      message:
+        'Select a scenario in the left pane before launching a Run.',
+    });
+  }, [selectedScenario]);
+
+  const handleStartRunSubmit = useCallback(() => {
+    // Task 7 owns the actual POST + post-success behaviour. For Task 6
+    // the dialog wires through to a noop close so the UI shell is
+    // exercisable end-to-end.
     notifications.show({
       color: 'blue',
-      title: 'Start-Run dialog',
-      message: 'The Start-Run dialog ships in Task 6.',
+      title: 'Run dialog submit',
+      message: 'Submit wiring lands in Task 7.',
     });
+    setStartRunFor(null);
   }, []);
 
   // ---------------------------------------------------------------------------
@@ -294,6 +313,7 @@ export function ExecutionsPage() {
             <Button
               leftSection={<IconPlayerPlay size={14} />}
               onClick={handleStartRun}
+              disabled={!selectedScenario}
               data-testid="executions-start-run"
             >
               Run scenario
@@ -346,6 +366,13 @@ export function ExecutionsPage() {
           if (!pendingRerun) return;
           void launchRerun(pendingRerun).finally(() => setPendingRerun(null));
         }}
+      />
+
+      <StartRunModal
+        scenario={startRunFor}
+        isPending={false}
+        onClose={() => setStartRunFor(null)}
+        onSubmit={handleStartRunSubmit}
       />
     </Group>
   );
