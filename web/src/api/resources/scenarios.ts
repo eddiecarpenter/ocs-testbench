@@ -20,6 +20,10 @@ import type {
   ScenarioInput,
   ScenarioSummary,
 } from '../../pages/scenarios/types';
+import type {
+  StartExecutionInput,
+  StartExecutionResult,
+} from './executions';
 
 export const scenarioKeys = {
   all: ['scenarios'] as const,
@@ -60,17 +64,24 @@ export const duplicateScenario = (
     body,
   );
 
-export interface RunIntentResult {
-  batchId?: string;
-  items: { id: string }[];
-}
-
+/**
+ * Start a one-off `continuous`-mode execution for a scenario from the
+ * Scenarios list "Run" affordance. The body matches OpenAPI v0.2's
+ * `StartExecutionInput` exactly — concurrency and repeats default to 1
+ * because this entry point doesn't expose batched-run controls (those
+ * live on the Executions Start-Run dialog, Feature #94).
+ */
 export const runScenario = (
   scenarioId: string,
-): Promise<RunIntentResult> =>
-  ApiService.post<RunIntentResult, { scenarioId: string; mode: 'continuous' }>(
+): Promise<StartExecutionResult> =>
+  ApiService.post<StartExecutionResult, StartExecutionInput>(
     '/executions',
-    { scenarioId, mode: 'continuous' },
+    {
+      scenarioId,
+      mode: 'continuous',
+      concurrency: 1,
+      repeats: 1,
+    },
   );
 
 // ---------------------------------------------------------------------------

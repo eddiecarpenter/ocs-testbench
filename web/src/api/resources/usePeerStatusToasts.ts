@@ -60,6 +60,11 @@ export function usePeerStatusToasts() {
           continue;
         }
 
+        // Peer-status toasts are *informational*, even when the new
+        // status is `error` — the user does not need to act, just take
+        // note. So they all auto-close (Mantine default), unlike the
+        // sticky `notifyError` toasts used for failed user actions.
+        // The colour still distinguishes the state at a glance.
         const color =
           peer.status === 'connected'
             ? 'teal'

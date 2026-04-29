@@ -17,8 +17,10 @@
  *                                             — 5xx for `error-` prefix
  *   DELETE /scenarios/:id                   — delete (204)
  *   POST   /scenarios/:id/duplicate         — duplicate (Scenario)
- *   POST   /executions                      — stub (returns fake id;
- *                                              used by Save & Run, Task 3)
+ *
+ * `POST /executions` lives in `executionsFakeApi.ts` and accepts the
+ * full `StartExecutionInput` contract — call it via
+ * `useCreateExecution()` from `api/resources/executions.ts`.
  *
  * The in-memory store survives reloads only within the page session;
  * a hard refresh re-seeds from `initialScenarioStore`.
@@ -230,13 +232,3 @@ mock
     return [204, undefined];
   });
 
-// ---------------------------------------------------------------------------
-// EXECUTIONS — stub for Save & Run (Task 3)
-// ---------------------------------------------------------------------------
-mock
-  .onPost(/\/executions$/)
-  .withDelayInMs(150)
-  .reply((): [number, { batchId?: string; items: { id: string }[] }] => {
-    const id = `exec-stub-${Date.now()}`;
-    return [201, { items: [{ id }] }];
-  });

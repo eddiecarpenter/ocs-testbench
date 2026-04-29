@@ -15,6 +15,7 @@ import {
   Title,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
+import { notifyError } from '../../utils/notify';
 import {
   IconAlertTriangle,
   IconDots,
@@ -297,8 +298,7 @@ function CreateSubscriberDrawer({
       return created;
     } catch (err) {
       if (err instanceof ApiError && err.status === 422) throw err;
-      notifications.show({
-        color: 'red',
+      notifyError({
         title: 'Could not create subscriber',
         message: err instanceof Error ? err.message : 'Unexpected error',
       });
@@ -387,8 +387,7 @@ function EditSubscriberForm({
       return next;
     } catch (err) {
       if (err instanceof ApiError && err.status === 422) throw err;
-      notifications.show({
-        color: 'red',
+      notifyError({
         title: 'Could not update subscriber',
         message: err instanceof Error ? err.message : 'Unexpected error',
       });
@@ -429,8 +428,7 @@ function DeleteSubscriberModal({
       });
       onClose();
     } catch (err) {
-      notifications.show({
-        color: 'red',
+      notifyError({
         title: 'Could not delete subscriber',
         message: err instanceof Error ? err.message : 'Unexpected error',
       });
