@@ -9,37 +9,44 @@
  *   &state=<state>           — filter chip selection (matches OpenAPI v0.2)
  *   &peer=<id>               — peer filter dropdown
  *
- * Subsequent tasks fill in the sidebar (Task 3), table (Task 4),
- * filters + actions (Task 5), and Start-Run dialog (Task 6/7).
+ * Subsequent tasks fill in the table (Task 4), filters + actions
+ * (Task 5), and Start-Run dialog (Tasks 6 / 7).
  */
 import {
   Alert,
+  Button,
   Card,
   Group,
+  Skeleton,
   Stack,
   Text,
   Title,
 } from '@mantine/core';
 import { IconAlertTriangle, IconPencil } from '@tabler/icons-react';
-import { Button } from '@mantine/core';
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 
 import { ApiError } from '../../api/errors';
 import { usePeers } from '../../api/resources/peers';
+import { useExecutions } from '../../api/resources/executions';
 import { useScenarios } from '../../api/resources/scenarios';
 import type { ScenarioSummary } from '../scenarios/types';
 
 import { buildSubHeader } from './buildSubHeader';
+import { ExecutionsSidebar } from './ExecutionsSidebar';
 import { selectScenarioForHeader } from './selectors';
 
 export function ExecutionsPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const scenarioId = searchParams.get('scenario');
 
   const scenariosQuery = useScenarios();
   const peersQuery = usePeers();
+  // The sidebar needs the full execution set to compute per-scenario
+  // counts and last-run timestamps; the right-pane table queries its
+  // own filtered slice (Task 4 wires that up).
+  const allExecutionsQuery = useExecutions({ limit: 500 });
 
   const peerNameById = useMemo(() => {
     const m = new Map<string, string>();
@@ -50,6 +57,19 @@ export function ExecutionsPage() {
   const selectedScenario: ScenarioSummary | undefined = useMemo(
     () => selectScenarioForHeader(scenariosQuery.data ?? [], scenarioId),
     [scenariosQuery.data, scenarioId],
+  );
+
+  const handleSidebarSelect = useCallback(
+    (nextId: string | null) => {
+      const next = new URLSearchParams(searchParams);
+      if (nextId === null) {
+        next.delete('scenario');
+      } else {
+        next.set('scenario', nextId);
+      }
+      setSearchParams(next, { replace: false });
+    },
+    [searchParams, setSearchParams],
   );
 
   if (scenariosQuery.isError) {
@@ -64,25 +84,34 @@ export function ExecutionsPage() {
     );
   }
 
+  const sidebarLoading =
+    scenariosQuery.isLoading || allExecutionsQuery.isLoading;
+
   return (
     <Group align="flex-start" gap="lg" wrap="nowrap" data-testid="executions-page">
-      {/* Sidebar (left) — Task 3 fills this in. */}
       <Card
         withBorder
         padding="md"
-        w={300}
+        w={320}
         miw={280}
         data-testid="executions-sidebar"
       >
-        <Stack gap="xs">
-          <Title order={5}>Scenarios</Title>
-          <Text c="dimmed" size="sm">
-            Sidebar coming online next.
-          </Text>
-        </Stack>
+        {sidebarLoading ? (
+          <Stack gap="xs">
+            <Skeleton height={28} />
+            <Skeleton height={36} />
+            <Skeleton height={120} />
+          </Stack>
+        ) : (
+          <ExecutionsSidebar
+            scenarios={scenariosQuery.data ?? []}
+            executions={allExecutionsQuery.data?.items ?? []}
+            selectedScenarioId={scenarioId ?? null}
+            onSelect={handleSidebarSelect}
+          />
+        )}
       </Card>
 
-      {/* Right pane — header + table. Table comes in Task 4. */}
       <Stack gap="md" style={{ flex: 1, minWidth: 0 }}>
         <Group justify="space-between" align="flex-start" wrap="nowrap">
           <Stack gap={2}>
@@ -123,4 +152,3 @@ export function ExecutionsPage() {
     </Group>
   );
 }
-
