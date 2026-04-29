@@ -28,7 +28,8 @@ import type {
   ExecutionContextSnapshot,
   StepRecord,
 } from '../../api/resources/executions';
-import type { AvpNode } from '../scenarios/types';
+
+import type { PreviewAvpNode } from './ccrPreview';
 
 // ---------------------------------------------------------------------------
 // State + edit shape
@@ -42,7 +43,7 @@ export interface DebuggerEditState {
   /** Service `id`s currently toggled on for the next CCR. */
   servicesEnabled: Set<string>;
   /** Resolved CCR preview tree for the current step + edit state. */
-  previewTree: AvpNode[] | null;
+  previewTree: PreviewAvpNode[] | null;
   /** True after any edit since the last regenerate / cursor advance. */
   dirty: boolean;
 }
@@ -86,6 +87,14 @@ export interface ExecutionStoreState {
   toggleService: (serviceId: string) => void;
   /** Re-resolve the preview tree from the current edit state. */
   regenerate: () => void;
+  /** Replace the resolved preview tree (called by the pane). */
+  setPreviewTree: (tree: PreviewAvpNode[] | null) => void;
+  /**
+   * Reset `edit.servicesEnabled` to the supplied default and clear
+   * `dirty`. The pane computes the default from the current step's
+   * scenario service selection, so the store stays scenario-agnostic.
+   */
+  revertEdit: (defaultServices: Set<string>) => void;
   /** Click a completed step in the Progress pane. */
   viewHistorical: (stepIndex: number | null) => void;
 
@@ -240,10 +249,27 @@ export function createExecutionStore(executionId: string): ExecutionStore {
       }));
     },
 
-    // Stubbed in Task 1 — Task 5 fills in.
     regenerate() {
+      // The pane re-runs the resolver on every edit/state change via
+      // a useMemo + setPreviewTree effect; calling regenerate() is a
+      // user-driven request to clear the dirty flag explicitly.
       const cur = get();
       set(() => ({ edit: { ...cur.edit, dirty: false } }));
+    },
+
+    setPreviewTree(tree) {
+      const cur = get();
+      set(() => ({ edit: { ...cur.edit, previewTree: tree } }));
+    },
+
+    revertEdit(defaultServices) {
+      set(() => ({
+        edit: {
+          servicesEnabled: new Set(defaultServices),
+          previewTree: null,
+          dirty: false,
+        },
+      }));
     },
 
     viewHistorical(stepIndex) {
