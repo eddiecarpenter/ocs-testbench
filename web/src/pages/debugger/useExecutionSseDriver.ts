@@ -5,12 +5,13 @@
  *   - Subscribe on mount, dispose on unmount.
  *   - Reinstall when the execution id or scenario changes.
  *
- * In Task 2 the subscriber is intentionally a no-op — Task 7 wires
- * the driver's events into the page-scoped store so the imperative
- * controls drive real state transitions. Until then, the driver
- * exists so the rest of the app can prove the contract is wired.
+ * Returns a stable controller object whose `pause()` / `resume()` call
+ * through to the live driver's handle (or are no-ops when no driver
+ * is installed). The controller is intentionally not React state — it
+ * doesn't need to trigger re-renders. Components that want to react
+ * to state should subscribe to the store directly.
  */
-import { useEffect } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 
 import type {
   Execution,
@@ -19,6 +20,7 @@ import type {
 import {
   installExecutionSse,
   type DriverEvent,
+  type InstallExecutionSseHandle,
 } from '../../mocks/sse/installExecutionSse';
 import type { Scenario } from '../scenarios/types';
 
@@ -28,10 +30,15 @@ interface UseExecutionSseDriverOptions {
   executionId: string;
   execution: Execution | undefined;
   scenario: Scenario | undefined;
-  /** Subscriber. Defaults to a no-op (Task 2 behaviour). */
+  /** Subscriber. Defaults to a no-op. */
   onEvent?: ExecutionSseHandler;
   /** When false, do not install the driver (e.g. terminal executions). */
   enabled?: boolean;
+}
+
+export interface ExecutionSseController {
+  pause(): void;
+  resume(): void;
 }
 
 export function useExecutionSseDriver({
@@ -40,29 +47,54 @@ export function useExecutionSseDriver({
   scenario,
   onEvent,
   enabled = true,
-}: UseExecutionSseDriverOptions): void {
+}: UseExecutionSseDriverOptions): ExecutionSseController {
+  const handleRef = useRef<InstallExecutionSseHandle | null>(null);
+
   useEffect(() => {
-    if (!enabled) return undefined;
-    if (!execution || !scenario) return undefined;
-    // Don't install for terminal runs — there's no live event stream
-    // for an already-finished execution.
+    if (!enabled) {
+      handleRef.current = null;
+      return undefined;
+    }
+    if (!execution || !scenario) {
+      handleRef.current = null;
+      return undefined;
+    }
     const isTerminal =
       execution.state === 'success' ||
       execution.state === 'failure' ||
       execution.state === 'aborted' ||
       execution.state === 'error';
-    if (isTerminal) return undefined;
+    if (isTerminal) {
+      handleRef.current = null;
+      return undefined;
+    }
 
     const mode: ExecutionMode = execution.mode;
-    const handle = installExecutionSse(executionId, scenario, mode, {
+    const driver = installExecutionSse(executionId, scenario, mode, {
       startedAtMs: Date.parse(execution.startedAt) || Date.now(),
     });
-    const unsub = handle.subscribe((event) => {
+    handleRef.current = driver;
+    const unsub = driver.subscribe((event) => {
       if (onEvent) onEvent(event);
     });
     return () => {
       unsub();
-      handle.dispose();
+      driver.dispose();
+      handleRef.current = null;
     };
   }, [executionId, execution, scenario, onEvent, enabled]);
+
+  // Stable controller — `pause` / `resume` always reflect the current
+  // driver via the ref.
+  return useMemo<ExecutionSseController>(
+    () => ({
+      pause() {
+        handleRef.current?.pause();
+      },
+      resume() {
+        handleRef.current?.resume();
+      },
+    }),
+    [],
+  );
 }

@@ -22,6 +22,7 @@
  */
 import { createStore, type StoreApi } from 'zustand/vanilla';
 
+import ApiService from '../../api/ApiService';
 import type {
   Execution,
   ExecutionState,
@@ -229,9 +230,91 @@ export function createExecutionStore(executionId: string): ExecutionStore {
       }));
     },
 
-    // Stubbed in Task 1 — Task 2 fills in.
-    ingestSse() {
-      /* no-op until Task 2 */
+    ingestSse(event: SseEventPayload) {
+      const cur = get();
+      switch (event.type) {
+        case 'execution.started': {
+          // The driver fires this immediately on install; the snapshot
+          // ingestion path already seeded our state, so this is mostly
+          // a confirmation. Promote `pending` → `running` if needed.
+          set(() => ({
+            state: reduceTransition(cur.state, 'running'),
+          }));
+          return;
+        }
+        case 'step.sending': {
+          // Update cursor to the active step and flip to running. The
+          // step's row turns into a spinner via the `running` state.
+          set(() => ({
+            state: reduceTransition(cur.state, 'running'),
+            cursor: event.data.stepIndex,
+          }));
+          return;
+        }
+        case 'step.responded': {
+          // Append the step record at its position. If a record at
+          // that index already exists, replace it.
+          const next = [...cur.steps];
+          const idx = event.data.step.n - 1;
+          next[idx] = event.data.step;
+          set(() => ({
+            steps: next,
+            cursor: Math.max(cur.cursor, idx + 1),
+          }));
+          return;
+        }
+        case 'execution.paused': {
+          set(() => ({
+            state: reduceTransition(cur.state, 'paused'),
+            cursor: event.data.atStepIndex,
+          }));
+          return;
+        }
+        case 'execution.resumed': {
+          set(() => ({
+            state: reduceTransition(cur.state, 'running'),
+            cursor: event.data.fromStepIndex,
+          }));
+          return;
+        }
+        case 'execution.completed': {
+          // Drive through running → success when arriving directly
+          // from paused (legal because `paused → running → success`).
+          let s = cur.state;
+          if (s === 'paused') s = reduceTransition(s, 'running');
+          s = reduceTransition(s, 'success');
+          set(() => ({
+            state: s,
+            cursor: event.data.totalSteps,
+            totalSteps: event.data.totalSteps,
+            steps: event.data.steps,
+            context: event.data.context,
+          }));
+          return;
+        }
+        case 'execution.failed': {
+          let s = cur.state;
+          if (s === 'paused') s = reduceTransition(s, 'running');
+          s = reduceTransition(s, 'failure');
+          set(() => ({
+            state: s,
+            cursor: event.data.totalSteps,
+            totalSteps: event.data.totalSteps,
+            steps: event.data.steps,
+            failureReason: event.data.failureReason ?? null,
+          }));
+          return;
+        }
+        case 'execution.aborted': {
+          set(() => ({
+            state: reduceTransition(cur.state, 'aborted'),
+            cursor: event.data.totalSteps,
+            totalSteps: event.data.totalSteps,
+            steps: event.data.steps,
+          }));
+          return;
+        }
+      }
     },
 
     // Stubbed in Task 1 — Task 5 fills in.
@@ -276,27 +359,75 @@ export function createExecutionStore(executionId: string): ExecutionStore {
       set(() => ({ historicalIndex: stepIndex }));
     },
 
-    // Imperative actions — Task 7. Stubbed to satisfy the surface.
+    // Imperative actions. Each posts to the corresponding endpoint
+    // and immediately drives the local state machine so the UI
+    // responds without waiting for the server's SSE round-trip
+    // (which still arrives and reconciles via `ingestSse`). The
+    // store is intentionally unaware of whether the run is mock or
+    // real — the same code path runs in both worlds.
     async sendCcr() {
-      /* no-op until Task 7 */
+      const cur = get();
+      // Optimistically flip to running; the next `step.responded`
+      // SSE event will append the step record and freeze us here
+      // again at `paused` (single-step semantics — see OpenAPI
+      // `stepExecution`).
+      set(() => ({ state: reduceTransition(cur.state, 'running') }));
+      await ApiService.post<void>(
+        `/executions/${encodeURIComponent(cur.executionId)}/step`,
+      );
     },
     async skip() {
-      /* no-op until Task 7 */
+      const cur = get();
+      // No CCR is sent — advance the cursor locally and confirm
+      // server-side. The fakeApi `/skip` endpoint exists but is a
+      // no-op on the engine until that surface lands.
+      set(() => ({
+        cursor: Math.min(cur.cursor + 1, cur.totalSteps),
+      }));
+      await ApiService.post<void>(
+        `/executions/${encodeURIComponent(cur.executionId)}/skip`,
+      );
     },
     async pause() {
-      /* no-op until Task 7 */
+      const cur = get();
+      set(() => ({ state: reduceTransition(cur.state, 'paused') }));
+      await ApiService.post<void>(
+        `/executions/${encodeURIComponent(cur.executionId)}/pause`,
+      );
     },
     async resume() {
-      /* no-op until Task 7 */
+      const cur = get();
+      set(() => ({ state: reduceTransition(cur.state, 'running') }));
+      await ApiService.post<void>(
+        `/executions/${encodeURIComponent(cur.executionId)}/resume`,
+      );
     },
     async runToEnd() {
-      /* no-op until Task 7 */
+      // Run-to-end is the same wire call as resume — the engine just
+      // doesn't pause again until terminal. Naming differs in the UI
+      // because the user sees "I'm letting it run".
+      const cur = get();
+      set(() => ({ state: reduceTransition(cur.state, 'running') }));
+      await ApiService.post<void>(
+        `/executions/${encodeURIComponent(cur.executionId)}/resume`,
+      );
     },
     async stop() {
-      /* no-op until Task 7 */
+      const cur = get();
+      // Optimistically transition. Aborted is a terminal state so the
+      // store stops emitting elapsed ticks.
+      set(() => ({ state: reduceTransition(cur.state, 'aborted') }));
+      await ApiService.post<void>(
+        `/executions/${encodeURIComponent(cur.executionId)}/abort`,
+      );
     },
     async restart() {
-      /* no-op until Task 7 */
+      // Restart is the only action that creates a new execution; the
+      // page-level handler owns the navigate, so the store action
+      // throws — the caller must use `useCreateExecution` directly so
+      // it can navigate to the new id. Kept on the surface for
+      // completeness per Task 1.
+      throw new Error('Restart is page-level — use useCreateExecution');
     },
   }));
 }

@@ -97,6 +97,35 @@ export const rerunExecution = (id: string) =>
 export const abortExecution = (id: string) =>
   ApiService.post<void>(`/executions/${encodeURIComponent(id)}/abort`);
 
+/**
+ * Pause a running execution. Server transitions to `paused` (the
+ * Debugger waits for the `execution.paused` SSE before flipping its
+ * own state).
+ */
+export const pauseExecution = (id: string) =>
+  ApiService.post<void>(`/executions/${encodeURIComponent(id)}/pause`);
+
+/**
+ * Resume a paused execution. Server transitions back to `running`.
+ */
+export const resumeExecution = (id: string) =>
+  ApiService.post<void>(`/executions/${encodeURIComponent(id)}/resume`);
+
+/**
+ * Advance exactly one step on a paused execution, then pause again.
+ */
+export const stepExecution = (id: string) =>
+  ApiService.post<void>(`/executions/${encodeURIComponent(id)}/step`);
+
+/**
+ * Skip the next step on a paused execution. Frontend-mock convenience
+ * — the OpenAPI v0.2 spec does not define `/skip` on `/executions`;
+ * the real backend may add it later. The mock layer (and this client)
+ * treat skip as "advance the cursor without sending a CCR".
+ */
+export const skipStep = (id: string) =>
+  ApiService.post<void>(`/executions/${encodeURIComponent(id)}/skip`);
+
 // ---------------------------------------------------------------------------
 // Hooks
 // ---------------------------------------------------------------------------
@@ -168,4 +197,36 @@ export function useAbortExecution() {
       void qc.invalidateQueries({ queryKey: executionKeys.detail(id) });
     },
   });
+}
+
+function useExecutionActionHook(
+  fn: (id: string) => Promise<unknown>,
+) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => fn(id),
+    onSuccess: (_v, id) => {
+      void qc.invalidateQueries({ queryKey: executionKeys.detail(id) });
+    },
+  });
+}
+
+/** Pause a running execution (Debugger Pause button). */
+export function usePauseExecution() {
+  return useExecutionActionHook(pauseExecution);
+}
+
+/** Resume a paused execution (Debugger Run-to-end button). */
+export function useResumeExecution() {
+  return useExecutionActionHook(resumeExecution);
+}
+
+/** Step exactly one step on a paused execution (Debugger Send-CCR button). */
+export function useStepExecution() {
+  return useExecutionActionHook(stepExecution);
+}
+
+/** Skip the next step on a paused execution (Debugger Skip button). */
+export function useSkipStep() {
+  return useExecutionActionHook(skipStep);
 }

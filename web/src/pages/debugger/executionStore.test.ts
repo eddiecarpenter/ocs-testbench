@@ -156,3 +156,152 @@ describe('createExecutionStore', () => {
     expect(store.getState().historicalIndex).toBeNull();
   });
 });
+
+describe('ingestSse — reducer mapping', () => {
+  function step(
+    n: number,
+    state: 'success' | 'failure' = 'success',
+  ): import('../../api/resources/executions').StepRecord {
+    return {
+      n,
+      kind: 'request',
+      state,
+      durationMs: 100,
+    };
+  }
+
+  function snapshot(
+    overrides: Partial<Execution> = {},
+  ): Execution {
+    return {
+      id: 'exec-1',
+      scenarioId: 'scn-1',
+      scenarioName: 'X',
+      mode: 'interactive',
+      state: 'running',
+      startedAt: '2026-04-29T07:00:00Z',
+      currentStep: 0,
+      totalSteps: 3,
+      steps: [],
+      context: { system: {}, user: {}, extracted: {} },
+      ...overrides,
+    } as Execution;
+  }
+
+  it('execution.started promotes pending → running', () => {
+    const s = createExecutionStore('exec-1');
+    s.getState().ingestSse({
+      type: 'execution.started',
+      data: snapshot({ state: 'running' }),
+    });
+    expect(s.getState().state).toBe('running');
+  });
+
+  it('step.sending updates cursor and flips to running', () => {
+    const s = createExecutionStore('exec-1');
+    // Bring the store into running state first.
+    s.getState().ingestSse({
+      type: 'execution.started',
+      data: snapshot({ state: 'running' }),
+    });
+    s.getState().ingestSse({
+      type: 'step.sending',
+      data: { executionId: 'exec-1', stepIndex: 2 },
+    });
+    expect(s.getState().cursor).toBe(2);
+    expect(s.getState().state).toBe('running');
+  });
+
+  it('step.responded appends the step record at its index', () => {
+    const s = createExecutionStore('exec-1');
+    s.getState().ingestSse({
+      type: 'execution.started',
+      data: snapshot(),
+    });
+    s.getState().ingestSse({
+      type: 'step.responded',
+      data: { executionId: 'exec-1', step: step(1) },
+    });
+    expect(s.getState().steps[0]).toEqual(step(1));
+    expect(s.getState().cursor).toBe(1);
+  });
+
+  it('execution.paused transitions to paused and parks cursor', () => {
+    const s = createExecutionStore('exec-1');
+    s.getState().ingestSse({
+      type: 'execution.started',
+      data: snapshot(),
+    });
+    s.getState().ingestSse({
+      type: 'execution.paused',
+      data: { executionId: 'exec-1', atStepIndex: 4 },
+    });
+    expect(s.getState().state).toBe('paused');
+    expect(s.getState().cursor).toBe(4);
+  });
+
+  it('execution.resumed transitions back to running', () => {
+    const s = createExecutionStore('exec-1');
+    s.getState().ingestSse({
+      type: 'execution.started',
+      data: snapshot(),
+    });
+    s.getState().ingestSse({
+      type: 'execution.paused',
+      data: { executionId: 'exec-1', atStepIndex: 2 },
+    });
+    s.getState().ingestSse({
+      type: 'execution.resumed',
+      data: { executionId: 'exec-1', fromStepIndex: 2 },
+    });
+    expect(s.getState().state).toBe('running');
+  });
+
+  it('execution.completed transitions to success even when entered from paused', () => {
+    const s = createExecutionStore('exec-1');
+    s.getState().ingestSse({
+      type: 'execution.started',
+      data: snapshot(),
+    });
+    s.getState().ingestSse({
+      type: 'execution.paused',
+      data: { executionId: 'exec-1', atStepIndex: 2 },
+    });
+    s.getState().ingestSse({
+      type: 'execution.completed',
+      data: snapshot({ state: 'success', currentStep: 3, totalSteps: 3 }),
+    });
+    expect(s.getState().state).toBe('success');
+    expect(s.getState().cursor).toBe(3);
+  });
+
+  it('execution.failed sets failureReason', () => {
+    const s = createExecutionStore('exec-1');
+    s.getState().ingestSse({
+      type: 'execution.started',
+      data: snapshot(),
+    });
+    s.getState().ingestSse({
+      type: 'execution.failed',
+      data: {
+        ...snapshot({ state: 'failure', currentStep: 3, totalSteps: 3 }),
+        failureReason: 'OCS lookup failed',
+      },
+    });
+    expect(s.getState().state).toBe('failure');
+    expect(s.getState().failureReason).toBe('OCS lookup failed');
+  });
+
+  it('execution.aborted transitions to aborted', () => {
+    const s = createExecutionStore('exec-1');
+    s.getState().ingestSse({
+      type: 'execution.started',
+      data: snapshot(),
+    });
+    s.getState().ingestSse({
+      type: 'execution.aborted',
+      data: snapshot({ state: 'aborted', currentStep: 1, totalSteps: 3 }),
+    });
+    expect(s.getState().state).toBe('aborted');
+  });
+});
