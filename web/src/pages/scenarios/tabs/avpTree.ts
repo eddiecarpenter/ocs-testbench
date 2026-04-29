@@ -5,7 +5,7 @@
  * non-managed AVPs runs through these helpers so the call site stays
  * declarative.
  */
-import type { AvpNode } from '../../store/types';
+import type { AvpNode } from '../types';
 
 /** Engine-managed AVP names — read-only in the Frame tab (ARCH §8). */
 export const ENGINE_MANAGED_AVPS: readonly string[] = [

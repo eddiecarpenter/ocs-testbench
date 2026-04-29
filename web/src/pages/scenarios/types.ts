@@ -6,7 +6,7 @@
  * via `npm run gen:api`). If a field is wrong here, fix the spec and
  * re-run the generator — do not patch the type locally.
  */
-import type { components } from '../../../api/schema';
+import type { components } from '../../api/schema';
 
 export type Scenario = components['schemas']['Scenario'];
 export type ScenarioInput = components['schemas']['ScenarioInput'];

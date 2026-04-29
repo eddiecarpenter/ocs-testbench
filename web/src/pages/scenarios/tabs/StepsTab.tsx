@@ -14,6 +14,7 @@ import {
   Badge,
   Card,
   Group,
+  Menu,
   NumberInput,
   Select,
   Stack,
@@ -25,6 +26,7 @@ import {
 import {
   IconArrowDown,
   IconArrowUp,
+  IconDots,
   IconGripVertical,
   IconPlus,
   IconTrash,
@@ -46,9 +48,10 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { useMediaQuery } from '@mantine/hooks';
 import { useMemo, useState } from 'react';
 
-import { useScenarioDraftStore } from '../../store/scenarioDraftStore';
+import { useScenarioDraftStore } from '../scenarioDraftStore';
 import type {
   ConsumeStep,
   PauseStep,
@@ -58,7 +61,7 @@ import type {
   SessionMode,
   VarValue,
   WaitStep,
-} from '../../store/types';
+} from '../types';
 import { isLegalRequestType, legalRequestTypes } from './stepsValidation';
 
 /** Default kind / requestType for a freshly-added step. */
@@ -78,6 +81,8 @@ interface SortableRowProps {
   total: number;
   selected: boolean;
   legalRequestType: boolean;
+  /** When true, collapse the per-row actions into a kebab. */
+  compactActions: boolean;
   onSelect: (i: number) => void;
   onMoveUp: (i: number) => void;
   onMoveDown: (i: number) => void;
@@ -90,6 +95,7 @@ function SortableRow({
   total,
   selected,
   legalRequestType,
+  compactActions,
   onSelect,
   onMoveUp,
   onMoveDown,
@@ -118,17 +124,24 @@ function SortableRow({
       onClick={() => onSelect(index)}
       data-testid={`steps-row-${index}`}
     >
-      <Table.Td onClick={(e) => e.stopPropagation()}>
-        <ActionIcon
-          variant="subtle"
-          aria-label="Drag to reorder"
-          {...attributes}
-          {...listeners}
-        >
-          <IconGripVertical size={14} />
-        </ActionIcon>
+      <Table.Td
+        onClick={(e) => e.stopPropagation()}
+        style={{ paddingLeft: 4, paddingRight: 0, width: 56 }}
+      >
+        <Group gap={2} wrap="nowrap" align="center">
+          <ActionIcon
+            variant="subtle"
+            aria-label="Drag to reorder"
+            {...attributes}
+            {...listeners}
+          >
+            <IconGripVertical size={14} />
+          </ActionIcon>
+          <Text size="sm" c="dimmed" component="span">
+            {index + 1}
+          </Text>
+        </Group>
       </Table.Td>
-      <Table.Td>{index + 1}</Table.Td>
       <Table.Td>
         <Group gap={4}>
           <Badge color={legalRequestType ? 'blue' : 'red'} variant="light">
@@ -146,36 +159,82 @@ function SortableRow({
           )}
         </Group>
       </Table.Td>
-      <Table.Td onClick={(e) => e.stopPropagation()}>
-        <Group gap={2} justify="flex-end">
-          <ActionIcon
-            variant="subtle"
-            aria-label="Move up"
-            disabled={index === 0}
-            onClick={() => onMoveUp(index)}
-            data-testid={`steps-up-${index}`}
-          >
-            <IconArrowUp size={14} />
-          </ActionIcon>
-          <ActionIcon
-            variant="subtle"
-            aria-label="Move down"
-            disabled={index === total - 1}
-            onClick={() => onMoveDown(index)}
-            data-testid={`steps-down-${index}`}
-          >
-            <IconArrowDown size={14} />
-          </ActionIcon>
-          <ActionIcon
-            variant="subtle"
-            color="red"
-            aria-label="Remove step"
-            onClick={() => onRemove(index)}
-            data-testid={`steps-remove-${index}`}
-          >
-            <IconTrash size={14} />
-          </ActionIcon>
-        </Group>
+      <Table.Td
+        onClick={(e) => e.stopPropagation()}
+        style={{ width: compactActions ? 40 : 120 }}
+      >
+        {compactActions ? (
+          <Group justify="flex-end">
+            <Menu position="bottom-end" withinPortal>
+              <Menu.Target>
+                <ActionIcon
+                  variant="subtle"
+                  aria-label="Step actions"
+                  data-testid={`steps-actions-${index}`}
+                >
+                  <IconDots size={14} />
+                </ActionIcon>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Item
+                  leftSection={<IconArrowUp size={14} />}
+                  disabled={index === 0}
+                  onClick={() => onMoveUp(index)}
+                  data-testid={`steps-up-${index}`}
+                >
+                  Move up
+                </Menu.Item>
+                <Menu.Item
+                  leftSection={<IconArrowDown size={14} />}
+                  disabled={index === total - 1}
+                  onClick={() => onMoveDown(index)}
+                  data-testid={`steps-down-${index}`}
+                >
+                  Move down
+                </Menu.Item>
+                <Menu.Divider />
+                <Menu.Item
+                  color="red"
+                  leftSection={<IconTrash size={14} />}
+                  onClick={() => onRemove(index)}
+                  data-testid={`steps-remove-${index}`}
+                >
+                  Remove
+                </Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
+          </Group>
+        ) : (
+          <Group gap={2} justify="flex-end" wrap="nowrap">
+            <ActionIcon
+              variant="subtle"
+              aria-label="Move up"
+              disabled={index === 0}
+              onClick={() => onMoveUp(index)}
+              data-testid={`steps-up-${index}`}
+            >
+              <IconArrowUp size={14} />
+            </ActionIcon>
+            <ActionIcon
+              variant="subtle"
+              aria-label="Move down"
+              disabled={index === total - 1}
+              onClick={() => onMoveDown(index)}
+              data-testid={`steps-down-${index}`}
+            >
+              <IconArrowDown size={14} />
+            </ActionIcon>
+            <ActionIcon
+              variant="subtle"
+              color="red"
+              aria-label="Remove step"
+              onClick={() => onRemove(index)}
+              data-testid={`steps-remove-${index}`}
+            >
+              <IconTrash size={14} />
+            </ActionIcon>
+          </Group>
+        )}
       </Table.Td>
     </Table.Tr>
   );
@@ -441,6 +500,11 @@ export function StepsTab() {
   const draft = useScenarioDraftStore((s) => s.draft);
   const setSteps = useScenarioDraftStore((s) => s.setSteps);
 
+  // Per-row actions: inline when there's room, kebab when the
+  // viewport is genuinely cramped. Threshold mirrors the modal's
+  // "tablet or smaller" breakpoint.
+  const compactActions = useMediaQuery('(max-width: 768px)') ?? false;
+
   const sessionMode = draft?.sessionMode ?? 'session';
   const steps = useMemo(() => draft?.steps ?? [], [draft?.steps]);
   const variableNames = useMemo(
@@ -501,8 +565,8 @@ export function StepsTab() {
   const selected = steps[effectiveIndex];
 
   return (
-    <Group align="flex-start" gap="lg" wrap="nowrap">
-      <Card withBorder padding="sm" style={{ flex: 1, minWidth: 0 }}>
+    <Group align="flex-start" gap="lg" wrap="wrap">
+      <Card withBorder padding="sm" style={{ flex: '1 1 280px', minWidth: 280 }}>
         <Stack gap="xs">
           <Group justify="space-between">
             <Title order={5}>Steps</Title>
@@ -527,7 +591,6 @@ export function StepsTab() {
               <Table>
                 <Table.Thead>
                   <Table.Tr>
-                    <Table.Th aria-label="Drag" />
                     <Table.Th>#</Table.Th>
                     <Table.Th>Type</Table.Th>
                     <Table.Th aria-label="Actions" />
@@ -545,6 +608,7 @@ export function StepsTab() {
                         step.kind !== 'request' ||
                         isLegalRequestType(sessionMode, step.requestType)
                       }
+                      compactActions={compactActions}
                       onSelect={setSelectedIndex}
                       onMoveUp={(idx) => moveTo(idx, idx - 1)}
                       onMoveDown={(idx) => moveTo(idx, idx + 1)}
@@ -563,7 +627,7 @@ export function StepsTab() {
         </Stack>
       </Card>
 
-      <Card withBorder padding="md" style={{ flex: 2, minWidth: 320 }}>
+      <Card withBorder padding="md" style={{ flex: '2 1 360px', minWidth: 320 }}>
         {selected ? (
           <StepEditor
             step={selected}

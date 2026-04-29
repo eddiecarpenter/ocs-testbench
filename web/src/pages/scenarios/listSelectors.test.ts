@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { filterScenarios, groupByUnit } from './listSelectors';
-import type { ScenarioSummary } from '../store/types';
+import type { ScenarioSummary } from './types';
 
 function row(overrides: Partial<ScenarioSummary>): ScenarioSummary {
   return {

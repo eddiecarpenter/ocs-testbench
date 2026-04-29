@@ -1,3 +1,20 @@
+/**
+ * Scenarios listing — replaces the legacy `/scenarios` placeholder.
+ *
+ * Renders rows grouped under `OCTET` / `TIME` / `UNITS` headers, with
+ * search across name + peer, a peer filter, the New CTA, and per-row
+ * Run / Edit / Duplicate / Delete actions in the kebab menu. Row
+ * click does NOT navigate — editing always goes through the kebab.
+ *
+ * The same component handles `/scenarios`, `/scenarios/new`, and
+ * `/scenarios/:id` — it always renders the list, and conditionally
+ * mounts the full-screen `<ScenarioBuilderPage>` modal when the URL
+ * indicates a create / edit / duplicate flow.
+ *
+ * The list is read-only here — every mutation goes through the API
+ * helpers in `../../api/resources/scenarios.ts`, which own the cache
+ * invalidation.
+ */
 import {
   ActionIcon,
   Alert,
@@ -6,6 +23,7 @@ import {
   Card,
   Group,
   Menu,
+  Modal,
   Select,
   Skeleton,
   Stack,
@@ -19,46 +37,47 @@ import {
   IconAlertTriangle,
   IconCopy,
   IconDots,
+  IconPencil,
   IconPlayerPlay,
   IconPlus,
   IconSearch,
+  IconTrash,
 } from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate, useParams } from 'react-router';
 
-import { ApiError } from '../../../api/errors';
-import { usePeers } from '../../../api/resources/peers';
+import { ApiError } from '../../api/errors';
+import { usePeers } from '../../api/resources/peers';
 import {
-  useDuplicateScenario,
+  useDeleteScenario,
   useRunScenario,
   useScenarios,
-} from '../api/scenarios';
+} from '../../api/resources/scenarios';
 import {
   UNIT_GROUP_ORDER,
   filterScenarios,
   groupByUnit,
-} from '../list/listSelectors';
-import type { ScenarioSummary } from '../store/types';
+} from './listSelectors';
+import { ScenarioBuilderPage } from './ScenarioBuilderPage';
+import type { ScenarioSummary } from './types';
 
-/**
- * Scenarios listing — replaces the legacy `/scenarios` placeholder.
- *
- * Renders rows grouped under `OCTET` / `TIME` / `UNITS` headers, with
- * search across name + peer, a peer filter, the New CTA, and per-row
- * Run + Duplicate actions. Click-row navigates into the Builder.
- *
- * The list is read-only here — every mutation goes through the API
- * helpers in `../api/scenarios.ts`, which own the cache invalidation.
- */
 export function ScenariosListPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { id: routeId } = useParams<{ id?: string }>();
+  const isEditorOpen =
+    location.pathname === '/scenarios/new' || Boolean(routeId);
+
   const scenariosQuery = useScenarios();
   const peersQuery = usePeers();
-  const duplicate = useDuplicateScenario();
   const run = useRunScenario();
+  const remove = useDeleteScenario();
 
   const [search, setSearch] = useState('');
   const [peerFilter, setPeerFilter] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<ScenarioSummary | null>(
+    null,
+  );
 
   /** Map peerId → peerName for the row display + the peer filter dropdown. */
   const peerMap = useMemo(() => {
@@ -90,27 +109,13 @@ export function ScenariosListPage() {
     }));
   }, [scenariosQuery.data, peerMap]);
 
-  if (scenariosQuery.isLoading) {
-    return (
-      <Stack gap="md">
-        <Title order={2}>Scenarios</Title>
-        <Skeleton height={32} />
-        <Skeleton height={140} />
-      </Stack>
-    );
-  }
+  // ---------------------------------------------------------------------------
+  // Row actions
+  // ---------------------------------------------------------------------------
 
-  if (scenariosQuery.isError) {
-    return (
-      <Alert
-        icon={<IconAlertTriangle size={16} />}
-        color="red"
-        title="Failed to load scenarios"
-      >
-        {(scenariosQuery.error as ApiError | Error).message}
-      </Alert>
-    );
-  }
+  const handleEdit = (row: ScenarioSummary) => {
+    navigate(`/scenarios/${encodeURIComponent(row.id)}`);
+  };
 
   const handleRun = async (row: ScenarioSummary) => {
     try {
@@ -130,23 +135,43 @@ export function ScenariosListPage() {
     }
   };
 
-  const handleDuplicate = async (row: ScenarioSummary) => {
+  /**
+   * Duplicate opens a fresh editor pre-filled with the source's data.
+   * NO API call — nothing is persisted until the user hits Save in the
+   * editor (so Discard truly throws everything away).
+   */
+  const handleDuplicate = (row: ScenarioSummary) => {
+    navigate(
+      `/scenarios/new?dup=${encodeURIComponent(row.id)}`,
+    );
+  };
+
+  const handleDeleteRequest = (row: ScenarioSummary) => {
+    setPendingDelete(row);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!pendingDelete) return;
     try {
-      const dup = await duplicate.mutateAsync({ id: row.id });
+      await remove.mutateAsync(pendingDelete.id);
       notifications.show({
-        color: 'green',
-        title: 'Scenario duplicated',
-        message: `Opened "${dup.name}" in the Builder.`,
+        color: 'teal',
+        title: 'Scenario deleted',
+        message: pendingDelete.name,
       });
-      navigate(`/scenarios/${encodeURIComponent(dup.id)}`);
+      setPendingDelete(null);
     } catch (err) {
       notifications.show({
         color: 'red',
-        title: 'Duplicate failed',
-        message: (err as Error).message,
+        title: 'Could not delete scenario',
+        message: err instanceof Error ? err.message : 'Unexpected error',
       });
     }
   };
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
 
   return (
     <Stack gap="md">
@@ -181,7 +206,20 @@ export function ScenariosListPage() {
         />
       </Group>
 
-      {filtered.length === 0 ? (
+      {scenariosQuery.isLoading ? (
+        <Stack gap="md">
+          <Skeleton height={32} />
+          <Skeleton height={140} />
+        </Stack>
+      ) : scenariosQuery.isError ? (
+        <Alert
+          icon={<IconAlertTriangle size={16} />}
+          color="red"
+          title="Failed to load scenarios"
+        >
+          {(scenariosQuery.error as ApiError | Error).message}
+        </Alert>
+      ) : filtered.length === 0 ? (
         <Card withBorder padding="lg">
           <Text ta="center" c="dimmed">
             No scenarios match the current filters.
@@ -215,10 +253,6 @@ export function ScenariosListPage() {
                       {rows.map((row) => (
                         <Table.Tr
                           key={row.id}
-                          style={{ cursor: 'pointer' }}
-                          onClick={() =>
-                            navigate(`/scenarios/${encodeURIComponent(row.id)}`)
-                          }
                           data-testid={`scenarios-row-${row.id}`}
                         >
                           <Table.Td>
@@ -240,7 +274,7 @@ export function ScenariosListPage() {
                           <Table.Td>
                             {new Date(row.updatedAt).toLocaleString()}
                           </Table.Td>
-                          <Table.Td onClick={(e) => e.stopPropagation()}>
+                          <Table.Td>
                             <Group gap={4} justify="flex-end" wrap="nowrap">
                               <ActionIcon
                                 variant="subtle"
@@ -256,17 +290,35 @@ export function ScenariosListPage() {
                                   <ActionIcon
                                     variant="subtle"
                                     aria-label="More actions"
+                                    data-testid={`scenarios-more-${row.id}`}
                                   >
                                     <IconDots size={16} />
                                   </ActionIcon>
                                 </Menu.Target>
                                 <Menu.Dropdown>
                                   <Menu.Item
+                                    leftSection={<IconPencil size={14} />}
+                                    onClick={() => handleEdit(row)}
+                                    data-testid={`scenarios-edit-${row.id}`}
+                                  >
+                                    Edit
+                                  </Menu.Item>
+                                  <Menu.Item
                                     leftSection={<IconCopy size={14} />}
                                     onClick={() => handleDuplicate(row)}
                                     data-testid={`scenarios-duplicate-${row.id}`}
                                   >
                                     Duplicate
+                                  </Menu.Item>
+                                  <Menu.Divider />
+                                  <Menu.Item
+                                    color="red"
+                                    leftSection={<IconTrash size={14} />}
+                                    onClick={() => handleDeleteRequest(row)}
+                                    disabled={row.origin === 'system'}
+                                    data-testid={`scenarios-delete-${row.id}`}
+                                  >
+                                    Delete
                                   </Menu.Item>
                                 </Menu.Dropdown>
                               </Menu>
@@ -282,6 +334,42 @@ export function ScenariosListPage() {
           })}
         </Stack>
       )}
+
+      {isEditorOpen && <ScenarioBuilderPage />}
+
+      <Modal
+        opened={Boolean(pendingDelete)}
+        onClose={() => setPendingDelete(null)}
+        title="Delete scenario"
+        centered
+        closeOnClickOutside={!remove.isPending}
+        closeOnEscape={!remove.isPending}
+      >
+        <Stack gap="md">
+          <Text size="sm">
+            Are you sure you want to delete{' '}
+            <strong>{pendingDelete?.name ?? ''}</strong>? This cannot be
+            undone.
+          </Text>
+          <Group justify="flex-end">
+            <Button
+              variant="subtle"
+              onClick={() => setPendingDelete(null)}
+              disabled={remove.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              color="red"
+              loading={remove.isPending}
+              onClick={handleDeleteConfirm}
+              data-testid="scenarios-delete-confirm"
+            >
+              Delete
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Stack>
   );
 }

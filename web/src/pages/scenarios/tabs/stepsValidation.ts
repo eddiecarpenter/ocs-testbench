@@ -3,7 +3,7 @@
  * component file so React Fast Refresh does not complain about mixing
  * components and helpers.
  */
-import type { RequestType, SessionMode } from '../../store/types';
+import type { RequestType, SessionMode } from '../types';
 
 /** Request types legal under each session mode (architecture §4). */
 export function legalRequestTypes(mode: SessionMode): RequestType[] {

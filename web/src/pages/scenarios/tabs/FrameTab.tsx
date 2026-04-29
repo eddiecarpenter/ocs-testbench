@@ -5,6 +5,14 @@
  * (engine-managed AVPs render dimmed and are not selectable for edit
  * — they remain visible to keep the §8 frame structure honest), and
  * a properties pane on the right scoped to the selected node.
+ *
+ * Per-row Remove sits inline in the tree (no Remove button in the
+ * properties pane); deleting a non-leaf prompts a confirmation
+ * modal because it cascades into all descendants.
+ *
+ * Value reference on a leaf AVP is a Select of variable names
+ * defined on the Variables tab — so the frame stays in lock-step
+ * with the variable catalogue.
  */
 import {
   ActionIcon,
@@ -12,11 +20,14 @@ import {
   Button,
   Card,
   Group,
+  Modal,
   NumberInput,
+  Select,
   Stack,
   Text,
   TextInput,
   Title,
+  Tooltip,
 } from '@mantine/core';
 import {
   IconChevronDown,
@@ -28,8 +39,12 @@ import {
 } from '@tabler/icons-react';
 import { useState } from 'react';
 
-import { useScenarioDraftStore } from '../../store/scenarioDraftStore';
-import type { AvpNode } from '../../store/types';
+import { useScenarioDraftStore } from '../scenarioDraftStore';
+import {
+  buildVariableOptions,
+  type VariableOptionGroup,
+} from '../selectors';
+import type { AvpNode } from '../types';
 import {
   addChildAt,
   type AvpPath,
@@ -43,6 +58,12 @@ function pathKey(path: AvpPath): string {
   return path.join('.');
 }
 
+/** Sum of node + all descendants — drives the delete-confirm copy. */
+function countNodes(node: AvpNode): number {
+  if (!node.children || node.children.length === 0) return 1;
+  return 1 + node.children.reduce((acc, c) => acc + countNodes(c), 0);
+}
+
 interface AvpRowProps {
   node: AvpNode;
   path: AvpPath;
@@ -50,6 +71,7 @@ interface AvpRowProps {
   expanded: Set<string>;
   onToggle: (key: string) => void;
   onSelect: (path: AvpPath) => void;
+  onRequestRemove: (path: AvpPath) => void;
 }
 
 function AvpRow({
@@ -59,10 +81,11 @@ function AvpRow({
   expanded,
   onToggle,
   onSelect,
+  onRequestRemove,
 }: AvpRowProps) {
   const key = pathKey(path);
   const managed = isManagedAvp(node);
-  const isGrouped = Boolean(node.children && node.children.length >= 0 && node.children !== undefined);
+  const isGrouped = Array.isArray(node.children);
   const isOpen = expanded.has(key);
   const isSelected = selectedKey === key;
 
@@ -102,12 +125,12 @@ function AvpRow({
         ) : (
           <IconCircleDot size={12} style={{ opacity: 0.4 }} />
         )}
-        <Text style={{ flex: 1 }} fw={managed ? 400 : 500}>
-          {node.name}
-        </Text>
         <Badge variant="outline" size="xs">
           {node.code}
         </Badge>
+        <Text style={{ flex: 1 }} fw={managed ? 400 : 500}>
+          {node.name}
+        </Text>
         {managed && (
           <Badge
             color="gray"
@@ -120,8 +143,25 @@ function AvpRow({
         )}
         {!isGrouped && node.valueRef && (
           <Text size="xs" c="dimmed">
-            ← {node.valueRef}
+            ← {`{{${node.valueRef}}}`}
           </Text>
+        )}
+        {!managed && (
+          <Tooltip label="Remove">
+            <ActionIcon
+              variant="subtle"
+              color="red"
+              size="sm"
+              aria-label="Remove AVP"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRequestRemove(path);
+              }}
+              data-testid={`avp-remove-${key}`}
+            >
+              <IconTrash size={14} />
+            </ActionIcon>
+          </Tooltip>
         )}
       </Group>
       {isGrouped && isOpen && (node.children ?? []).map((child, i) => (
@@ -133,6 +173,7 @@ function AvpRow({
           expanded={expanded}
           onToggle={onToggle}
           onSelect={onSelect}
+          onRequestRemove={onRequestRemove}
         />
       ))}
     </Stack>
@@ -141,32 +182,23 @@ function AvpRow({
 
 interface PropertiesPaneProps {
   node: AvpNode;
+  variableOptions: VariableOptionGroup[];
+  hasAnyVariable: boolean;
   onChange: (replacement: AvpNode) => void;
   onAddChild: () => void;
-  onRemove: () => void;
 }
 
 function PropertiesPane({
   node,
+  variableOptions,
+  hasAnyVariable,
   onChange,
   onAddChild,
-  onRemove,
 }: PropertiesPaneProps) {
   const isGrouped = Array.isArray(node.children);
 
   return (
     <Stack gap="md">
-      <Group justify="space-between">
-        <Title order={5}>{node.name}</Title>
-        <Button
-          variant="subtle"
-          color="red"
-          leftSection={<IconTrash size={14} />}
-          onClick={onRemove}
-        >
-          Remove
-        </Button>
-      </Group>
       <TextInput
         label="Name"
         value={node.name}
@@ -192,13 +224,20 @@ function PropertiesPane({
         }
       />
       {!isGrouped && (
-        <TextInput
+        <Select
           label="Value reference"
-          description="Variable name (e.g. MSISDN) — wraps to {{NAME}} in the wire frame."
-          value={node.valueRef ?? ''}
-          onChange={(e) =>
-            onChange({ ...node, valueRef: e.currentTarget.value })
+          description="Variable bound to this AVP — wraps to {{NAME}} in the wire frame. Includes engine-provided System variables and any User variables you define."
+          placeholder={
+            !hasAnyVariable ? 'No variables available' : '{{ ... }}'
           }
+          data={variableOptions}
+          value={node.valueRef ?? null}
+          onChange={(v) =>
+            onChange({ ...node, valueRef: v ?? '' })
+          }
+          clearable
+          disabled={!hasAnyVariable}
+          data-testid="avp-value-ref"
         />
       )}
       {isGrouped && (
@@ -242,9 +281,12 @@ export function FrameTab() {
 
   const [selected, setSelected] = useState<AvpPath | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [pendingRemove, setPendingRemove] = useState<AvpPath | null>(null);
 
   if (!draft) return null;
   const tree = draft.avpTree;
+  const { options: variableOptions, hasAny: hasAnyVariable } =
+    buildVariableOptions(draft.variables);
 
   const selectedKey = selected ? pathKey(selected) : '';
   const selectedNode = selected ? getNodeAt(tree, selected) : null;
@@ -283,63 +325,109 @@ export function FrameTab() {
     setExpanded((prev) => new Set(prev).add(selectedKey));
   }
 
-  function handleRemove() {
-    if (!selected) return;
-    setAvpTree(removeNodeAt(tree, selected));
-    setSelected(null);
+  function requestRemove(path: AvpPath) {
+    setPendingRemove(path);
   }
 
+  function confirmRemove() {
+    if (!pendingRemove) return;
+    setAvpTree(removeNodeAt(tree, pendingRemove));
+    if (selected && pathKey(selected).startsWith(pathKey(pendingRemove))) {
+      setSelected(null);
+    }
+    setPendingRemove(null);
+  }
+
+  const pendingNode = pendingRemove ? getNodeAt(tree, pendingRemove) : null;
+  const pendingDescendantCount = pendingNode ? countNodes(pendingNode) - 1 : 0;
+
   return (
-    <Group align="flex-start" gap="lg" wrap="nowrap">
-      <Card withBorder padding="sm" style={{ flex: 1, minWidth: 0 }}>
-        <Stack gap="xs">
-          <Group justify="space-between">
-            <Title order={5}>AVP frame</Title>
-            <ActionIcon
-              variant="filled"
-              aria-label="Add root AVP"
-              onClick={handleAddRoot}
-              data-testid="avp-add-root"
-            >
-              <IconPlus size={16} />
-            </ActionIcon>
-          </Group>
-          <Stack gap={2}>
-            {tree.map((node, i) => (
-              <AvpRow
-                key={i}
-                node={node}
-                path={[i]}
-                selectedKey={selectedKey}
-                expanded={expanded}
-                onToggle={handleToggle}
-                onSelect={handleSelect}
-              />
-            ))}
+    <>
+      <Group align="flex-start" gap="lg" wrap="nowrap">
+        <Card withBorder padding="sm" style={{ flex: 1, minWidth: 0 }}>
+          <Stack gap="xs">
+            <Group justify="space-between">
+              <Title order={5}>AVP frame</Title>
+              <ActionIcon
+                variant="filled"
+                aria-label="Add root AVP"
+                onClick={handleAddRoot}
+                data-testid="avp-add-root"
+              >
+                <IconPlus size={16} />
+              </ActionIcon>
+            </Group>
+            <Stack gap={2}>
+              {tree.map((node, i) => (
+                <AvpRow
+                  key={i}
+                  node={node}
+                  path={[i]}
+                  selectedKey={selectedKey}
+                  expanded={expanded}
+                  onToggle={handleToggle}
+                  onSelect={handleSelect}
+                  onRequestRemove={requestRemove}
+                />
+              ))}
+            </Stack>
+            {tree.length === 0 && (
+              <Text c="dimmed" ta="center">
+                No AVPs in the frame yet.
+              </Text>
+            )}
           </Stack>
-          {tree.length === 0 && (
-            <Text c="dimmed" ta="center">
-              No AVPs in the frame yet.
+        </Card>
+
+        <Card withBorder padding="md" style={{ flex: 1, minWidth: 320 }}>
+          {selectedNode && !isManagedAvp(selectedNode) ? (
+            <PropertiesPane
+              node={selectedNode}
+              variableOptions={variableOptions}
+              hasAnyVariable={hasAnyVariable}
+              onChange={handleChange}
+              onAddChild={handleAddChild}
+            />
+          ) : (
+            <Text c="dimmed">
+              Select a non-managed AVP to edit its properties. Engine-managed
+              AVPs are read-only because the runtime owns their value.
             </Text>
           )}
-        </Stack>
-      </Card>
+        </Card>
+      </Group>
 
-      <Card withBorder padding="md" style={{ flex: 1, minWidth: 320 }}>
-        {selectedNode && !isManagedAvp(selectedNode) ? (
-          <PropertiesPane
-            node={selectedNode}
-            onChange={handleChange}
-            onAddChild={handleAddChild}
-            onRemove={handleRemove}
-          />
-        ) : (
-          <Text c="dimmed">
-            Select a non-managed AVP to edit its properties. Engine-managed
-            AVPs are read-only because the runtime owns their value.
+      <Modal
+        opened={Boolean(pendingRemove)}
+        onClose={() => setPendingRemove(null)}
+        title="Remove AVP"
+        centered
+      >
+        <Stack gap="md">
+          <Text size="sm">
+            Remove <strong>{pendingNode?.name ?? ''}</strong>
+            {pendingDescendantCount > 0 && (
+              <>
+                {' '}and its {pendingDescendantCount}{' '}
+                {pendingDescendantCount === 1 ? 'descendant' : 'descendants'}
+              </>
+            )}
+            ? This cannot be undone outside of Discard.
           </Text>
-        )}
-      </Card>
-    </Group>
+          <Group justify="flex-end">
+            <Button variant="subtle" onClick={() => setPendingRemove(null)}>
+              Cancel
+            </Button>
+            <Button
+              color="red"
+              onClick={confirmRemove}
+              data-testid="avp-remove-confirm"
+            >
+              Remove
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+    </>
   );
 }

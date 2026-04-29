@@ -11,7 +11,7 @@ import type {
   ScenarioInput,
   Service,
   Variable,
-} from '../store/types';
+} from './types';
 
 const DEFAULT_AVP_TREE: AvpNode[] = [
   { name: 'Origin-Host', code: 264, valueRef: 'ORIGIN_HOST' },
