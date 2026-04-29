@@ -139,7 +139,7 @@ describe('buildPlan', () => {
 });
 
 describe('installExecutionSse', () => {
-  it('interactive: fires execution.started immediately and paces remaining events', () => {
+  it('interactive: fires execution.started on the first tick, then paces step events', () => {
     const sched = makeFakeScheduler();
     const seen: string[] = [];
     const handle = installExecutionSse(
@@ -153,36 +153,28 @@ describe('installExecutionSse', () => {
     );
     handle.subscribe((e) => seen.push(e.type));
 
-    // execution.started is synchronous — it fires before subscribe()
-    // attaches, so we can't see it via this handler. The first event
-    // the *subscriber* sees is the first paced one (step.sending of
-    // the first step).
+    // execution.started is scheduled on the next tick (delay 0) so
+    // subscribers attached immediately after install() reliably see
+    // it. Without this, the started event would fire inside install
+    // before subscribe() could register, and the store would never
+    // get its session-local startedAt stamp.
     expect(seen).toEqual([]);
 
+    sched.advance(0);
+    expect(seen).toEqual(['execution.started']);
+
     sched.advance(100);
-    expect(seen[0]).toBe('step.sending');
+    expect(seen[1]).toBe('step.sending');
     sched.advance(100);
-    expect(seen[1]).toBe('step.responded');
+    expect(seen[2]).toBe('step.responded');
 
     handle.dispose();
   });
 
-  it('subscribe before install captures execution.started', () => {
+  it('subscriber attached after install reliably receives execution.started', () => {
     const sched = makeFakeScheduler();
     const seen: string[] = [];
 
-    // We can't subscribe before install() in this API — the handle is
-    // returned by install. So instead we verify the documented
-    // behaviour: the FIRST plan entry is execution.started, fired
-    // synchronously during install. Test it by mounting a subscriber
-    // into the install side via a small wrapper.
-    let earlyHandler: ((s: string) => void) | null = null;
-    const sub = (t: string) => earlyHandler?.(t);
-
-    earlyHandler = (t) => seen.push(t);
-    // installExecutionSse fans the started event INSIDE the constructor;
-    // since subscribe hasn't been called yet, the started event won't
-    // reach `seen`. We assert that paced events do.
     const handle = installExecutionSse(
       'exec-1',
       interactiveScenario,
@@ -192,10 +184,16 @@ describe('installExecutionSse', () => {
         scheduler: sched,
       },
     );
-    handle.subscribe((e) => sub(e.type));
+    // Subscribe AFTER install — the contract guarantees we still see
+    // execution.started because the driver schedules it on the first
+    // tick rather than firing it synchronously inside install.
+    handle.subscribe((e) => seen.push(e.type));
+
+    sched.advance(0);
+    expect(seen[0]).toBe('execution.started');
 
     sched.advance(50);
-    expect(seen[0]).toBe('step.sending');
+    expect(seen[1]).toBe('step.sending');
 
     handle.dispose();
   });
@@ -214,7 +212,12 @@ describe('installExecutionSse', () => {
     );
     handle.subscribe((e) => seen.push(e.type));
 
-    // 30 ms in (70 ms remaining on the first tick), pause.
+    // Drain the leading execution.started (scheduled on tick 0).
+    sched.advance(0);
+    expect(seen).toEqual(['execution.started']);
+    seen.length = 0;
+
+    // 30 ms in (70 ms remaining on the first paced tick), pause.
     sched.advance(30);
     expect(seen).toEqual([]);
     expect(sched.pending()).toBe(true);
@@ -250,6 +253,10 @@ describe('installExecutionSse', () => {
     );
     handle.subscribe((e) => seen.push(e.type));
 
+    sched.advance(0);
+    expect(seen).toEqual(['execution.started']);
+    seen.length = 0;
+
     sched.advance(100);
     expect(seen).toEqual(['step.sending']);
 
@@ -273,6 +280,11 @@ describe('installExecutionSse', () => {
       },
     );
     handle.subscribe((e) => seen.push(e));
+
+    // Drain leading execution.started.
+    sched.advance(0);
+    expect(seen[0].type).toBe('execution.started');
+    seen.length = 0;
 
     // Fire all 3 batchStep events.
     sched.advance(50);
@@ -306,6 +318,10 @@ describe('installExecutionSse', () => {
     handle.subscribe((e) => a.push(e.type));
     handle.subscribe((e) => b.push(e.type));
 
+    sched.advance(0); // drain started
+    a.length = 0;
+    b.length = 0;
+
     sched.advance(10);
     expect(a).toEqual(['step.sending']);
     expect(b).toEqual(['step.sending']);
@@ -326,6 +342,8 @@ describe('installExecutionSse', () => {
       },
     );
     const off = handle.subscribe((e) => seen.push(e.type));
+    sched.advance(0); // drain started
+    seen.length = 0;
     sched.advance(10);
     expect(seen.length).toBe(1);
     off();
@@ -358,8 +376,10 @@ describe('installExecutionSse', () => {
 
     h1.pause();
     sched1.advance(100);
+    sched2.advance(0); // drain started on h2
     sched2.advance(10);
-    expect(seen1).toEqual([]); // h1 paused
+    seen2.splice(0, seen2.indexOf('step.sending')); // drop leading started
+    expect(seen1).toEqual([]); // h1 paused before its first tick fired
     expect(seen2).toEqual(['step.sending']); // h2 still running
 
     // Vitest will catch leaked timers
@@ -379,7 +399,7 @@ describe('installExecutionSse', () => {
       );
       handle.subscribe((e) => seen.push(e.type));
       vi.advanceTimersByTime(100);
-      expect(seen).toEqual(['step.sending']);
+      expect(seen).toEqual(['execution.started', 'step.sending']);
       handle.dispose();
     } finally {
       vi.useRealTimers();

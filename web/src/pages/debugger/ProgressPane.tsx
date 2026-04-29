@@ -127,6 +127,14 @@ function ProgressRow({ row, onClick }: ProgressRowProps) {
   const completed = isStepCompleted(record);
   const label = record?.label ?? `Step ${index + 1}`;
   const kind = record?.kind ?? 'request';
+  // For `request` kinds, the step's `requestType` (INITIAL / UPDATE /
+  // TERMINATE / EVENT) is the more informative chip — generic
+  // "Request" applied to every row in a CCR-only scenario is noise.
+  // Other kinds (consume / wait / pause) keep the kind label.
+  const chipLabel =
+    kind === 'request' && record?.requestType
+      ? record.requestType
+      : kindLabel(kind);
   const stateForIcon: StepRowState = computeRowState(record, isCursor, runState);
 
   const background = isHistoricalSelected
@@ -159,7 +167,7 @@ function ProgressRow({ row, onClick }: ProgressRowProps) {
             {index + 1}. {label}
           </Text>
           <Badge size="xs" variant="light" color={kindColor(kind)}>
-            {kindLabel(kind)}
+            {chipLabel}
           </Badge>
         </Group>
         {completed && record?.durationMs !== undefined && (

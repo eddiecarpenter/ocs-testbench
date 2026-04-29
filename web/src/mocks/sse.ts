@@ -4,7 +4,10 @@ import type { DashboardKpis } from '../api/resources/dashboard';
 import type { Peer } from '../api/resources/peers';
 import type { EventStreamLike } from '../api/sse/transport';
 import { setEventStreamFactory } from '../api/sse/transport';
-import { buildExecutionDetail, TOTAL_STEPS } from './data/executionDetails';
+import {
+  buildExecutionDetail,
+  defaultTotalStepsForScenario,
+} from './data/executionDetails';
 import { executionFixtures } from './data/executions';
 import { peerFixtures } from './data/peers';
 import { scenarioFixtures } from './data/scenarios';
@@ -169,20 +172,21 @@ class MockSseEmitter {
     this.broadcast('dashboard.kpi', this.computeKpis());
   }
 
-  /** Advance every running execution by one step; terminate at TOTAL_STEPS. */
+  /** Advance every running execution by one step; terminate at the scenario's step count. */
   private tickExecutions(): void {
     for (const exec of this.executions) {
       if (exec.state !== 'running') continue;
+      const total = defaultTotalStepsForScenario(exec.scenarioId);
       const soFar = this.execProgress.get(exec.id) ?? 0;
       const next = soFar + 1;
 
-      if (next >= TOTAL_STEPS) {
+      if (next >= total) {
         // Terminal transition — mark success and emit a final progress
         // event carrying the completed state.
         exec.state = 'success';
         exec.finishedAt = new Date().toISOString();
-        this.execProgress.set(exec.id, TOTAL_STEPS);
-        const detail = buildExecutionDetail(exec.id, TOTAL_STEPS);
+        this.execProgress.set(exec.id, total);
+        const detail = buildExecutionDetail(exec.id, total);
         if (detail) this.broadcast('execution.progress', detail);
         this.broadcast('dashboard.kpi', this.computeKpis());
       } else {

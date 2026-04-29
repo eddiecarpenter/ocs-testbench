@@ -1,29 +1,26 @@
+/**
+ * Mock execution-detail builder.
+ *
+ * Step records are derived from the source scenario's actual step list
+ * — one `StepRecord` per `scenario.steps[i]` with both the request
+ * (CCR) and the response (CCA) carried as `request` / `response`
+ * payloads on the same record. This matches the architecture (§4 —
+ * a step is a *send*; the CCA is part of that step's response, not a
+ * separate step) and matches what the SSE driver emits, so the
+ * snapshot-then-SSE handoff is coherent.
+ *
+ * Failures land on the LAST step (so the run reads naturally), and
+ * one assertion-failure variant is injected on the UPDATE step (when
+ * present) so the right pane's red-✗ branch is reachable.
+ */
 import type {
   Execution,
   ExecutionContextSnapshot,
   StepRecord,
 } from '../../api/resources/executions';
+import type { Scenario } from '../../pages/scenarios/types';
 import { executionFixtures } from './executions';
-
-/**
- * Canonical 12-step Diameter scenario template. Real scenarios would vary
- * per-execution, but for MVP every execution uses the same outline and
- * failures are injected by swapping one step's `state` to `failure`.
- */
-const STEP_TEMPLATE = [
-  'CER',
-  'CEA',
-  'CCR-I',
-  'CCA-I',
-  'CCR-U (1)',
-  'CCA-U (1)',
-  'CCR-U (2)',
-  'CCA-U (2)',
-  'CCR-U (3)',
-  'CCA-U (3)',
-  'CCR-T',
-  'CCA-T',
-];
+import { scenarioFixtures } from './scenarios';
 
 /** Empty context snapshot — mock executions do not populate live variables. */
 const EMPTY_CONTEXT: ExecutionContextSnapshot = {
@@ -32,77 +29,44 @@ const EMPTY_CONTEXT: ExecutionContextSnapshot = {
   extracted: {},
 };
 
-function buildCompletedSteps(
-  startedAtMs: number,
-  finishedAtMs: number,
-  outcome: 'success' | 'failure',
-): StepRecord[] {
-  const total = STEP_TEMPLATE.length;
-  const span = Math.max(1, finishedAtMs - startedAtMs);
-  const bucket = Math.floor(span / total);
-  // For failures, flip the last step to failure so the step list reads naturally.
-  return STEP_TEMPLATE.map((label, i): StepRecord => {
-    const started = startedAtMs + i * bucket;
-    const finished = i === total - 1 ? finishedAtMs : started + bucket;
-    const isTerminalFail = outcome === 'failure' && i === total - 1;
-    return {
-      n: i + 1,
-      kind: 'request',
-      label,
-      state: isTerminalFail ? 'failure' : 'success',
-      startedAt: new Date(started).toISOString(),
-      finishedAt: new Date(finished).toISOString(),
-      durationMs: finished - started,
-      request: buildSampleRequest(label, i),
-      response: buildSampleResponse(label, i, isTerminalFail),
-      assertionResults: buildSampleAssertions(label, isTerminalFail),
-      ...(isTerminalFail
-        ? { errorDetail: 'DIAMETER_UNABLE_TO_COMPLY (5012)' }
-        : {}),
-    };
-  });
+/** Look up the source scenario for an execution; falls back to first fixture. */
+function scenarioFor(scenarioId: string): Scenario {
+  return (
+    scenarioFixtures.find((s) => s.id === scenarioId) ?? scenarioFixtures[0]
+  );
 }
 
-function buildRunningSteps(
-  startedAtMs: number,
-  completedSoFar: number,
-): StepRecord[] {
-  const out: StepRecord[] = [];
-  let cursor = startedAtMs;
-  for (let i = 0; i < completedSoFar; i++) {
-    const duration = 20 + ((i * 7) % 35); // deterministic-ish jitter
-    const started = cursor;
-    const finished = cursor + duration;
-    out.push({
-      n: i + 1,
-      kind: 'request',
-      label: STEP_TEMPLATE[i],
-      state: 'success',
-      startedAt: new Date(started).toISOString(),
-      finishedAt: new Date(finished).toISOString(),
-      durationMs: duration,
-      request: buildSampleRequest(STEP_TEMPLATE[i], i),
-      response: buildSampleResponse(STEP_TEMPLATE[i], i, false),
-      assertionResults: buildSampleAssertions(STEP_TEMPLATE[i], false),
-    });
-    cursor = finished;
+/** Display label for a step row. CCR-INITIAL / CCR-UPDATE / etc. for requests; kind for others. */
+function labelFor(step: Scenario['steps'][number]): string {
+  if (step.kind === 'request' && step.requestType) {
+    return `CCR-${step.requestType}`;
   }
-  return out;
+  if (step.kind === 'pause') return step.label ?? 'pause';
+  if (step.kind === 'wait') return 'wait';
+  if (step.kind === 'consume') return 'consume';
+  return step.kind;
+}
+
+/** Step count for an execution's source scenario. Used by the executions list. */
+export function defaultTotalStepsForScenario(scenarioId: string): number {
+  return scenarioFor(scenarioId).steps.length;
 }
 
 // ---------------------------------------------------------------------------
-// CCA / CCR sample payloads — three variants exercise the renderer:
+// CCR / CCA sample payloads — three variants exercise the renderer:
 //   - SUCCESS    (Result-Code 2001, all extractions populated)
 //   - ASSERTION  (Result-Code 2001 but an assertion fails)
-//   - EXTRACTION (Result-Code 2001 but a key extraction returns null)
-// Tasks 6 + 8 lean on these so the right pane renders meaningful state
-// without a real engine.
+//   - EXTRACTION (Result-Code 2001 but a key extraction returns null —
+//                 used on the final step of a `failure`-outcome run)
 // ---------------------------------------------------------------------------
 
-function buildSampleRequest(label: string, i: number): Record<string, unknown> {
+function buildSampleRequest(
+  step: Scenario['steps'][number],
+  i: number,
+): Record<string, unknown> {
   return {
     sessionId: `mock-session-${(1000 + i).toString(16)}`,
-    requestType: requestTypeFor(label),
+    requestType: step.kind === 'request' ? step.requestType : step.kind,
     msisdn: '27821234567',
     ccRequestNumber: i,
     'CC-Total-Octets': 1_048_576,
@@ -110,46 +74,32 @@ function buildSampleRequest(label: string, i: number): Record<string, unknown> {
 }
 
 function buildSampleResponse(
-  label: string,
+  step: Scenario['steps'][number],
   i: number,
-  isTerminalFail: boolean,
+  variant: 'success' | 'assertion-fail' | 'terminal-fail',
 ): Record<string, unknown> {
-  if (isTerminalFail) {
+  const requestType = step.kind === 'request' ? step.requestType : step.kind;
+  if (variant === 'terminal-fail') {
     return {
       resultCode: 5012,
-      requestType: requestTypeFor(label),
+      requestType,
       ccRequestNumber: i,
-      // No grant on the terminal-fail variant — extraction should
-      // render `(not set)`.
+      // No grant on terminal-fail — extractions render `(not set)`.
       extractions: { GRANTED_TOTAL: null, EXPIRY: null },
     };
   }
-  // Inject one ASSERTION-failure variant on update step 5 and one
-  // EXTRACTION-failure variant on update step 7 so the renderer is
-  // exercised across all three states without breaking the run.
-  const assertionFailIndex = 4; // CCR-U (1) → CCA-U (1)
-  const extractionFailIndex = 6; // CCR-U (2) → CCA-U (2)
-  if (i === assertionFailIndex) {
+  if (variant === 'assertion-fail') {
     return {
       resultCode: 2001,
-      requestType: requestTypeFor(label),
+      requestType,
       ccRequestNumber: i,
       'CC-Total-Octets': 524_288,
       extractions: { GRANTED_TOTAL: 524_288, EXPIRY: '2026-04-29T10:30:00Z' },
     };
   }
-  if (i === extractionFailIndex) {
-    return {
-      resultCode: 2001,
-      requestType: requestTypeFor(label),
-      ccRequestNumber: i,
-      // Engine missed a Validity-Time extraction.
-      extractions: { GRANTED_TOTAL: 1_048_576, EXPIRY: null },
-    };
-  }
   return {
     resultCode: 2001,
-    requestType: requestTypeFor(label),
+    requestType,
     ccRequestNumber: i,
     'CC-Total-Octets': 1_048_576,
     extractions: {
@@ -160,10 +110,9 @@ function buildSampleResponse(
 }
 
 function buildSampleAssertions(
-  label: string,
-  isTerminalFail: boolean,
+  variant: 'success' | 'assertion-fail' | 'terminal-fail',
 ): NonNullable<StepRecord['assertionResults']> {
-  if (isTerminalFail) {
+  if (variant === 'terminal-fail') {
     return [
       {
         expression: 'response.resultCode == 2001',
@@ -172,16 +121,10 @@ function buildSampleAssertions(
       },
     ];
   }
-  // Per-step canonical assertion. Update step 5 (CCR-U / CCA-U pair
-  // index 4) carries an extra failing assertion so the assertion-
-  // failure variant is reachable from the fixture set.
   const out: NonNullable<StepRecord['assertionResults']> = [
-    {
-      expression: 'response.resultCode == 2001',
-      passed: true,
-    },
+    { expression: 'response.resultCode == 2001', passed: true },
   ];
-  if (label === 'CCA-U (1)') {
+  if (variant === 'assertion-fail') {
     out.push({
       expression: 'response.granted.total >= 1MiB',
       passed: false,
@@ -191,19 +134,103 @@ function buildSampleAssertions(
   return out;
 }
 
-function requestTypeFor(label: string): string {
-  if (label.startsWith('CCR-I') || label.startsWith('CCA-I')) return 'INITIAL';
-  if (label.startsWith('CCR-U') || label.startsWith('CCA-U')) return 'UPDATE';
-  if (label.startsWith('CCR-T') || label.startsWith('CCA-T')) return 'TERMINATE';
-  return label;
+/**
+ * Pick the per-step variant used to colour the CCR/CCA payloads.
+ *
+ *   - The LAST step of a failure-outcome run → `terminal-fail` (red).
+ *   - The UPDATE step (if the scenario has one) → `assertion-fail`
+ *     so the right pane's failed-assertion branch is reachable on
+ *     a *successful* run.
+ *   - Everything else → `success`.
+ */
+function variantForStep(
+  scenario: Scenario,
+  i: number,
+  outcome: 'success' | 'failure',
+): 'success' | 'assertion-fail' | 'terminal-fail' {
+  const lastIndex = scenario.steps.length - 1;
+  if (outcome === 'failure' && i === lastIndex) return 'terminal-fail';
+  const step = scenario.steps[i];
+  if (step.kind === 'request' && step.requestType === 'UPDATE') {
+    return 'assertion-fail';
+  }
+  return 'success';
+}
+
+function buildCompletedSteps(
+  scenario: Scenario,
+  startedAtMs: number,
+  finishedAtMs: number,
+  outcome: 'success' | 'failure',
+): StepRecord[] {
+  const total = scenario.steps.length;
+  const span = Math.max(1, finishedAtMs - startedAtMs);
+  const bucket = Math.max(1, Math.floor(span / total));
+  return scenario.steps.map((step, i): StepRecord => {
+    const started = startedAtMs + i * bucket;
+    const finished = i === total - 1 ? finishedAtMs : started + bucket;
+    const variant = variantForStep(scenario, i, outcome);
+    const isTerminalFail = variant === 'terminal-fail';
+    return {
+      n: i + 1,
+      kind: step.kind,
+      ...(step.kind === 'request' && step.requestType
+        ? { requestType: step.requestType }
+        : {}),
+      label: labelFor(step),
+      state: isTerminalFail ? 'failure' : 'success',
+      startedAt: new Date(started).toISOString(),
+      finishedAt: new Date(finished).toISOString(),
+      durationMs: finished - started,
+      request: buildSampleRequest(step, i),
+      response: buildSampleResponse(step, i, variant),
+      assertionResults: buildSampleAssertions(variant),
+      ...(isTerminalFail
+        ? { errorDetail: 'DIAMETER_UNABLE_TO_COMPLY (5012)' }
+        : {}),
+    };
+  });
+}
+
+function buildRunningSteps(
+  scenario: Scenario,
+  startedAtMs: number,
+  completedSoFar: number,
+): StepRecord[] {
+  const out: StepRecord[] = [];
+  let cursor = startedAtMs;
+  const limit = Math.min(completedSoFar, scenario.steps.length);
+  for (let i = 0; i < limit; i++) {
+    const step = scenario.steps[i];
+    const variant = variantForStep(scenario, i, 'success');
+    const duration = 20 + ((i * 7) % 35); // deterministic-ish jitter
+    const started = cursor;
+    const finished = cursor + duration;
+    out.push({
+      n: i + 1,
+      kind: step.kind,
+      ...(step.kind === 'request' && step.requestType
+        ? { requestType: step.requestType }
+        : {}),
+      label: labelFor(step),
+      state: 'success',
+      startedAt: new Date(started).toISOString(),
+      finishedAt: new Date(finished).toISOString(),
+      durationMs: duration,
+      request: buildSampleRequest(step, i),
+      response: buildSampleResponse(step, i, variant),
+      assertionResults: buildSampleAssertions(variant),
+    });
+    cursor = finished;
+  }
+  return out;
 }
 
 /**
- * Build a full `Execution` detail record from a summary. Running executions
- * get a partial `steps` array; completed executions get all 12.
- *
- * `completedStepsForRunning` lets the mock SSE emitter advance a running
- * execution by calling this with incrementing values.
+ * Build a full `Execution` detail record from a summary. Running
+ * executions get a partial `steps` array up to
+ * `completedStepsForRunning`; completed/failed executions get every
+ * step.
  */
 export function buildExecutionDetail(
   id: string,
@@ -211,15 +238,17 @@ export function buildExecutionDetail(
 ): Execution | undefined {
   const summary = executionFixtures.find((e) => e.id === id);
   if (!summary) return undefined;
+  const scenario = scenarioFor(summary.scenarioId);
+  const total = scenario.steps.length;
 
   if (summary.state === 'running') {
     const startedAtMs = Date.parse(summary.startedAt);
-    const completed = completedStepsForRunning ?? defaultRunningProgress(id);
-    const steps = buildRunningSteps(startedAtMs, completed);
+    const completed = completedStepsForRunning ?? defaultRunningProgress();
+    const steps = buildRunningSteps(scenario, startedAtMs, completed);
     return {
       ...summary,
-      currentStep: completed,
-      totalSteps: STEP_TEMPLATE.length,
+      currentStep: Math.min(completed, total),
+      totalSteps: total,
       steps,
       context: EMPTY_CONTEXT,
     };
@@ -229,9 +258,10 @@ export function buildExecutionDetail(
   const finishedAtMs = Date.parse(summary.finishedAt ?? summary.startedAt);
   return {
     ...summary,
-    currentStep: STEP_TEMPLATE.length,
-    totalSteps: STEP_TEMPLATE.length,
+    currentStep: total,
+    totalSteps: total,
     steps: buildCompletedSteps(
+      scenario,
       startedAtMs,
       finishedAtMs,
       summary.state === 'failure' ? 'failure' : 'success',
@@ -240,11 +270,11 @@ export function buildExecutionDetail(
   };
 }
 
-/** Initial "how many steps done" for each running fixture at load time. */
-function defaultRunningProgress(id: string): number {
-  if (id === '43') return 4;
-  if (id === '44') return 1;
+/**
+ * Initial "how many steps done" for each running fixture at load
+ * time. With the per-scenario step count in play, just start every
+ * running run at step 0 — the SSE driver advances them realistically.
+ */
+function defaultRunningProgress(): number {
   return 0;
 }
-
-export const TOTAL_STEPS = STEP_TEMPLATE.length;

@@ -450,12 +450,17 @@ function TerminalControls({ execution }: TerminalControlsProps) {
 // ---------------------------------------------------------------------------
 
 /**
- * Elapsed since `startedAt`. Live-ticks only while the run is
- * `running`; paused / terminal states freeze the clock per AC. Recomputes
- * from `startedAt` (no internal accumulator) so the value is robust to
- * timer drift.
+ * Elapsed since the run's effective start. Live-ticks only while the
+ * run is `running`; paused / terminal states freeze the clock per AC.
+ * Reads the timeline from the store (which the SSE driver
+ * stamps session-locally on `execution.started` and on terminal
+ * events) and falls back to the snapshot's timestamps when the store
+ * has not yet seen an SSE event — so a freshly-loaded already-completed
+ * run still shows a sensible elapsed.
  */
 function useElapsedMs(execution: Execution, state: ExecutionState): number {
+  const storeStartedAt = useExecutionStore((s) => s.startedAt);
+  const storeFinishedAt = useExecutionStore((s) => s.finishedAt);
   const ticking = state === 'running';
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -464,14 +469,13 @@ function useElapsedMs(execution: Execution, state: ExecutionState): number {
     return () => clearInterval(t);
   }, [ticking]);
 
-  // When the clock is frozen, snap to the last sensible reference: the
-  // execution's recorded `finishedAt` (terminal), or the moment of the
-  // freeze (paused) — captured implicitly by `now` not advancing.
-  const referenceMs =
-    !ticking && execution.finishedAt
-      ? Date.parse(execution.finishedAt)
-      : now;
-  const startedAtMs = Date.parse(execution.startedAt);
+  const startedIso = storeStartedAt ?? execution.startedAt;
+  const finishedIso = storeFinishedAt ?? execution.finishedAt ?? null;
+  // Frozen-clock reference: the run's recorded finishedAt when
+  // terminal, otherwise `now` (which stops advancing while paused
+  // because the interval above only ticks while `running`).
+  const referenceMs = !ticking && finishedIso ? Date.parse(finishedIso) : now;
+  const startedAtMs = Date.parse(startedIso);
   if (Number.isNaN(startedAtMs)) return 0;
   return Math.max(0, referenceMs - startedAtMs);
 }

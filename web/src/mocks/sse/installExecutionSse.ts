@@ -175,12 +175,14 @@ export function installExecutionSse(
     }
   }
 
-  // Fire `execution.started` immediately so the page's first paint
-  // already reflects the run.
-  const startedEvent = plan.shift();
-  if (startedEvent) fan(startedEvent);
-  // Then schedule the first paced event at the regular cadence.
-  scheduleNext(tickMs);
+  // Schedule `execution.started` for the next tick (delay 0) — NOT
+  // synchronous. Firing it inside `install()` would deliver to an
+  // empty handler set, since the caller can only register via
+  // `.subscribe()` *after* `installExecutionSse` returns. After this
+  // first event, the regular cadence (`tickMs`) takes over via
+  // `scheduleNext` calling itself recursively from the timer
+  // callback at line ~167.
+  scheduleNext(0);
 
   return {
     subscribe(handler) {

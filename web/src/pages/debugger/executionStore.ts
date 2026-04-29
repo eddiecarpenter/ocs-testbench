@@ -73,6 +73,21 @@ export interface ExecutionStoreState {
   /** Last failure detail (rendered in the failure banner when terminal). */
   failureReason: string | null;
 
+  /**
+   * Effective start of the run from the page's perspective. Initialised
+   * from the snapshot, then overwritten when SSE emits
+   * `execution.started` (the driver re-runs the timeline session-locally
+   * for stale fixture runs whose original `startedAt` is days old).
+   */
+  startedAt: string | null;
+  /**
+   * Effective end of the run. Set when SSE emits a terminal event
+   * (`execution.completed | failed | aborted`); falls back to the
+   * snapshot's `finishedAt` for runs that were already terminal at
+   * mount. Drives the elapsed-clock freeze in the top bar.
+   */
+  finishedAt: string | null;
+
   // -------------------------------------------------------------------
   // actions — most are stubs in Task 1
   // -------------------------------------------------------------------
@@ -208,10 +223,18 @@ export function createExecutionStore(executionId: string): ExecutionStore {
     historicalIndex: null,
     edit: EMPTY_EDIT,
     failureReason: null,
+    startedAt: null,
+    finishedAt: null,
 
     ingestSnapshot(snapshot) {
       const cur = get();
       const nextState = reduceTransition(cur.state, snapshot.state);
+      // `startedAt` / `finishedAt` are deliberately NOT seeded here —
+      // they stay `null` until SSE stamps them session-locally. Top
+      // bar falls back to the snapshot's timestamps when the store
+      // value is null. Refetches re-running this method must not
+      // clobber a session-local timestamp set by an earlier SSE
+      // event.
       set(() => ({
         state: nextState,
         cursor: snapshot.currentStep,
@@ -234,11 +257,14 @@ export function createExecutionStore(executionId: string): ExecutionStore {
       const cur = get();
       switch (event.type) {
         case 'execution.started': {
-          // The driver fires this immediately on install; the snapshot
-          // ingestion path already seeded our state, so this is mostly
-          // a confirmation. Promote `pending` → `running` if needed.
+          // The driver fires this immediately on install; promote
+          // `pending` → `running` if needed and stamp the
+          // session-local startedAt so the elapsed clock measures
+          // *this* page's run rather than the fixture's stale ts.
           set(() => ({
             state: reduceTransition(cur.state, 'running'),
+            startedAt: new Date().toISOString(),
+            finishedAt: null,
           }));
           return;
         }
@@ -289,6 +315,7 @@ export function createExecutionStore(executionId: string): ExecutionStore {
             totalSteps: event.data.totalSteps,
             steps: event.data.steps,
             context: event.data.context,
+            finishedAt: new Date().toISOString(),
           }));
           return;
         }
@@ -302,6 +329,7 @@ export function createExecutionStore(executionId: string): ExecutionStore {
             totalSteps: event.data.totalSteps,
             steps: event.data.steps,
             failureReason: event.data.failureReason ?? null,
+            finishedAt: new Date().toISOString(),
           }));
           return;
         }
@@ -311,6 +339,7 @@ export function createExecutionStore(executionId: string): ExecutionStore {
             cursor: event.data.totalSteps,
             totalSteps: event.data.totalSteps,
             steps: event.data.steps,
+            finishedAt: new Date().toISOString(),
           }));
           return;
         }
