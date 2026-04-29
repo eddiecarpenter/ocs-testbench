@@ -27,10 +27,12 @@ import { useNavigate, useParams, Link } from 'react-router';
 import { ApiError } from '../../api/errors';
 import { useExecution } from '../../api/resources/executions';
 
+import { ContinuousModePlaceholder } from './ContinuousModePlaceholder';
 import { DebuggerStoreProvider } from './DebuggerStoreProvider';
 import { DebuggerTopBar } from './DebuggerTopBar';
 import { ExecutionSnapshotBridge } from './ExecutionSnapshotBridge';
 import { ExecutionSseBridge } from './ExecutionSseBridge';
+import { FailureBanner } from './FailureBanner';
 import { LastResponsePane } from './LastResponsePane';
 import { ProgressPane } from './ProgressPane';
 import { StepEditorPane } from './StepEditorPane';
@@ -105,6 +107,13 @@ export function DebuggerPage() {
     );
   }
 
+  // Continuous-mode runs route to a placeholder page — the three-pane
+  // shell is Interactive-only in MVP per the rationale (no step
+  // cursor on a continuous batch).
+  if (execution.mode === 'continuous') {
+    return <ContinuousModePlaceholder executionId={id} />;
+  }
+
   return (
     <DebuggerStoreProvider executionId={id}>
       <ExecutionSnapshotBridge execution={execution} />
@@ -114,6 +123,7 @@ export function DebuggerPage() {
           execution={execution}
           onBack={() => navigate('/executions')}
         />
+        <FailureBanner />
         <Grid align="stretch">
           <Grid.Col span={{ base: 12, lg: 3 }}>
             <Card

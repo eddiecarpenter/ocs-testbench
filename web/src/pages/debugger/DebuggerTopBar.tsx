@@ -52,6 +52,11 @@ import {
   modeLabel,
 } from '../executions/runTableHelpers';
 
+import {
+  buildExportPayload,
+  exportFilename,
+  exportToString,
+} from './exportRun';
 import { useExecutionStore } from './useDebuggerStore';
 
 interface DebuggerTopBarProps {
@@ -348,9 +353,6 @@ function ControlButtons({ execution }: ControlButtonsProps) {
 
 /**
  * Terminal-state controls — Export / View scenario / Re-run.
- *
- * Task 7 lands the layout + the View-scenario navigate. Task 8 wires
- * Export (JSON download) and Re-run (POST /executions + navigate).
  */
 interface TerminalControlsProps {
   execution: Execution;
@@ -358,12 +360,63 @@ interface TerminalControlsProps {
 
 function TerminalControls({ execution }: TerminalControlsProps) {
   const navigate = useNavigate();
+  const create = useCreateExecution();
+
+  const handleExport = () => {
+    const payload = buildExportPayload(execution);
+    const json = exportToString(payload);
+    const blob = new Blob([json], { type: 'application/json' });
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = href;
+    a.download = exportFilename(execution.id);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(href);
+  };
+
+  const handleRerun = async () => {
+    try {
+      const result = await create.mutateAsync({
+        scenarioId: execution.scenarioId,
+        mode: execution.mode,
+        concurrency: 1,
+        repeats: 1,
+        ...(execution.peerId || execution.subscriberId
+          ? {
+              overrides: {
+                ...(execution.peerId ? { peerId: execution.peerId } : {}),
+                ...(execution.subscriberId
+                  ? { subscriberIds: [execution.subscriberId] }
+                  : {}),
+              },
+            }
+          : {}),
+      });
+      const fresh = result.items[0];
+      if (fresh) {
+        notifications.show({
+          color: 'green',
+          title: 'Re-run started',
+          message: `New run #${fresh.id}`,
+        });
+        navigate(`/executions/${encodeURIComponent(fresh.id)}`);
+      }
+    } catch (err) {
+      notifyError({
+        title: 'Re-run failed',
+        message: (err as ApiError | Error).message,
+      });
+    }
+  };
+
   return (
     <>
       <Button
         variant="default"
         leftSection={<IconDownload size={14} />}
-        disabled
+        onClick={handleExport}
         data-testid="debugger-export"
       >
         Export
@@ -372,7 +425,9 @@ function TerminalControls({ execution }: TerminalControlsProps) {
         variant="default"
         leftSection={<IconExternalLink size={14} />}
         onClick={() =>
-          navigate(`/scenarios/${encodeURIComponent(execution.scenarioId)}`)
+          navigate(`/scenarios/${encodeURIComponent(execution.scenarioId)}`, {
+            state: { returnTo: `/executions/${encodeURIComponent(execution.id)}` },
+          })
         }
         data-testid="debugger-view-scenario"
       >
@@ -380,7 +435,8 @@ function TerminalControls({ execution }: TerminalControlsProps) {
       </Button>
       <Button
         leftSection={<IconRepeat size={14} />}
-        disabled
+        loading={create.isPending}
+        onClick={() => void handleRerun()}
         data-testid="debugger-rerun"
       >
         Re-run
