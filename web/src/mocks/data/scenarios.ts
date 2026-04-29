@@ -214,17 +214,21 @@ export const scenarioFixtures: Scenario[] = [
       // Report a random 500 KB..1 MB used each round (refresh: per-send).
       variableLib.usuTotalRandom('USU_TOTAL', 524_288, 1_048_576),
     ],
-    // UPDATE repeats with a 10s sleep between rounds, exiting when the
-    // synthetic `USED_TOTAL` (cumulative across rounds) reaches 10 MB.
-    // No `times` cap — the predicate is the only design-time bound.
-    // The architecture's auto-termination on RG exhaustion (§6) covers
-    // the "OCS stopped granting" case implicitly.
+    // UPDATE repeats with a 10s sleep between rounds. Two
+    // independent stop conditions, OR'd:
+    //   1. cumulative used reaches 10 MB
+    //   2. OCS returns a Final-Unit Indicator on a CCA
+    // Either fires → the loop exits and the scenario advances to
+    // TERMINATE. No `times` cap — predicate is the only design-time
+    // bound. The engine's auto-termination on RG exhaustion (§6) is
+    // also implicit and runs alongside.
     updateRepeat: {
       delayMs: 10_000,
       until: {
-        variable: 'USED_TOTAL',
-        op: 'gte',
-        value: 10_485_760, // 10 MB
+        any: [
+          { variable: 'USED_TOTAL', op: 'gte', value: 10_485_760 }, // 10 MB
+          { variable: 'FUI_ACTION', op: 'ne', value: 'null' },
+        ],
       },
     },
   }),

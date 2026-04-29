@@ -25,11 +25,13 @@
  *     when `rng` is seeded from the executionId (caller's choice);
  *     otherwise `Math.random` is used and each call is non-deterministic.
  */
-import type {
-  Predicate,
-  Scenario,
-  ScenarioStep,
-  Variable,
+import {
+  predicateComparisons,
+  type Predicate,
+  type PredicateComparison,
+  type Scenario,
+  type ScenarioStep,
+  type Variable,
 } from './types';
 
 /** Fallback round count when simulation can't determine a number. */
@@ -140,15 +142,14 @@ export function totalRoundsFor(
 }
 
 /**
- * Synthetic predicate evaluator. Walks rounds 1..cap, accumulating a
- * per-round usage value into `until.variable`, until the predicate
- * fires (or `cap` is reached).
+ * Synthetic predicate evaluator. Walks rounds 1..cap, evolving a
+ * synthetic context map (per-round consumption accumulating into
+ * `*_USED_TOTAL` variables, FUI_ACTION sometimes flipping per the
+ * heuristic), until any sub-predicate fires (OR semantics) or
+ * `cap` is reached.
  *
- * Heuristic for the per-round value: derive from the scenario variable
- * whose name matches the predicate variable with `USED_TOTAL` swapped
- * to `USU_TOTAL` — that's the convention `variableLib` uses. If that
- * variable can't be resolved to a number, the simulator can't proceed
- * and returns `DEFAULT_UNTIL_ROUNDS` capped at `cap`.
+ * Predicate is either a single comparison or an OR-list — both
+ * shapes flatten through `predicateComparisons`.
  *
  * Real-engine territory replaces this with an expression evaluator
  * over the live execution context.
@@ -160,24 +161,69 @@ function simulateUntilRounds(
   options: ExpandOptions,
 ): number {
   const rng = options.rng ?? Math.random;
-  const perRoundVarName = inferPerRoundVar(until.variable);
-  const perRoundDef = scenario.variables.find((v) => v.name === perRoundVarName);
-  if (!perRoundDef) return Math.min(cap, DEFAULT_UNTIL_ROUNDS);
+  const comparisons = predicateComparisons(until);
+  if (comparisons.length === 0) return Math.min(cap, DEFAULT_UNTIL_ROUNDS);
 
-  // Synthetic accumulator — predicate variable starts at 0.
-  let accumulated = 0;
+  // Accumulators keyed by the comparison's variable name. Starts at 0
+  // for any numeric tracker; we never advance non-USED-TOTAL variables
+  // synthetically — those just won't fire from the simulator.
+  const accumulators = new Map<string, number>();
+  for (const c of comparisons) accumulators.set(c.variable, 0);
+
+  // Dedupe by variable name so an accumulator referenced by multiple
+  // comparisons advances exactly once per round.
+  const advancePlan = new Map<string, Variable>();
+  for (const c of comparisons) {
+    if (advancePlan.has(c.variable)) continue;
+    const perRoundDef = perRoundSourceFor(scenario, c);
+    if (perRoundDef) advancePlan.set(c.variable, perRoundDef);
+  }
+
   for (let r = 1; r <= cap; r += 1) {
-    const sample = sampleValue(perRoundDef, rng);
-    if (sample === null) return Math.min(cap, DEFAULT_UNTIL_ROUNDS);
-    accumulated += sample;
-    if (predicateFires(until, accumulated)) return r;
+    // Advance each unique accumulator once per round.
+    let advancedAny = false;
+    for (const [varName, perRoundDef] of advancePlan.entries()) {
+      const sample = sampleValue(perRoundDef, rng);
+      if (sample === null) continue;
+      accumulators.set(
+        varName,
+        (accumulators.get(varName) ?? 0) + sample,
+      );
+      advancedAny = true;
+    }
+    // If no comparison's variable can be sampled, the simulator has
+    // nothing meaningful to do. Fall back to the static default.
+    if (!advancedAny) return Math.min(cap, DEFAULT_UNTIL_ROUNDS);
+
+    // OR semantics — exit when ANY sub-comparison fires.
+    for (const c of comparisons) {
+      const lhs = accumulators.get(c.variable);
+      if (lhs !== undefined && predicateFires(c, lhs)) return r;
+    }
   }
   return cap;
 }
 
-/** Map `USED_TOTAL` → `USU_TOTAL`, `RG100_USED_TOTAL` → `RG100_USU_TOTAL`, etc. */
-function inferPerRoundVar(predicateVar: string): string {
-  return predicateVar.replace('USED_TOTAL', 'USU_TOTAL');
+/**
+ * Resolve the per-round numeric source feeding the cumulative
+ * variable named in this comparison. Returns `null` when the
+ * simulator can't advance this comparison (predicate compares
+ * against an extracted variable like `FUI_ACTION` that the engine
+ * sets, not the simulator).
+ */
+function perRoundSourceFor(
+  scenario: Pick<Scenario, 'variables'>,
+  comparison: PredicateComparison,
+): Variable | null {
+  // Map `USED_TOTAL` → `USU_TOTAL`, `RG100_USED_TOTAL` → `RG100_USU_TOTAL`.
+  if (!comparison.variable.includes('USED_TOTAL')) return null;
+  const perRoundVarName = comparison.variable.replace(
+    'USED_TOTAL',
+    'USU_TOTAL',
+  );
+  return (
+    scenario.variables.find((v) => v.name === perRoundVarName) ?? null
+  );
 }
 
 /**
@@ -204,8 +250,11 @@ function sampleValue(variable: Variable, rng: () => number): number | null {
   return null;
 }
 
-/** Compare an accumulated number against a `Predicate`. */
-function predicateFires(predicate: Predicate, lhs: number): boolean {
+/** Compare an accumulated number against a single `PredicateComparison`. */
+function predicateFires(
+  predicate: PredicateComparison,
+  lhs: number,
+): boolean {
   const rhs = predicate.value;
   if (typeof rhs !== 'number') {
     // Mock can't reason about non-numeric comparisons here.

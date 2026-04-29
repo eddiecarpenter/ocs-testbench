@@ -277,5 +277,15 @@ export function listSystemVariables(): SystemVariable[] {
         'to N units" loops. Multi-MSCC scenarios expose `RG<rg>_USED_TOTAL` ' +
         'per Rating-Group.',
     },
+    {
+      name: 'FUI_ACTION',
+      kind: 'extracted',
+      description:
+        'Final-Unit-Action AVP from the latest CCA: `0` (TERMINATE), ' +
+        '`1` (REDIRECT), `2` (RESTRICT), or `null` if absent. Reaches a ' +
+        'non-null value once the OCS signals "no more grants" — useful as ' +
+        'a `repeat.until` exit condition. Multi-MSCC scenarios expose ' +
+        '`RG<rg>_FUI_ACTION` per Rating-Group.',
+    },
   ];
 }

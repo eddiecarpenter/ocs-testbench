@@ -170,6 +170,51 @@ describe('totalRoundsFor', () => {
       }),
     ).toBe(3);
   });
+
+  it('OR-list predicate fires when ANY sub-comparison fires', () => {
+    // First comparison: USED_TOTAL >= 10 MB → fires at round 10.
+    // Second comparison: FUI_ACTION (extracted, no per-round source)
+    // is inert in the simulator. Net: 10 rounds.
+    const sc = scenarioWith([literalVar('USU_TOTAL', 1_048_576)]);
+    expect(
+      totalRoundsFor(
+        {
+          ...update,
+          repeat: {
+            until: {
+              any: [
+                { variable: 'USED_TOTAL', op: 'gte', value: 10_485_760 },
+                { variable: 'FUI_ACTION', op: 'ne', value: 'null' },
+              ],
+            },
+          },
+        },
+        sc,
+      ),
+    ).toBe(10);
+  });
+
+  it('OR-list picks the earlier-firing comparison', () => {
+    // Two thresholds against the same accumulator. `>= 5MB` fires at
+    // round 5, well before `>= 10MB` would.
+    const sc = scenarioWith([literalVar('USU_TOTAL', 1_048_576)]);
+    expect(
+      totalRoundsFor(
+        {
+          ...update,
+          repeat: {
+            until: {
+              any: [
+                { variable: 'USED_TOTAL', op: 'gte', value: 10_485_760 },
+                { variable: 'USED_TOTAL', op: 'gte', value: 5_242_880 },
+              ],
+            },
+          },
+        },
+        sc,
+      ),
+    ).toBe(5);
+  });
 });
 
 describe('expandScenarioSteps', () => {

@@ -55,17 +55,20 @@ import { useMediaQuery } from '@mantine/hooks';
 import { useMemo, useState } from 'react';
 
 import { useScenarioDraftStore } from '../scenarioDraftStore';
-import type {
-  ConsumeStep,
-  PauseStep,
-  Predicate,
-  RequestStep,
-  RequestType,
-  ScenarioStep,
-  SessionMode,
-  UpdateRepeatPolicy,
-  VarValue,
-  WaitStep,
+import {
+  predicateComparisons,
+  predicateFromComparisons,
+  type ConsumeStep,
+  type PauseStep,
+  type Predicate,
+  type PredicateComparison,
+  type RequestStep,
+  type RequestType,
+  type ScenarioStep,
+  type SessionMode,
+  type UpdateRepeatPolicy,
+  type VarValue,
+  type WaitStep,
 } from '../types';
 import { isLegalRequestType, legalRequestTypes } from './stepsValidation';
 
@@ -450,9 +453,12 @@ const ENGINE_MANAGED_PREDICATE_VARS = [
   'USED_TOTAL',
   'GRANTED_TOTAL',
   'CC_REQUEST_NUMBER',
+  'FUI_ACTION',
+  'RESULT_CODE',
+  'SESSION_STATE',
 ] as const;
 
-const PREDICATE_OPS: { value: Predicate['op']; label: string }[] = [
+const PREDICATE_OPS: { value: PredicateComparison['op']; label: string }[] = [
   { value: 'lt', label: '<' },
   { value: 'lte', label: '≤' },
   { value: 'eq', label: '=' },
@@ -529,129 +535,19 @@ function RepeatPolicyEditor({
             />
           </Group>
 
-          <Stack gap={4}>
-            <Text size="sm" fw={500}>
-              Stop when (optional)
-            </Text>
-            {hasUntil ? (
-              <Group gap="xs" wrap="nowrap" align="center">
-                {(() => {
-                  // Combine authored scenario variables with the engine-
-                  // managed catalogue so the picker can resolve names
-                  // like USED_TOTAL that the engine tracks automatically.
-                  // Currently-selected variable is appended last so a
-                  // free-typed engine variant (e.g. RG100_USED_TOTAL) is
-                  // visible even if not in either list.
-                  const all = new Set<string>([
-                    ...variableNames,
-                    ...ENGINE_MANAGED_PREDICATE_VARS,
-                  ]);
-                  if (policy?.until?.variable) all.add(policy.until.variable);
-                  const data = [...all].map((n) => ({
-                    value: n,
-                    label: ENGINE_MANAGED_PREDICATE_VARS.includes(
-                      n as (typeof ENGINE_MANAGED_PREDICATE_VARS)[number],
-                    )
-                      ? `${n} (engine-managed)`
-                      : n,
-                  }));
-                  return (
-                    <Select
-                      data={data}
-                      value={policy?.until?.variable ?? null}
-                      searchable
-                      placeholder="Variable"
-                      // Free-typed variable names persist — engines
-                      // expose RG-prefixed variants we don't enumerate
-                      // statically. Mantine's Select doesn't support
-                      // creating new options, so we accept the typed
-                      // search via `onSearchChange` as a fallback.
-                      onChange={(v) =>
-                        v &&
-                        onChange({
-                          ...(policy ?? {}),
-                          until: {
-                            ...(policy?.until ?? { op: 'gte', value: 0 }),
-                            variable: v,
-                          },
-                        })
-                      }
-                      style={{ flex: 1 }}
-                      data-testid="step-repeat-until-variable"
-                    />
-                  );
-                })()}
-                <Select
-                  data={PREDICATE_OPS}
-                  value={policy?.until?.op ?? 'gte'}
-                  onChange={(v) =>
-                    v &&
-                    onChange({
-                      ...(policy ?? {}),
-                      until: {
-                        ...(policy?.until ?? { variable: '', value: 0 }),
-                        op: v as Predicate['op'],
-                      },
-                    })
-                  }
-                  allowDeselect={false}
-                  w={80}
-                  data-testid="step-repeat-until-op"
-                />
-                <input
-                  value={String(policy?.until?.value ?? '')}
-                  placeholder="Value"
-                  onChange={(e) => {
-                    const raw = e.currentTarget.value;
-                    // Cheap coercion — number when parseable, else string.
-                    const num = Number(raw);
-                    const value: Predicate['value'] =
-                      raw !== '' && Number.isFinite(num) ? num : raw;
-                    onChange({
-                      ...(policy ?? {}),
-                      until: {
-                        ...(policy?.until ?? { variable: '', op: 'gte' }),
-                        value,
-                      },
-                    });
-                  }}
-                  style={{ flex: 1, padding: '6px 8px' }}
-                  data-testid="step-repeat-until-value"
-                />
-                <ActionIcon
-                  variant="subtle"
-                  color="red"
-                  aria-label="Remove stop condition"
-                  onClick={() => {
-                    const next = { ...(policy ?? {}) };
-                    delete next.until;
-                    onChange(next);
-                  }}
-                >
-                  <IconX size={14} />
-                </ActionIcon>
-              </Group>
-            ) : (
-              <Button
-                variant="default"
-                size="xs"
-                leftSection={<IconPlus size={12} />}
-                onClick={() =>
-                  onChange({
-                    ...(policy ?? {}),
-                    until: {
-                      variable: variableNames[0] ?? '',
-                      op: 'gte',
-                      value: 0,
-                    },
-                  })
-                }
-                data-testid="step-repeat-add-until"
-              >
-                Add stop condition
-              </Button>
-            )}
-          </Stack>
+          <UntilEditor
+            until={policy?.until}
+            variableNames={variableNames}
+            onChange={(until) => {
+              if (until === undefined) {
+                const next = { ...(policy ?? {}) };
+                delete next.until;
+                onChange(next);
+              } else {
+                onChange({ ...(policy ?? {}), until });
+              }
+            }}
+          />
 
           {missingBound && (
             <Text size="xs" c="red">
@@ -662,6 +558,167 @@ function RepeatPolicyEditor({
         </Stack>
       )}
     </Stack>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Stop-when editor — supports either a single comparison or an
+// OR-list ("any of these"). Each row is a Variable / Op / Value
+// triplet; multiple rows are OR'd together so authors can express
+// "stop when 10 MB consumed OR final-unit indicator returned".
+// Variable names display with `{{ }}` decoration to match the
+// architecture's token convention; the underlying schema stores the
+// bare name.
+// ---------------------------------------------------------------------------
+
+interface UntilEditorProps {
+  until: Predicate | undefined;
+  variableNames: string[];
+  onChange: (until: Predicate | undefined) => void;
+}
+
+function UntilEditor({ until, variableNames, onChange }: UntilEditorProps) {
+  const comparisons = until ? predicateComparisons(until) : [];
+
+  const apply = (next: PredicateComparison[]) => {
+    onChange(predicateFromComparisons(next));
+  };
+
+  return (
+    <Stack gap={4}>
+      <Text size="sm" fw={500}>
+        Stop when (optional · any of these)
+      </Text>
+      <Text size="xs" c="dimmed">
+        Loop exits when the first matching condition fires. Variable
+        names are referenced as <code>{'{{NAME}}'}</code> to match the
+        AVP-tree token convention.
+      </Text>
+
+      {comparisons.length > 0 && (
+        <Stack gap="xs">
+          {comparisons.map((c, i) => (
+            <UntilRow
+              key={i}
+              comparison={c}
+              variableNames={variableNames}
+              onChange={(updated) => {
+                const next = [...comparisons];
+                next[i] = updated;
+                apply(next);
+              }}
+              onRemove={() => {
+                const next = comparisons.filter((_, j) => j !== i);
+                apply(next);
+              }}
+            />
+          ))}
+        </Stack>
+      )}
+
+      <Group gap="xs">
+        <Button
+          variant="default"
+          size="xs"
+          leftSection={<IconPlus size={12} />}
+          onClick={() => {
+            const next: PredicateComparison[] = [
+              ...comparisons,
+              {
+                variable: variableNames[0] ?? '',
+                op: 'gte',
+                value: 0,
+              },
+            ];
+            apply(next);
+          }}
+          data-testid="step-repeat-add-until"
+        >
+          {comparisons.length === 0 ? 'Add stop condition' : 'Add another condition'}
+        </Button>
+      </Group>
+    </Stack>
+  );
+}
+
+interface UntilRowProps {
+  comparison: PredicateComparison;
+  variableNames: string[];
+  onChange: (next: PredicateComparison) => void;
+  onRemove: () => void;
+}
+
+function UntilRow({
+  comparison,
+  variableNames,
+  onChange,
+  onRemove,
+}: UntilRowProps) {
+  // Decorate the variable picker's current value with `{{ }}` —
+  // storage stays bare, display wraps. Mantine's Select uses the
+  // option's `label` for display; we therefore include the wrapped
+  // form as the label for both authored and engine-managed entries.
+  const all = new Set<string>([
+    ...variableNames,
+    ...ENGINE_MANAGED_PREDICATE_VARS,
+  ]);
+  if (comparison.variable) all.add(comparison.variable);
+  const data = [...all].map((n) => {
+    const wrapped = `{{${n}}}`;
+    const isEngine = ENGINE_MANAGED_PREDICATE_VARS.includes(
+      n as (typeof ENGINE_MANAGED_PREDICATE_VARS)[number],
+    );
+    return {
+      value: n,
+      label: isEngine ? `${wrapped} · engine-managed` : wrapped,
+    };
+  });
+
+  return (
+    <Group gap="xs" wrap="nowrap" align="center">
+      <Select
+        data={data}
+        value={comparison.variable || null}
+        searchable
+        placeholder="Variable"
+        onChange={(v) =>
+          v && onChange({ ...comparison, variable: v })
+        }
+        style={{ flex: 1 }}
+        data-testid="step-repeat-until-variable"
+      />
+      <Select
+        data={PREDICATE_OPS}
+        value={comparison.op}
+        onChange={(v) =>
+          v && onChange({ ...comparison, op: v as PredicateComparison['op'] })
+        }
+        allowDeselect={false}
+        w={80}
+        data-testid="step-repeat-until-op"
+      />
+      <input
+        value={String(comparison.value ?? '')}
+        placeholder="Value"
+        onChange={(e) => {
+          const raw = e.currentTarget.value;
+          const num = Number(raw);
+          const value: PredicateComparison['value'] =
+            raw !== '' && Number.isFinite(num) ? num : raw;
+          onChange({ ...comparison, value });
+        }}
+        style={{ flex: 1, padding: '6px 8px' }}
+        data-testid="step-repeat-until-value"
+      />
+      <ActionIcon
+        variant="subtle"
+        color="red"
+        aria-label="Remove stop condition"
+        onClick={onRemove}
+      >
+        <IconX size={14} />
+      </ActionIcon>
+    </Group>
   );
 }
 

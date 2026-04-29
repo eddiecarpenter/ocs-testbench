@@ -3,7 +3,12 @@
  * component file so React Fast Refresh does not complain about mixing
  * components and helpers.
  */
-import type { RequestType, ScenarioStep, SessionMode } from '../types';
+import {
+  predicateComparisons,
+  type RequestType,
+  type ScenarioStep,
+  type SessionMode,
+} from '../types';
 
 /** Request types legal under each session mode (architecture §4). */
 export function legalRequestTypes(mode: SessionMode): RequestType[] {
@@ -54,12 +59,19 @@ export function validateStep(
           'Repeat policy needs either a times cap or a stop-when condition — unbounded loops are not allowed',
         );
       }
-      // Predicate sanity (when present): variable must be non-empty.
-      if (
-        step.repeat.until &&
-        (!step.repeat.until.variable || step.repeat.until.variable.trim() === '')
-      ) {
-        problems.push('Repeat stop-when condition is missing a variable');
+      // Predicate sanity — every sub-comparison must reference a
+      // non-empty variable. The schema lets through `{ any: [] }`
+      // for round-trip stability, but a no-op predicate is wrong.
+      if (step.repeat.until) {
+        const comparisons = predicateComparisons(step.repeat.until);
+        if (comparisons.length === 0) {
+          problems.push('Repeat stop-when has no conditions');
+        }
+        for (const c of comparisons) {
+          if (!c.variable || c.variable.trim() === '') {
+            problems.push('Repeat stop-when condition is missing a variable');
+          }
+        }
       }
     }
   }

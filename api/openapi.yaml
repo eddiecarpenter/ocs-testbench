@@ -1714,12 +1714,24 @@ components:
         - required: [until]
 
     Predicate:
+      description: |
+        Either a single comparison or an OR-list of comparisons. Used
+        by `repeat.until`; the loop exits when the predicate evaluates
+        to true. When the OR-list form is used (`{ any: [...] }`), the
+        loop exits when ANY sub-comparison fires — this is how authors
+        express multiple independent stop conditions, e.g. "stop when
+        10 MB consumed OR final-unit indicator returned".
+      oneOf:
+        - $ref: '#/components/schemas/PredicateComparison'
+        - $ref: '#/components/schemas/PredicateAny'
+
+    PredicateComparison:
       type: object
       description: |
-        Structured comparison predicate used by `repeat.until`. The
-        `variable` must be the name of a declared scenario variable
-        (system or user). `value` is compared with the named operator;
-        type coercion follows the variable's declared type.
+        Single comparison predicate. The `variable` must be the name
+        of a declared scenario variable (system or user). `value` is
+        compared with the named operator; type coercion follows the
+        variable's declared type.
       required: [variable, op, value]
       properties:
         variable:
@@ -1732,6 +1744,21 @@ components:
             - type: number
             - type: string
             - type: boolean
+
+    PredicateAny:
+      type: object
+      description: |
+        OR-list of comparisons. The composite predicate fires when any
+        sub-comparison fires. At least one entry is required;
+        a single-entry list is equivalent to a bare `PredicateComparison`
+        but is permitted for round-trip stability of authoring tools.
+      required: [any]
+      properties:
+        any:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/PredicateComparison'
 
     ConsumeStep:
       type: object

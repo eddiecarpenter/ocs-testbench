@@ -1066,16 +1066,34 @@ export interface components {
             delayMs: number;
         } | unknown | unknown;
         /**
-         * @description Structured comparison predicate used by `repeat.until`. The
-         *     `variable` must be the name of a declared scenario variable
-         *     (system or user). `value` is compared with the named operator;
-         *     type coercion follows the variable's declared type.
+         * @description Either a single comparison or an OR-list of comparisons. Used
+         *     by `repeat.until`; the loop exits when the predicate evaluates
+         *     to true. When the OR-list form is used (`{ any: [...] }`), the
+         *     loop exits when ANY sub-comparison fires — this is how authors
+         *     express multiple independent stop conditions, e.g. "stop when
+         *     10 MB consumed OR final-unit indicator returned".
          */
-        Predicate: {
+        Predicate: components["schemas"]["PredicateComparison"] | components["schemas"]["PredicateAny"];
+        /**
+         * @description Single comparison predicate. The `variable` must be the name
+         *     of a declared scenario variable (system or user). `value` is
+         *     compared with the named operator; type coercion follows the
+         *     variable's declared type.
+         */
+        PredicateComparison: {
             variable: string;
             /** @enum {string} */
             op: "eq" | "ne" | "lt" | "lte" | "gt" | "gte";
             value: number | string | boolean;
+        };
+        /**
+         * @description OR-list of comparisons. The composite predicate fires when any
+         *     sub-comparison fires. At least one entry is required;
+         *     a single-entry list is equivalent to a bare `PredicateComparison`
+         *     but is permitted for round-trip stability of authoring tools.
+         */
+        PredicateAny: {
+            any: components["schemas"]["PredicateComparison"][];
         };
         /**
          * @description Only legal in `sessionMode: session`. Expands at run time into an
