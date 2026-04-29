@@ -35,12 +35,18 @@ import {
 import { useCallback, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 
+import { useQueryClient } from '@tanstack/react-query';
+
 import { ApiError } from '../../api/errors';
 import { usePeers } from '../../api/resources/peers';
 import {
+  executionKeys,
+  useCreateExecution,
   useExecutions,
   useRerunExecution,
+  type ExecutionPage,
   type ExecutionSummary,
+  type StartExecutionInput,
 } from '../../api/resources/executions';
 import { useScenarios } from '../../api/resources/scenarios';
 import type { ScenarioSummary } from '../scenarios/types';
@@ -49,6 +55,7 @@ import { buildSubHeader } from './buildSubHeader';
 import { ExecutionsFilterBar } from './ExecutionsFilterBar';
 import { ExecutionsSidebar } from './ExecutionsSidebar';
 import { ExecutionsTable } from './ExecutionsTable';
+import { prependExecutions } from './optimisticPrepend';
 import { RerunConfirmModal } from './RerunConfirmModal';
 import { StartRunModal } from './StartRunModal';
 import {
@@ -77,11 +84,16 @@ export function ExecutionsPage() {
     scenarioId ? { scenarioId, limit: 500 } : { limit: 500 },
   );
   const rerun = useRerunExecution();
+  const create = useCreateExecution();
+  const queryClient = useQueryClient();
 
   const [pendingRerun, setPendingRerun] = useState<ExecutionSummary | null>(
     null,
   );
   const [startRunFor, setStartRunFor] = useState<ScenarioSummary | null>(null);
+  const [startRunErrors, setStartRunErrors] = useState<Record<string, string>>(
+    {},
+  );
 
   const peerNameById = useMemo(() => {
     const m = new Map<string, string>();
@@ -198,6 +210,7 @@ export function ExecutionsPage() {
   }, [launchRerun, latestRunForSelected]);
 
   const handleStartRun = useCallback(() => {
+    setStartRunErrors({});
     if (selectedScenario) {
       setStartRunFor(selectedScenario);
       return;
@@ -212,17 +225,84 @@ export function ExecutionsPage() {
     });
   }, [selectedScenario]);
 
-  const handleStartRunSubmit = useCallback(() => {
-    // Task 7 owns the actual POST + post-success behaviour. For Task 6
-    // the dialog wires through to a noop close so the UI shell is
-    // exercisable end-to-end.
-    notifications.show({
-      color: 'blue',
-      title: 'Run dialog submit',
-      message: 'Submit wiring lands in Task 7.',
-    });
-    setStartRunFor(null);
-  }, []);
+  /**
+   * POST /executions and branch on the server response.
+   *
+   *   Interactive success: navigate to /executions/<new id> (lands on
+   *   F2's stub for now).
+   *
+   *   Continuous success: optimistically prepend the new rows onto
+   *   every cached `useExecutions(...)` slice so the new row shows
+   *   "at the top" even before the next refetch lands; then
+   *   invalidate so the source-of-truth refetches in the background.
+   *   On failure the optimistic write is rolled back via
+   *   invalidateQueries (the next fetch supersedes it).
+   *
+   *   Validation error (RFC 7807, 422): surface field-level errors
+   *   under the matching inputs; keep the dialog open. Reuse the
+   *   ApiError pattern from ScenarioBuilderPage.handleSave.
+   *
+   *   Other error: toast and keep the dialog open.
+   */
+  const handleStartRunSubmit = useCallback(
+    async (input: StartExecutionInput) => {
+      setStartRunErrors({});
+      try {
+        const result = await create.mutateAsync(input);
+        const created = result.items;
+        if (created.length === 0) return;
+
+        if (input.mode === 'interactive') {
+          const first = created[0];
+          notifications.show({
+            color: 'green',
+            title: 'Run started',
+            message: `#${first.id} — ${first.scenarioName}`,
+          });
+          setStartRunFor(null);
+          navigate(`/executions/${encodeURIComponent(first.id)}`);
+          return;
+        }
+
+        // Continuous: optimistically prepend onto every list cache so
+        // the row appears at the top instantly. The subsequent
+        // invalidate refetches authoritative state in the background;
+        // on failure the cache is reconciled by the same invalidate.
+        queryClient.setQueriesData<ExecutionPage>(
+          { queryKey: executionKeys.all },
+          (prev) => prependExecutions(prev, created),
+        );
+        void queryClient.invalidateQueries({ queryKey: executionKeys.all });
+
+        notifications.show({
+          color: 'green',
+          title: 'Continuous run started',
+          message:
+            created.length > 1
+              ? `${created.length} workers queued for ${created[0].scenarioName}`
+              : `#${created[0].id} — ${created[0].scenarioName}`,
+        });
+        setStartRunFor(null);
+      } catch (err) {
+        const apiErr = err as ApiError;
+        if (apiErr instanceof ApiError && apiErr.errors) {
+          setStartRunErrors(apiErr.fieldErrors());
+          notifications.show({
+            color: 'red',
+            title: 'Run failed',
+            message: 'Validation errors — see fields below.',
+          });
+        } else {
+          notifications.show({
+            color: 'red',
+            title: 'Run failed',
+            message: (err as Error).message,
+          });
+        }
+      }
+    },
+    [create, navigate, queryClient],
+  );
 
   // ---------------------------------------------------------------------------
   // Render
@@ -370,9 +450,15 @@ export function ExecutionsPage() {
 
       <StartRunModal
         scenario={startRunFor}
-        isPending={false}
-        onClose={() => setStartRunFor(null)}
+        isPending={create.isPending}
+        onClose={() => {
+          if (!create.isPending) {
+            setStartRunFor(null);
+            setStartRunErrors({});
+          }
+        }}
         onSubmit={handleStartRunSubmit}
+        fieldErrors={startRunErrors}
       />
     </Group>
   );
