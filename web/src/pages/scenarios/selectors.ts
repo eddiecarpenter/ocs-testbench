@@ -186,16 +186,26 @@ export function buildVariableOptions(
  * System variables — auto-provisioned at run time, do not appear in
  * `scenario.variables` per the OpenAPI contract. The Variables tab
  * surfaces them for completeness so the user knows what names the
- * runtime will populate.
+ * runtime will populate; they're also accepted by predicate pickers
+ * (e.g. UPDATE-step `repeat.until`).
+ *
+ * Loosely aligned with `docs/ARCHITECTURE.md` §5 — kind `generator`
+ * for engine-derived values, `bound` for values pulled from
+ * subscriber / peer / config, `extracted` for values written from
+ * the latest CCA. Multi-MSCC `RG<rg>_*` variants are not in the
+ * static list (they're scenario-shape-dependent — the predicate
+ * picker accepts free-typed names so authors can still reference
+ * them).
  */
 export interface SystemVariable {
   name: string;
-  kind: 'generator' | 'bound';
+  kind: 'generator' | 'bound' | 'extracted';
   description: string;
 }
 
 export function listSystemVariables(): SystemVariable[] {
   return [
+    // ── Session-wide generators ─────────────────────────────────
     {
       name: 'SESSION_ID',
       kind: 'generator',
@@ -211,6 +221,12 @@ export function listSystemVariables(): SystemVariable[] {
       kind: 'generator',
       description: 'Auto-incrementing CCR sequence — engine-managed.',
     },
+    {
+      name: 'EVENT_TIMESTAMP',
+      kind: 'generator',
+      description: 'Wall-clock at send time (refreshed per CCR).',
+    },
+    // ── Bound from peer / config / subscriber ───────────────────
     {
       name: 'ORIGIN_HOST',
       kind: 'bound',
@@ -231,6 +247,35 @@ export function listSystemVariables(): SystemVariable[] {
       kind: 'bound',
       description:
         'Service-Context-Id (RFC 4006 §5.1.1.4) — bound from the application config (e.g. `gy.ocs.test@3gpp.org` on Gy).',
+    },
+    // ── Extracted from CCA (per-session state) ──────────────────
+    {
+      name: 'RESULT_CODE',
+      kind: 'extracted',
+      description: 'Top-level Diameter Result-Code from the latest CCA.',
+    },
+    {
+      name: 'SESSION_STATE',
+      kind: 'extracted',
+      description:
+        'Derived session state — `active` while the session is open, ' +
+        '`terminated` after the final CCA, `error` on session-level failure.',
+    },
+    {
+      name: 'GRANTED_TOTAL',
+      kind: 'extracted',
+      description:
+        'Total units granted across the session (sum of CCA grants). ' +
+        'For `multi-mscc` scenarios, see `RG<rg>_GRANTED_TOTAL` per Rating-Group.',
+    },
+    {
+      name: 'USED_TOTAL',
+      kind: 'extracted',
+      description:
+        'Cumulative units reported as used across the session (sum of USU ' +
+        'across CCRs). Useful as a `repeat.until` target for "consume up ' +
+        'to N units" loops. Multi-MSCC scenarios expose `RG<rg>_USED_TOTAL` ' +
+        'per Rating-Group.',
     },
   ];
 }
