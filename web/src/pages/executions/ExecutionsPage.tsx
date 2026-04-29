@@ -34,6 +34,7 @@ import type { ScenarioSummary } from '../scenarios/types';
 
 import { buildSubHeader } from './buildSubHeader';
 import { ExecutionsSidebar } from './ExecutionsSidebar';
+import { ExecutionsTable } from './ExecutionsTable';
 import { selectScenarioForHeader } from './selectors';
 
 export function ExecutionsPage() {
@@ -44,9 +45,12 @@ export function ExecutionsPage() {
   const scenariosQuery = useScenarios();
   const peersQuery = usePeers();
   // The sidebar needs the full execution set to compute per-scenario
-  // counts and last-run timestamps; the right-pane table queries its
-  // own filtered slice (Task 4 wires that up).
+  // counts and last-run timestamps; the right-pane table consumes a
+  // filtered slice driven by the URL `?scenario=` param.
   const allExecutionsQuery = useExecutions({ limit: 500 });
+  const tableQuery = useExecutions(
+    scenarioId ? { scenarioId, limit: 500 } : { limit: 500 },
+  );
 
   const peerNameById = useMemo(() => {
     const m = new Map<string, string>();
@@ -144,9 +148,25 @@ export function ExecutionsPage() {
         </Group>
 
         <Card withBorder padding="md" data-testid="executions-table">
-          <Text c="dimmed" size="sm" ta="center" py="lg">
-            Run table coming online next.
-          </Text>
+          {tableQuery.isLoading ? (
+            <Stack gap="xs">
+              <Skeleton height={40} />
+              <Skeleton height={120} />
+            </Stack>
+          ) : tableQuery.isError ? (
+            <Alert
+              icon={<IconAlertTriangle size={16} />}
+              color="red"
+              title="Failed to load executions"
+            >
+              {(tableQuery.error as ApiError | Error).message}
+            </Alert>
+          ) : (
+            <ExecutionsTable
+              executions={tableQuery.data?.items ?? []}
+              showScenarioColumn={!scenarioId}
+            />
+          )}
         </Card>
       </Stack>
     </Group>
