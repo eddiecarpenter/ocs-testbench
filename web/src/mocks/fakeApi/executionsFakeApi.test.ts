@@ -219,4 +219,27 @@ describe('POST /executions/:id/rerun', () => {
       ApiService.post<StartExecutionResult>('/executions/does-not-exist/rerun'),
     ).rejects.toMatchObject({ status: 404 });
   });
+
+  it('returns 5xx when the source row references a force-failure scenario', async () => {
+    // Plant a row, then mutate the in-memory copy (not the response
+    // clone — axios-mock-adapter serialises through JSON) so the
+    // rerun-side `scenarioId.startsWith('error-')` guard fires.
+    __test__.reset();
+    const stub: StartExecutionResult = await ApiService.post<
+      StartExecutionResult
+    >('/executions', {
+      scenarioId: 'scn-octet-single-001',
+      mode: 'continuous',
+      concurrency: 1,
+      repeats: 1,
+    } as StartExecutionInput);
+    const stubId = stub.items[0].id;
+    const inMemory = __test__.state.find((e) => e.id === stubId)!;
+    expect(inMemory).toBeDefined();
+    (inMemory as { scenarioId: string }).scenarioId = 'error-force-fail';
+
+    await expect(
+      ApiService.post<StartExecutionResult>(`/executions/${stubId}/rerun`),
+    ).rejects.toMatchObject({ status: 500 });
+  });
 });
