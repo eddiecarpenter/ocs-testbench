@@ -17,6 +17,7 @@ import {
   Title,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
+import { notifyError } from '../../utils/notify';
 import {
   IconAlertTriangle,
   IconDots,
@@ -381,8 +382,7 @@ function RowMenu({
     try {
       await start.mutateAsync(peer.id);
     } catch (err) {
-      notifications.show({
-        color: 'red',
+      notifyError({
         title: 'Start failed',
         message: err instanceof Error ? err.message : 'Unexpected error',
       });
@@ -393,8 +393,7 @@ function RowMenu({
     try {
       await stop.mutateAsync(peer.id);
     } catch (err) {
-      notifications.show({
-        color: 'red',
+      notifyError({
         title: 'Stop failed',
         message: err instanceof Error ? err.message : 'Unexpected error',
       });
@@ -454,8 +453,7 @@ function useProbeConfig() {
         message: `${result.detail ?? (result.ok ? 'OK' : 'No response')} (${result.durationMs} ms)`,
       });
     } catch (err) {
-      notifications.show({
-        color: 'red',
+      notifyError({
         title: 'Probe failed',
         message: err instanceof Error ? err.message : 'Unexpected error',
       });
@@ -495,8 +493,7 @@ function CreatePeerDrawer({
       return peer;
     } catch (err) {
       if (err instanceof ApiError && err.status === 422) throw err;
-      notifications.show({
-        color: 'red',
+      notifyError({
         title: 'Could not create peer',
         message: err instanceof Error ? err.message : 'Unexpected error',
       });
@@ -588,8 +585,7 @@ function EditPeerForm({
       return next;
     } catch (err) {
       if (err instanceof ApiError && err.status === 422) throw err;
-      notifications.show({
-        color: 'red',
+      notifyError({
         title: 'Could not update peer',
         message: err instanceof Error ? err.message : 'Unexpected error',
       });
@@ -632,8 +628,7 @@ function DeletePeerModal({
       });
       onClose();
     } catch (err) {
-      notifications.show({
-        color: 'red',
+      notifyError({
         title: 'Could not delete peer',
         message: err instanceof Error ? err.message : 'Unexpected error',
       });
@@ -695,8 +690,7 @@ function showLifecycleToast(
       ? mutations.restart.mutateAsync(p.peer.id)
       : mutations.start.mutateAsync(p.peer.id);
     promise.catch((err: unknown) => {
-      notifications.show({
-        color: 'red',
+      notifyError({
         title: isRestart ? 'Restart failed' : 'Start failed',
         message: err instanceof Error ? err.message : 'Unexpected error',
       });

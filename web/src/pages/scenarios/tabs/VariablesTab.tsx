@@ -31,7 +31,7 @@ import {
   Title,
   Tooltip,
 } from '@mantine/core';
-import { notifications } from '@mantine/notifications';
+import { notifyError } from '../../../utils/notify';
 import {
   IconArrowRight,
   IconPlus,
@@ -526,8 +526,7 @@ export function VariablesTab() {
       // Reject empty names and collisions with another existing
       // variable (system or user) so refactor stays unambiguous.
       if (trimmed === '') {
-        notifications.show({
-          color: 'red',
+        notifyError({
           title: 'Name cannot be empty',
           message: 'Variable names must contain at least one character.',
         });
@@ -537,8 +536,7 @@ export function VariablesTab() {
         trimmed !== selectedUser.name &&
         allByName.has(trimmed)
       ) {
-        notifications.show({
-          color: 'red',
+        notifyError({
           title: 'Name already in use',
           message: `Another variable is already called "${trimmed}".`,
         });

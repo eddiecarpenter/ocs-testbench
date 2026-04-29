@@ -30,9 +30,15 @@ import {
 } from '@mantine/core';
 import { useHotkeys, useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
+import { notifyError } from '../../utils/notify';
 import { IconAlertTriangle } from '@tabler/icons-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router';
+import {
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from 'react-router';
 
 import { ApiError } from '../../api/errors';
 import {
@@ -65,8 +71,15 @@ export function ScenarioBuilderPage() {
   const { id: routeId } = useParams<{ id?: string }>();
   const isNew = !routeId;
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const dupFromId = isNew ? searchParams.get('dup') : null;
+  // Where to land when the modal closes. Callers (e.g. the Executions
+  // page's "Edit scenario" button) can pass `state: { returnTo: '/…' }`
+  // to bring the user back to where they came from instead of the
+  // default Scenarios list.
+  const returnTo =
+    (location.state as { returnTo?: string } | null)?.returnTo ?? '/scenarios';
 
   // Responsive sizing: full-screen on small viewports, 95% on
   // medium, 80% on wide. Avoids the cramped feel that prompted
@@ -162,19 +175,17 @@ export function ScenarioBuilderPage() {
       // won't fire the discard prompt; we still set the
       // programmatic-close flag for clarity.
       closingProgrammatically.current = true;
-      navigate('/scenarios');
+      navigate(returnTo);
     } catch (err) {
       const apiErr = err as ApiError;
       if (apiErr instanceof ApiError && apiErr.errors) {
         setFieldErrors(apiErr.errors);
-        notifications.show({
-          color: 'red',
+        notifyError({
           title: 'Save failed',
           message: 'Validation errors — see fields below.',
         });
       } else {
-        notifications.show({
-          color: 'red',
+        notifyError({
           title: 'Save failed',
           message: (err as Error).message,
         });
@@ -189,7 +200,7 @@ export function ScenarioBuilderPage() {
     if (!dirty) {
       // Nothing to discard — close the editor.
       closingProgrammatically.current = true;
-      navigate('/scenarios');
+      navigate(returnTo);
       return;
     }
     setDiscardOpen(true);
@@ -198,7 +209,7 @@ export function ScenarioBuilderPage() {
   function handleDiscardConfirm() {
     setDiscardOpen(false);
     closingProgrammatically.current = true;
-    navigate('/scenarios');
+    navigate(returnTo);
   }
 
   function handleDeleteRequest() {
@@ -217,10 +228,9 @@ export function ScenarioBuilderPage() {
       });
       setDeleteOpen(false);
       closingProgrammatically.current = true;
-      navigate('/scenarios');
+      navigate(returnTo);
     } catch (err) {
-      notifications.show({
-        color: 'red',
+      notifyError({
         title: 'Could not delete scenario',
         message: err instanceof Error ? err.message : 'Unexpected error',
       });
@@ -234,7 +244,7 @@ export function ScenarioBuilderPage() {
       return;
     }
     if (!dirty) {
-      navigate('/scenarios');
+      navigate(returnTo);
       return;
     }
     setDiscardOpen(true);

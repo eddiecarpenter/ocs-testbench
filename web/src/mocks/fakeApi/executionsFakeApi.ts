@@ -319,6 +319,28 @@ mock
   });
 
 // ---------------------------------------------------------------------------
+// ABORT — POST /executions/:id/abort
+// ---------------------------------------------------------------------------
+mock
+  .onPost(/\/executions\/[^/]+\/abort$/)
+  .withDelayInMs(150)
+  .reply((config): [number, void | ProblemBody] => {
+    const m = /\/executions\/([^/]+)\/abort$/.exec(config.url ?? '');
+    const id = m ? decodeURIComponent(m[1]) : '';
+    const idx = executions.findIndex((e) => e.id === id);
+    if (idx === -1) return notFound(id);
+    // Flip the row to `aborted` and stamp `finishedAt` if not already
+    // terminal — mirrors the engine's transition contract.
+    const next: ExecutionSummary = {
+      ...executions[idx],
+      state: 'aborted',
+      finishedAt: executions[idx].finishedAt ?? new Date().toISOString(),
+    };
+    executions[idx] = next;
+    return [204, undefined];
+  });
+
+// ---------------------------------------------------------------------------
 // Test seam — exposed only to the unit tests so they can reseed the
 // working copy between cases. Must NOT be imported from production code.
 // ---------------------------------------------------------------------------

@@ -1,26 +1,25 @@
 /**
- * Start-Run dialog — opens from the Executions page header's Run
- * scenario CTA. Pre-fills from the active sidebar scenario; the
- * operator can override the peer / subscriber, switch mode, and (for
- * Continuous mode) tune concurrency × repeats before launching.
+ * Start-Run dialog — opens from the Executions page header's "Run as
+ * continuous batch…" CTA, or from a row kebab's "Re-run with
+ * overrides…" item. The default "Run scenario" path on the page
+ * fires silently (no dialog) and uses the scenario's bound peer +
+ * subscriber.
  *
- * Form state lives in `StartRunForm`, which is keyed on `scenario.id`
- * so a fresh scenario remounts the form with the right defaults
- * (avoiding the `setState-in-effect` lint rule and removing a class
- * of stale-state bugs).
+ * The dialog stays focused on run-time decisions:
+ *   - Mode (Interactive / Continuous)
+ *   - Concurrency / Repeats (Continuous only)
+ *   - Optional peer / subscriber override (collapsed by default —
+ *     the scenario already binds them; overriding is the rare case)
  *
- * The submit wiring (POST /executions, error → field errors,
- * Interactive vs Continuous post-success behaviour) ships in Task 7.
- * This task ships the dialog UI shell, fields, and validation.
- *
- * Reuse: refactor — same centered-modal pattern as
- * RerunConfirmModal.tsx; reuses usePeers / useSubscribers hooks for
- * the override dropdowns; reuses Mantine NumberInput /
- * SegmentedControl primitives.
+ * Form state lives in `StartRunForm`, which is keyed on the scenario
+ * id + an `instance` token so re-opening the dialog from a different
+ * source row (e.g. a "Re-run with overrides…" on a row using
+ * different mode/concurrency/peer) remounts with fresh defaults.
  */
 import {
   Badge,
   Button,
+  Collapse,
   Group,
   Modal,
   NumberInput,
@@ -28,8 +27,13 @@ import {
   Select,
   Stack,
   Text,
+  UnstyledButton,
 } from '@mantine/core';
-import { IconPlayerPlay } from '@tabler/icons-react';
+import {
+  IconChevronDown,
+  IconChevronRight,
+  IconPlayerPlay,
+} from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
 
 import { usePeers } from '../../api/resources/peers';
@@ -42,27 +46,45 @@ import type { ScenarioSummary } from '../scenarios/types';
 
 import { buildStartExecutionInput } from './buildStartExecutionInput';
 
+export interface StartRunInitialValues {
+  mode?: ExecutionMode;
+  peerId?: string | null;
+  subscriberId?: string | null;
+  concurrency?: number;
+  repeats?: number;
+  /**
+   * Whether the override section starts expanded. Useful for the
+   * "Re-run with overrides…" entry point where the user has already
+   * declared intent to override.
+   */
+  overrideExpanded?: boolean;
+  /**
+   * Optional dialog title — defaults to "Run scenario". Callers like
+   * "Run as continuous batch…" can pass a more specific label.
+   */
+  title?: string;
+  /**
+   * Token bumped each time the dialog is reopened from a different
+   * source so the form remounts with fresh defaults.
+   */
+  instance?: string;
+}
+
 interface StartRunModalProps {
   /** The pre-filled scenario; the modal stays closed when null. */
   scenario: ScenarioSummary | null;
-  /** Set while a launch is in flight (Task 7 wires this). */
+  /** Pre-fill values + dialog-shape options. */
+  initial?: StartRunInitialValues;
+  /** Set while a launch is in flight. */
   isPending: boolean;
   onClose(): void;
-  /**
-   * Fired with the validated `StartExecutionInput` payload. Task 7
-   * implements the actual POST + post-success behaviour.
-   */
   onSubmit(input: StartExecutionInput): void;
-  /**
-   * Optional field-level error map keyed by JSON-Pointer (`/peerId`,
-   * `/concurrency`, …). Task 7 populates this from the server's
-   * 422 response.
-   */
   fieldErrors?: Record<string, string>;
 }
 
 export function StartRunModal({
   scenario,
+  initial,
   isPending,
   onClose,
   onSubmit,
@@ -73,7 +95,7 @@ export function StartRunModal({
       opened={Boolean(scenario)}
       onClose={onClose}
       centered
-      title="Run scenario"
+      title={initial?.title ?? 'Run scenario'}
       closeOnClickOutside={!isPending}
       closeOnEscape={!isPending}
       size="md"
@@ -81,8 +103,11 @@ export function StartRunModal({
     >
       {scenario && (
         <StartRunForm
-          key={scenario.id}
+          // Remount on scenario change AND on dialog-open instance change
+          // (e.g. a different source row triggered "Re-run with overrides").
+          key={`${scenario.id}::${initial?.instance ?? 'default'}`}
           scenario={scenario}
+          initial={initial}
           isPending={isPending}
           onClose={onClose}
           onSubmit={onSubmit}
@@ -95,6 +120,7 @@ export function StartRunModal({
 
 interface StartRunFormProps {
   scenario: ScenarioSummary;
+  initial: StartRunInitialValues | undefined;
   isPending: boolean;
   onClose(): void;
   onSubmit(input: StartExecutionInput): void;
@@ -103,6 +129,7 @@ interface StartRunFormProps {
 
 function StartRunForm({
   scenario,
+  initial,
   isPending,
   onClose,
   onSubmit,
@@ -111,13 +138,24 @@ function StartRunForm({
   const peersQuery = usePeers();
   const subscribersQuery = useSubscribers();
 
-  const [mode, setMode] = useState<ExecutionMode>('interactive');
-  const [peerId, setPeerId] = useState<string | null>(scenario.peerId ?? null);
-  const [subscriberId, setSubscriberId] = useState<string | null>(
-    scenario.subscriberId ?? null,
+  const [mode, setMode] = useState<ExecutionMode>(
+    initial?.mode ?? 'interactive',
   );
-  const [concurrency, setConcurrency] = useState<number>(1);
-  const [repeats, setRepeats] = useState<number>(10);
+  const [peerId, setPeerId] = useState<string | null>(
+    initial?.peerId ?? null,
+  );
+  const [subscriberId, setSubscriberId] = useState<string | null>(
+    initial?.subscriberId ?? null,
+  );
+  const [concurrency, setConcurrency] = useState<number>(
+    initial?.concurrency ?? 1,
+  );
+  const [repeats, setRepeats] = useState<number>(initial?.repeats ?? 10);
+  const [overrideExpanded, setOverrideExpanded] = useState<boolean>(
+    Boolean(
+      initial?.overrideExpanded || initial?.peerId || initial?.subscriberId,
+    ),
+  );
 
   const peerOptions = useMemo(
     () => (peersQuery.data ?? []).map((p) => ({ value: p.id, label: p.name })),
@@ -148,6 +186,16 @@ function StartRunForm({
     );
   };
 
+  // Resolve the bound names for the read-only override summary line.
+  const boundPeerName =
+    peerOptions.find((o) => o.value === scenario.peerId)?.label ??
+    scenario.peerId ??
+    '—';
+  const boundSubscriberName =
+    subscriberOptions.find((o) => o.value === scenario.subscriberId)?.label ??
+    scenario.subscriberId ??
+    '—';
+
   return (
     <Stack gap="md">
       <Stack gap={4}>
@@ -162,33 +210,6 @@ function StartRunForm({
           {scenario.name}
         </Badge>
       </Stack>
-
-      <Select
-        label="Peer"
-        placeholder="Use scenario default"
-        data={peerOptions}
-        value={peerId}
-        onChange={setPeerId}
-        clearable
-        searchable
-        error={fieldErrors?.['/overrides/peerId'] ?? fieldErrors?.['/peerId']}
-        data-testid="executions-start-run-peer"
-      />
-
-      <Select
-        label="Subscriber"
-        placeholder="Use scenario default"
-        data={subscriberOptions}
-        value={subscriberId}
-        onChange={setSubscriberId}
-        clearable
-        searchable
-        error={
-          fieldErrors?.['/overrides/subscriberIds'] ??
-          fieldErrors?.['/subscriberId']
-        }
-        data-testid="executions-start-run-subscriber"
-      />
 
       <Stack gap={4}>
         <Text size="sm" fw={500}>
@@ -238,6 +259,68 @@ function StartRunForm({
           Concurrency and repeats are only available in Continuous mode.
         </Text>
       )}
+
+      {/*
+        Override section — collapsed by default since the scenario
+        already binds peer + subscriber. The toggle reads as a small
+        chevron + summary so the user can see the bound values at a
+        glance and one-click into the override editor.
+      */}
+      <Stack gap={4}>
+        <UnstyledButton
+          onClick={() => setOverrideExpanded((v) => !v)}
+          data-testid="executions-start-run-override-toggle"
+          aria-expanded={overrideExpanded}
+        >
+          <Group gap={4} wrap="nowrap">
+            {overrideExpanded ? (
+              <IconChevronDown size={14} />
+            ) : (
+              <IconChevronRight size={14} />
+            )}
+            <Text size="sm" fw={500}>
+              Override peer / subscriber
+            </Text>
+            {!overrideExpanded && (
+              <Text size="xs" c="dimmed">
+                · {boundPeerName} · {boundSubscriberName} (from scenario)
+              </Text>
+            )}
+          </Group>
+        </UnstyledButton>
+
+        <Collapse expanded={overrideExpanded}>
+          <Stack gap="md" pt="xs">
+            <Select
+              label="Peer"
+              placeholder={`Use scenario default (${boundPeerName})`}
+              data={peerOptions}
+              value={peerId}
+              onChange={setPeerId}
+              clearable
+              searchable
+              error={
+                fieldErrors?.['/overrides/peerId'] ?? fieldErrors?.['/peerId']
+              }
+              data-testid="executions-start-run-peer"
+            />
+            <Select
+              label="Subscriber"
+              placeholder={`Use scenario default (${boundSubscriberName})`}
+              data={subscriberOptions}
+              value={subscriberId}
+              onChange={setSubscriberId}
+              clearable
+              searchable
+              error={
+                fieldErrors?.['/overrides/subscriberIds'] ??
+                fieldErrors?.['/subscriberId']
+              }
+              data-testid="executions-start-run-subscriber"
+            />
+          </Stack>
+        </Collapse>
+      </Stack>
 
       <Group justify="flex-end" gap="sm">
         <Button

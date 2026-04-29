@@ -9,17 +9,17 @@
  *   ?scenario=<id>           — sidebar selection (omit = "All runs")
  *   &status=<filter>         — filter chip selection (all / running /
  *                              completed / failed)
- *   &peer=<id>               — peer filter dropdown
  *
- * Task 6 / 7 plug in the Start-Run dialog; this task wires up the
- * filter chips, peer dropdown, header CTAs, and per-row Re-run
- * affordances.
+ * Peers used to be filterable via a dropdown but were dropped — peer
+ * is now a sortable column on the table itself. Re-run goes through
+ * the Start-Run dialog (no silent re-run); Stop confirms via modal.
  */
 import {
   Alert,
   Button,
   Card,
   Group,
+  Modal,
   Skeleton,
   Stack,
   Text,
@@ -30,10 +30,9 @@ import {
   IconAlertTriangle,
   IconPencil,
   IconPlayerPlay,
-  IconRotate,
 } from '@tabler/icons-react';
 import { useCallback, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -41,14 +40,15 @@ import { ApiError } from '../../api/errors';
 import { usePeers } from '../../api/resources/peers';
 import {
   executionKeys,
+  useAbortExecution,
   useCreateExecution,
   useExecutions,
-  useRerunExecution,
   type ExecutionPage,
   type ExecutionSummary,
   type StartExecutionInput,
 } from '../../api/resources/executions';
 import { useScenarios } from '../../api/resources/scenarios';
+import { notifyError } from '../../utils/notify';
 import type { ScenarioSummary } from '../scenarios/types';
 
 import { buildSubHeader } from './buildSubHeader';
@@ -56,23 +56,21 @@ import { ExecutionsFilterBar } from './ExecutionsFilterBar';
 import { ExecutionsSidebar } from './ExecutionsSidebar';
 import { ExecutionsTable } from './ExecutionsTable';
 import { prependExecutions } from './optimisticPrepend';
-import { RerunConfirmModal } from './RerunConfirmModal';
 import { StartRunModal } from './StartRunModal';
 import {
   applyTableFilters,
   countByStatusFilter,
   parseStatusFilter,
-  selectLatestRunForScenario,
   selectScenarioForHeader,
 } from './selectors';
 
 export function ExecutionsPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const scenarioId = searchParams.get('scenario');
   const statusFilter = parseStatusFilter(searchParams.get('status'));
-  const peerFilter = searchParams.get('peer');
 
   const scenariosQuery = useScenarios();
   const peersQuery = usePeers();
@@ -83,17 +81,21 @@ export function ExecutionsPage() {
   const tableQuery = useExecutions(
     scenarioId ? { scenarioId, limit: 500 } : { limit: 500 },
   );
-  const rerun = useRerunExecution();
   const create = useCreateExecution();
+  const abort = useAbortExecution();
   const queryClient = useQueryClient();
 
-  const [pendingRerun, setPendingRerun] = useState<ExecutionSummary | null>(
-    null,
-  );
+  const [pendingStop, setPendingStop] = useState<ExecutionSummary | null>(null);
   const [startRunFor, setStartRunFor] = useState<ScenarioSummary | null>(null);
   const [startRunErrors, setStartRunErrors] = useState<Record<string, string>>(
     {},
   );
+  // Pre-fill values + dialog-shape options for the next StartRunModal
+  // open. Driven by the entry point: "Run as continuous batch…",
+  // "Re-run with overrides…", etc. Cleared on close.
+  const [startRunInitial, setStartRunInitial] = useState<
+    import('./StartRunModal').StartRunInitialValues | undefined
+  >(undefined);
 
   const peerNameById = useMemo(() => {
     const m = new Map<string, string>();
@@ -112,34 +114,12 @@ export function ExecutionsPage() {
   );
 
   const filteredRows = useMemo(
-    () =>
-      applyTableFilters(tableRows, {
-        status: statusFilter,
-        peerId: peerFilter,
-      }),
-    [tableRows, statusFilter, peerFilter],
+    () => applyTableFilters(tableRows, { status: statusFilter }),
+    [tableRows, statusFilter],
   );
 
   const chipCounts = useMemo(() => countByStatusFilter(tableRows), [tableRows]);
 
-  const peerOptions = useMemo(() => {
-    const ids = new Set<string>();
-    for (const r of tableRows) {
-      if (r.peerId) ids.add(r.peerId);
-    }
-    return Array.from(ids).map((id) => ({
-      value: id,
-      label: peerNameById.get(id) ?? id,
-    }));
-  }, [tableRows, peerNameById]);
-
-  const latestRunForSelected = useMemo(
-    () =>
-      selectedScenario
-        ? selectLatestRunForScenario(tableRows, selectedScenario.id)
-        : undefined,
-    [selectedScenario, tableRows],
-  );
 
   // ---------------------------------------------------------------------------
   // URL helpers
@@ -167,63 +147,108 @@ export function ExecutionsPage() {
   // Run-launch handlers
   // ---------------------------------------------------------------------------
 
-  const launchRerun = useCallback(
-    async (source: ExecutionSummary) => {
-      try {
-        const res = await rerun.mutateAsync(source.id);
-        const newId = res.items[0]?.id;
-        notifications.show({
-          color: 'green',
-          title: `Re-running #${source.id}…`,
-          message: newId
-            ? `New run #${newId} queued for ${source.scenarioName}`
-            : `New run queued for ${source.scenarioName}`,
-        });
-        if (newId && source.mode === 'interactive') {
-          navigate(`/executions/${encodeURIComponent(newId)}`);
-        }
-      } catch (err) {
-        notifications.show({
-          color: 'red',
-          title: 'Re-run failed',
-          message: (err as ApiError | Error).message,
-        });
-      }
-    },
-    [rerun, navigate],
-  );
-
-  const handleRerunRow = useCallback(
+  /**
+   * "View" kebab item — opens the Debugger route for the row. Replaces
+   * the previous row-onClick navigation; matches the kebab-driven
+   * pattern used on Peers / Subscribers / Scenarios.
+   */
+  const handleViewRow = useCallback(
     (row: ExecutionSummary) => {
-      if (row.mode === 'continuous') {
-        setPendingRerun(row);
-      } else {
-        void launchRerun(row);
-      }
+      navigate(`/executions/${encodeURIComponent(row.id)}`);
     },
-    [launchRerun],
+    [navigate],
   );
 
-  const handleRerunLatest = useCallback(() => {
-    if (!latestRunForSelected) return;
-    void launchRerun(latestRunForSelected);
-  }, [launchRerun, latestRunForSelected]);
+  /**
+   * "Stop" kebab item (running rows only) — opens a confirm modal.
+   * Confirmation fires `POST /executions/:id/abort` and the row's
+   * status flips to `aborted` after the next refetch.
+   */
+  const handleStopRow = useCallback((row: ExecutionSummary) => {
+    setPendingStop(row);
+  }, []);
 
+  const confirmStop = useCallback(async () => {
+    if (!pendingStop) return;
+    try {
+      await abort.mutateAsync(pendingStop.id);
+      notifications.show({
+        color: 'orange',
+        title: `Run #${pendingStop.id} stopped`,
+        message: pendingStop.scenarioName,
+      });
+      setPendingStop(null);
+    } catch (err) {
+      notifyError({
+        title: 'Stop failed',
+        message: (err as ApiError | Error).message,
+      });
+    }
+  }, [abort, pendingStop]);
+
+
+  /**
+   * "Run scenario" — opens the Start-Run dialog with Interactive
+   * defaults so the user reviews mode + overrides before launching.
+   * Continuous mode and peer/subscriber overrides are one click away
+   * inside the dialog.
+   */
   const handleStartRun = useCallback(() => {
-    setStartRunErrors({});
-    if (selectedScenario) {
-      setStartRunFor(selectedScenario);
+    if (!selectedScenario) {
+      notifications.show({
+        color: 'yellow',
+        title: 'Pick a scenario first',
+        message: 'Select a scenario in the left pane before launching a Run.',
+      });
       return;
     }
-    // No scenario picked in the sidebar: the dialog must be pre-filled,
-    // so prompt the operator to choose one first.
-    notifications.show({
-      color: 'yellow',
-      title: 'Pick a scenario first',
-      message:
-        'Select a scenario in the left pane before launching a Run.',
+    setStartRunErrors({});
+    setStartRunInitial({
+      mode: 'continuous',
+      concurrency: 1,
+      repeats: 10,
+      overrideExpanded: false,
+      title: 'Run scenario',
+      instance: 'fresh',
     });
+    setStartRunFor(selectedScenario);
   }, [selectedScenario]);
+
+  /**
+   * "Re-run" from a row kebab — opens the Start-Run dialog pre-filled
+   * with the source row's mode + bindings, override section expanded.
+   * Every re-run goes through the dialog (the previous "silent"
+   * re-run was removed) so the user can confirm or tweak parameters.
+   */
+  const handleRerunRow = useCallback(
+    (row: ExecutionSummary) => {
+      const sourceScenario = scenariosQuery.data?.find(
+        (s) => s.id === row.scenarioId,
+      );
+      if (!sourceScenario) {
+        notifyError({
+          title: 'Scenario not found',
+          message: `Source scenario for run #${row.id} is no longer available.`,
+        });
+        return;
+      }
+      setStartRunErrors({});
+      setStartRunInitial({
+        mode: row.mode,
+        peerId: row.peerId ?? null,
+        // ExecutionSummary has a single subscriberId; the dialog only
+        // edits one, matching the row.
+        subscriberId: null,
+        concurrency: 1,
+        repeats: 10,
+        overrideExpanded: true,
+        title: `Re-run #${row.id}`,
+        instance: `rerun-${row.id}`,
+      });
+      setStartRunFor(sourceScenario);
+    },
+    [scenariosQuery.data],
+  );
 
   /**
    * POST /executions and branch on the server response.
@@ -260,6 +285,7 @@ export function ExecutionsPage() {
             message: `#${first.id} — ${first.scenarioName}`,
           });
           setStartRunFor(null);
+          setStartRunInitial(undefined);
           navigate(`/executions/${encodeURIComponent(first.id)}`);
           return;
         }
@@ -268,8 +294,13 @@ export function ExecutionsPage() {
         // the row appears at the top instantly. The subsequent
         // invalidate refetches authoritative state in the background;
         // on failure the cache is reconciled by the same invalidate.
+        //
+        // Scope the update to list-keyed caches only — `executionKeys.all`
+        // is a prefix that also matches `detail(id)` entries (whose data
+        // is an `Execution`, not an `ExecutionPage`), and spreading
+        // `prev.items` on those would throw.
         queryClient.setQueriesData<ExecutionPage>(
-          { queryKey: executionKeys.all },
+          { queryKey: [...executionKeys.all, 'list'] },
           (prev) => prependExecutions(prev, created),
         );
         void queryClient.invalidateQueries({ queryKey: executionKeys.all });
@@ -283,18 +314,17 @@ export function ExecutionsPage() {
               : `#${created[0].id} — ${created[0].scenarioName}`,
         });
         setStartRunFor(null);
+        setStartRunInitial(undefined);
       } catch (err) {
         const apiErr = err as ApiError;
         if (apiErr instanceof ApiError && apiErr.errors) {
           setStartRunErrors(apiErr.fieldErrors());
-          notifications.show({
-            color: 'red',
+          notifyError({
             title: 'Run failed',
             message: 'Validation errors — see fields below.',
           });
         } else {
-          notifications.show({
-            color: 'red',
+          notifyError({
             title: 'Run failed',
             message: (err as Error).message,
           });
@@ -372,28 +402,28 @@ export function ExecutionsPage() {
                   variant="default"
                   leftSection={<IconPencil size={14} />}
                   onClick={() =>
-                    navigate(`/scenarios/${encodeURIComponent(selectedScenario.id)}`)
+                    navigate(
+                      `/scenarios/${encodeURIComponent(selectedScenario.id)}`,
+                      // Carry the current Executions URL (incl. ?scenario / ?status)
+                      // so the Builder modal can navigate the user back here when they close.
+                      {
+                        state: {
+                          returnTo: `/executions${location.search}`,
+                        },
+                      },
+                    )
                   }
                   data-testid="executions-edit-scenario"
                 >
                   Edit scenario
-                </Button>
-                <Button
-                  variant="default"
-                  leftSection={<IconRotate size={14} />}
-                  onClick={handleRerunLatest}
-                  disabled={!latestRunForSelected || rerun.isPending}
-                  loading={rerun.isPending}
-                  data-testid="executions-rerun-latest"
-                >
-                  Re-run latest
                 </Button>
               </>
             )}
             <Button
               leftSection={<IconPlayerPlay size={14} />}
               onClick={handleStartRun}
-              disabled={!selectedScenario}
+              disabled={!selectedScenario || create.isPending}
+              loading={create.isPending}
               data-testid="executions-start-run"
             >
               Run scenario
@@ -407,9 +437,6 @@ export function ExecutionsPage() {
           onStatusChange={(next) =>
             setParam('status', next === 'all' ? null : next)
           }
-          peerOptions={peerOptions}
-          peerId={peerFilter}
-          onPeerChange={(next) => setParam('peer', next)}
         />
 
         <Card withBorder padding="md" data-testid="executions-table">
@@ -430,31 +457,60 @@ export function ExecutionsPage() {
             <ExecutionsTable
               executions={filteredRows}
               showScenarioColumn={!scenarioId}
+              onViewRow={handleViewRow}
               onRerunRow={handleRerunRow}
+              onStopRow={handleStopRow}
             />
           )}
         </Card>
       </Stack>
 
-      <RerunConfirmModal
-        source={pendingRerun}
-        isPending={rerun.isPending}
+      <Modal
+        opened={Boolean(pendingStop)}
         onClose={() => {
-          if (!rerun.isPending) setPendingRerun(null);
+          if (!abort.isPending) setPendingStop(null);
         }}
-        onConfirm={() => {
-          if (!pendingRerun) return;
-          void launchRerun(pendingRerun).finally(() => setPendingRerun(null));
-        }}
-      />
+        title="Stop execution"
+        centered
+        closeOnClickOutside={!abort.isPending}
+        closeOnEscape={!abort.isPending}
+      >
+        <Stack gap="md">
+          <Text size="sm">
+            Stop run <strong>#{pendingStop?.id ?? ''}</strong> for{' '}
+            <strong>{pendingStop?.scenarioName ?? ''}</strong>? The engine
+            transitions the run to <code>aborted</code>; in-flight CCRs are
+            terminated best-effort. This cannot be undone.
+          </Text>
+          <Group justify="flex-end">
+            <Button
+              variant="subtle"
+              onClick={() => setPendingStop(null)}
+              disabled={abort.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              color="red"
+              onClick={confirmStop}
+              loading={abort.isPending}
+              data-testid="executions-stop-confirm"
+            >
+              Stop
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
 
       <StartRunModal
         scenario={startRunFor}
+        initial={startRunInitial}
         isPending={create.isPending}
         onClose={() => {
           if (!create.isPending) {
             setStartRunFor(null);
             setStartRunErrors({});
+            setStartRunInitial(undefined);
           }
         }}
         onSubmit={handleStartRunSubmit}

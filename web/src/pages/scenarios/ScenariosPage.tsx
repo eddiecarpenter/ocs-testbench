@@ -33,6 +33,7 @@ import {
   Title,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
+import { notifyError } from '../../utils/notify';
 import {
   IconAlertTriangle,
   IconCopy,
@@ -127,8 +128,7 @@ export function ScenariosListPage() {
         message: `Execution ${id} started for ${row.name}`,
       });
     } catch (err) {
-      notifications.show({
-        color: 'red',
+      notifyError({
         title: 'Run failed',
         message: (err as Error).message,
       });
@@ -161,8 +161,7 @@ export function ScenariosListPage() {
       });
       setPendingDelete(null);
     } catch (err) {
-      notifications.show({
-        color: 'red',
+      notifyError({
         title: 'Could not delete scenario',
         message: err instanceof Error ? err.message : 'Unexpected error',
       });

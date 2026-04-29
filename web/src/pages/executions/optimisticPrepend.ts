@@ -26,6 +26,11 @@ export function prependExecutions(
 ): ExecutionPage | undefined {
   if (!prev) return prev;
   if (created.length === 0) return prev;
+  // Defensive: if a cache entry under the same key prefix is reached
+  // (e.g. an `Execution` detail under `['executions', ...]`), it will
+  // not have an `items` array — leave it untouched rather than crash
+  // when spreading.
+  if (!Array.isArray(prev.items)) return prev;
   return {
     items: [...created, ...prev.items],
     page: { ...prev.page, total: prev.page.total + created.length },

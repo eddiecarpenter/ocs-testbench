@@ -58,6 +58,80 @@ export function sortByStartedDesc(
   return [...rows].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }
 
+/** Sortable column keys exposed by the run table. */
+export type SortKey =
+  | 'id'
+  | 'scenarioName'
+  | 'state'
+  | 'mode'
+  | 'subscriber'
+  | 'peer'
+  | 'progress'
+  | 'duration'
+  | 'startedAt';
+
+export type SortDir = 'asc' | 'desc';
+
+/** Duration in ms, or -1 when the run never finished — used for column sort. */
+function durationMs(row: ExecutionSummary): number {
+  if (!row.finishedAt) return -1;
+  const diff = Date.parse(row.finishedAt) - Date.parse(row.startedAt);
+  return Number.isNaN(diff) ? -1 : diff;
+}
+
+/**
+ * Generic column sort. `progress` and `duration` sort on their numeric
+ * representation (terminal-sibling count / ms). Pure — returns a fresh
+ * array.
+ */
+export function sortRows(
+  rows: readonly ExecutionSummary[],
+  key: SortKey,
+  dir: SortDir,
+  runsByBatch: Map<string, ExecutionSummary[]>,
+): ExecutionSummary[] {
+  const sign = dir === 'asc' ? 1 : -1;
+
+  const keyFn = (r: ExecutionSummary): string | number => {
+    switch (key) {
+      case 'id':
+        return r.id;
+      case 'scenarioName':
+        return r.scenarioName ?? '';
+      case 'state':
+        return STATE_LABEL[r.state];
+      case 'mode':
+        return modeLabel(r.mode);
+      case 'subscriber':
+        return r.subscriberMsisdn ?? r.subscriberId ?? '';
+      case 'peer':
+        return r.peerName ?? r.peerId ?? '';
+      case 'progress': {
+        if (r.batchId) {
+          const siblings = runsByBatch.get(r.batchId) ?? [];
+          return siblings.filter((s) => isTerminal(s.state)).length;
+        }
+        return isTerminal(r.state) ? 1 : 0;
+      }
+      case 'duration':
+        return durationMs(r);
+      case 'startedAt':
+        return r.startedAt;
+      default:
+        return '';
+    }
+  };
+
+  return [...rows].sort((a, b) => {
+    const av = keyFn(a);
+    const bv = keyFn(b);
+    if (typeof av === 'number' && typeof bv === 'number') {
+      return (av - bv) * sign;
+    }
+    return String(av).localeCompare(String(bv)) * sign;
+  });
+}
+
 /**
  * Group executions by `batchId` to compute `done / total` for
  * Continuous rows. The map is keyed by batchId; rows without a

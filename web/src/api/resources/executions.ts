@@ -89,6 +89,14 @@ export const rerunExecution = (id: string) =>
     `/executions/${encodeURIComponent(id)}/rerun`,
   );
 
+/**
+ * Abort a running execution. Mirrors the OpenAPI `abortExecution`
+ * operation — server transitions the run to `aborted` (with a
+ * best-effort CCR-TERMINATE if the scenario is mid-session).
+ */
+export const abortExecution = (id: string) =>
+  ApiService.post<void>(`/executions/${encodeURIComponent(id)}/abort`);
+
 // ---------------------------------------------------------------------------
 // Hooks
 // ---------------------------------------------------------------------------
@@ -143,6 +151,21 @@ export function useRerunExecution() {
       if (first) {
         qc.setQueryData(executionKeys.detail(first.id), first);
       }
+    },
+  });
+}
+
+/**
+ * Abort a running execution. Invalidates list + detail caches so the
+ * row's status flips to `aborted` after the next refetch.
+ */
+export function useAbortExecution() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => abortExecution(id),
+    onSuccess: (_v, id) => {
+      void qc.invalidateQueries({ queryKey: executionKeys.all });
+      void qc.invalidateQueries({ queryKey: executionKeys.detail(id) });
     },
   });
 }

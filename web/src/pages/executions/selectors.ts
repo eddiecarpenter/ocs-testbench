@@ -133,18 +133,18 @@ export function countByStatusFilter(
 }
 
 /**
- * Apply both the status chip and the peer dropdown to the candidate
- * executions list — pure, so tests can drive it directly.
+ * Apply the status chip to the candidate executions list — pure, so
+ * tests can drive it directly. (The previous peer-dropdown filter was
+ * removed; peer is now visible as a column in the table and can be
+ * column-sorted.)
  */
 export function applyTableFilters(
   executions: readonly ExecutionSummary[],
-  filters: { status: StatusFilter; peerId: string | null },
+  filters: { status: StatusFilter },
 ): ExecutionSummary[] {
-  return executions.filter((e) => {
-    if (!statusFilterMatches(filters.status, e.state)) return false;
-    if (filters.peerId && e.peerId !== filters.peerId) return false;
-    return true;
-  });
+  return executions.filter((e) =>
+    statusFilterMatches(filters.status, e.state),
+  );
 }
 
 /**

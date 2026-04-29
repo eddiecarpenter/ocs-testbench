@@ -190,26 +190,13 @@ describe('applyTableFilters', () => {
     exec({ id: '4', state: 'success', peerId: 'peer-02' }),
   ];
 
-  it('filters by status only', () => {
-    const out = applyTableFilters(rows, { status: 'completed', peerId: null });
+  it('filters by status', () => {
+    const out = applyTableFilters(rows, { status: 'completed' });
     expect(out.map((r) => r.id)).toEqual(['2', '4']);
   });
 
-  it('filters by peer only', () => {
-    const out = applyTableFilters(rows, { status: 'all', peerId: 'peer-02' });
-    expect(out.map((r) => r.id)).toEqual(['3', '4']);
-  });
-
-  it('combines status and peer filters with AND', () => {
-    const out = applyTableFilters(rows, {
-      status: 'completed',
-      peerId: 'peer-01',
-    });
-    expect(out.map((r) => r.id)).toEqual(['2']);
-  });
-
-  it('returns the input set when both filters are open', () => {
-    const out = applyTableFilters(rows, { status: 'all', peerId: null });
+  it('returns the input set when status is "all"', () => {
+    const out = applyTableFilters(rows, { status: 'all' });
     expect(out).toHaveLength(rows.length);
   });
 });
