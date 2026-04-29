@@ -22,6 +22,7 @@ import {
   Card,
   Group,
   SegmentedControl,
+  Select,
   Stack,
   Text,
   TextInput,
@@ -34,9 +35,13 @@ import {
   IconTrash,
 } from '@tabler/icons-react';
 
-import { useScenarioDraftStore } from '../../store/scenarioDraftStore';
-import type { Service, ServiceModel } from '../../store/types';
-import { matrix } from '../../store/validators';
+import { useScenarioDraftStore } from '../scenarioDraftStore';
+import {
+  buildVariableOptions,
+  type VariableOptionGroup,
+} from '../selectors';
+import type { Service, ServiceModel } from '../types';
+import { matrix } from '../validators';
 
 const SERVICE_MODELS: ServiceModel[] = ['root', 'single-mscc', 'multi-mscc'];
 
@@ -49,6 +54,8 @@ const HINT_BY_MODEL: Record<ServiceModel, string> = {
 interface ServiceEditorProps {
   service: Service;
   showIdentifiers: boolean;
+  variableOptions: VariableOptionGroup[];
+  hasAnyVariable: boolean;
   onChange: (next: Service) => void;
   onRemove?: () => void;
 }
@@ -56,16 +63,22 @@ interface ServiceEditorProps {
 function ServiceEditor({
   service,
   showIdentifiers,
+  variableOptions,
+  hasAnyVariable,
   onChange,
   onRemove,
 }: ServiceEditorProps) {
+  // Empty-state placeholder mirrors the `{{NAME}}` wrapping used for
+  // selected values, so an unset variable slot is instantly
+  // distinguishable from a free-text field.
+  const variablePlaceholder = hasAnyVariable
+    ? '{{ ... }}'
+    : 'No variables available';
+
   return (
     <Stack gap="xs">
-      <Group justify="space-between">
-        <Group gap="xs">
-          <Title order={6}>Service id: {service.id || '—'}</Title>
-        </Group>
-        {onRemove && (
+      {onRemove && (
+        <Group justify="flex-end">
           <ActionIcon
             variant="subtle"
             color="red"
@@ -74,8 +87,8 @@ function ServiceEditor({
           >
             <IconTrash size={14} />
           </ActionIcon>
-        )}
-      </Group>
+        </Group>
+      )}
       {showIdentifiers && (
         <Group grow>
           <TextInput
@@ -85,39 +98,55 @@ function ServiceEditor({
               onChange({ ...service, id: e.currentTarget.value })
             }
           />
-          <TextInput
-            label="Rating-Group var"
-            value={service.ratingGroup ?? ''}
-            onChange={(e) =>
-              onChange({ ...service, ratingGroup: e.currentTarget.value })
+          <Select
+            label="Rating-Group"
+            placeholder={variablePlaceholder}
+            data={variableOptions}
+            value={service.ratingGroup ?? null}
+            onChange={(v) =>
+              onChange({ ...service, ratingGroup: v ?? '' })
             }
+            clearable
+            disabled={!hasAnyVariable}
           />
-          <TextInput
-            label="Service-Identifier var"
-            value={service.serviceIdentifier ?? ''}
-            onChange={(e) =>
+          <Select
+            label="Service-Identifier"
+            placeholder={variablePlaceholder}
+            data={variableOptions}
+            value={service.serviceIdentifier ?? null}
+            onChange={(v) =>
               onChange({
                 ...service,
-                serviceIdentifier: e.currentTarget.value,
+                serviceIdentifier: v ?? '',
               })
             }
+            clearable
+            disabled={!hasAnyVariable}
           />
         </Group>
       )}
       <Group grow>
-        <TextInput
-          label="Requested service-units var (RSU)"
-          value={service.requestedUnits}
-          onChange={(e) =>
-            onChange({ ...service, requestedUnits: e.currentTarget.value })
+        <Select
+          label="Requested service-units (RSU)"
+          placeholder={variablePlaceholder}
+          data={variableOptions}
+          value={service.requestedUnits || null}
+          onChange={(v) =>
+            onChange({ ...service, requestedUnits: v ?? '' })
           }
+          clearable
+          disabled={!hasAnyVariable}
         />
-        <TextInput
-          label="Used service-units var (USU)"
-          value={service.usedUnits ?? ''}
-          onChange={(e) =>
-            onChange({ ...service, usedUnits: e.currentTarget.value })
+        <Select
+          label="Used service-units (USU)"
+          placeholder={variablePlaceholder}
+          data={variableOptions}
+          value={service.usedUnits ?? null}
+          onChange={(v) =>
+            onChange({ ...service, usedUnits: v ?? '' })
           }
+          clearable
+          disabled={!hasAnyVariable}
         />
       </Group>
     </Stack>
@@ -132,6 +161,8 @@ export function ServicesTab() {
   if (!draft) return null;
 
   const { unitType, serviceModel, services } = draft;
+  const { options: variableOptions, hasAny: hasAnyVariable } =
+    buildVariableOptions(draft.variables);
 
   function handleSegment(value: string) {
     const next = value as ServiceModel;
@@ -243,6 +274,8 @@ export function ServicesTab() {
             <ServiceEditor
               service={services[0]}
               showIdentifiers={false}
+              variableOptions={variableOptions}
+              hasAnyVariable={hasAnyVariable}
               onChange={(next) => setServices([next])}
             />
           </Stack>
@@ -256,6 +289,8 @@ export function ServicesTab() {
             <ServiceEditor
               service={services[0]}
               showIdentifiers
+              variableOptions={variableOptions}
+              hasAnyVariable={hasAnyVariable}
               onChange={(next) => setServices([next])}
             />
           </Stack>
@@ -293,6 +328,8 @@ export function ServicesTab() {
                   <ServiceEditor
                     service={svc}
                     showIdentifiers
+                    variableOptions={variableOptions}
+                    hasAnyVariable={hasAnyVariable}
                     onChange={(next) =>
                       setServices(services.map((s, j) => (j === i ? next : s)))
                     }

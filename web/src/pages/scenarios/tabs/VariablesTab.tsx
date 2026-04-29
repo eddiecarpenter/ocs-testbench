@@ -19,27 +19,36 @@
 import {
   ActionIcon,
   Badge,
+  Button,
   Card,
   Group,
+  Modal,
   NumberInput,
   Select,
   Stack,
   Text,
   TextInput,
   Title,
+  Tooltip,
 } from '@mantine/core';
-import { IconArrowRight, IconPlus, IconTrash, IconWand } from '@tabler/icons-react';
+import { notifications } from '@mantine/notifications';
+import {
+  IconArrowRight,
+  IconPlus,
+  IconTrash,
+  IconWand,
+} from '@tabler/icons-react';
 import { useState } from 'react';
 import { useSearchParams } from 'react-router';
 
-import { provisionVariables } from '../../store/provisionVariables';
-import { useScenarioDraftStore } from '../../store/scenarioDraftStore';
+import { provisionVariables } from '../provisionVariables';
+import { useScenarioDraftStore } from '../scenarioDraftStore';
 import {
   type SystemVariable,
   type UsageRef,
   findUsages,
   listSystemVariables,
-} from '../../store/selectors';
+} from '../selectors';
 import type {
   GeneratorRefresh,
   GeneratorStrategy,
@@ -48,7 +57,7 @@ import type {
   VariableSourceBound,
   VariableSourceExtracted,
   VariableSourceGenerator,
-} from '../../store/types';
+} from '../types';
 
 type VarKind = 'generator' | 'bound' | 'extracted';
 
@@ -78,18 +87,23 @@ interface SidebarProps {
   system: SystemVariable[];
   user: Variable[];
   selected: string;
+  /** Reference count per user-variable name (0 → trash enabled). */
+  userUsageCounts: Record<string, number>;
   onSelect: (name: string, isSystem: boolean) => void;
   onAdd: () => void;
   onProvision: () => void;
+  onRequestRemove: (name: string) => void;
 }
 
 function Sidebar({
   system,
   user,
   selected,
+  userUsageCounts,
   onSelect,
   onAdd,
   onProvision,
+  onRequestRemove,
 }: SidebarProps) {
   return (
     <Card withBorder padding="sm" style={{ width: 280 }}>
@@ -123,24 +137,33 @@ function Sidebar({
         <Group justify="space-between">
           <Title order={6}>User</Title>
           <Group gap={4}>
-            <ActionIcon
-              variant="subtle"
-              size="sm"
-              aria-label="Auto-provision missing variables"
-              onClick={onProvision}
-              data-testid="vars-provision"
+            <Tooltip
+              label="Auto-provision: add the variables this scenario's services and serviceModel imply but aren't defined yet (won't overwrite existing ones)"
+              multiline
+              w={260}
+              withArrow
             >
-              <IconWand size={14} />
-            </ActionIcon>
-            <ActionIcon
-              variant="filled"
-              size="sm"
-              aria-label="Add variable"
-              onClick={onAdd}
-              data-testid="vars-add"
-            >
-              <IconPlus size={14} />
-            </ActionIcon>
+              <ActionIcon
+                variant="subtle"
+                size="sm"
+                aria-label="Auto-provision missing variables"
+                onClick={onProvision}
+                data-testid="vars-provision"
+              >
+                <IconWand size={14} />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label="Add variable" withArrow>
+              <ActionIcon
+                variant="filled"
+                size="sm"
+                aria-label="Add variable"
+                onClick={onAdd}
+                data-testid="vars-add"
+              >
+                <IconPlus size={14} />
+              </ActionIcon>
+            </Tooltip>
           </Group>
         </Group>
         <Stack gap={2}>
@@ -149,26 +172,54 @@ function Sidebar({
               No user variables yet.
             </Text>
           )}
-          {user.map((v) => (
-            <Group
-              key={v.name}
-              gap="xs"
-              wrap="nowrap"
-              style={{
-                cursor: 'pointer',
-                padding: '4px 6px',
-                borderRadius: 4,
-                backgroundColor:
-                  selected === `user:${v.name}`
-                    ? 'var(--mantine-color-blue-light)'
-                    : undefined,
-              }}
-              onClick={() => onSelect(v.name, false)}
-            >
-              {chipFor(v.source.kind)}
-              <Text size="sm">{v.name}</Text>
-            </Group>
-          ))}
+          {user.map((v) => {
+            const inUseCount = userUsageCounts[v.name] ?? 0;
+            const inUse = inUseCount > 0;
+            return (
+              <Group
+                key={v.name}
+                gap="xs"
+                wrap="nowrap"
+                style={{
+                  cursor: 'pointer',
+                  padding: '4px 6px',
+                  borderRadius: 4,
+                  backgroundColor:
+                    selected === `user:${v.name}`
+                      ? 'var(--mantine-color-blue-light)'
+                      : undefined,
+                }}
+                onClick={() => onSelect(v.name, false)}
+              >
+                {chipFor(v.source.kind)}
+                <Text size="sm" style={{ flex: 1 }}>
+                  {v.name}
+                </Text>
+                <Tooltip
+                  label={
+                    inUse
+                      ? `In use — referenced in ${inUseCount} place${inUseCount === 1 ? '' : 's'}`
+                      : 'Remove variable'
+                  }
+                >
+                  <ActionIcon
+                    variant="subtle"
+                    color="red"
+                    size="sm"
+                    aria-label={`Remove ${v.name}`}
+                    disabled={inUse}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRequestRemove(v.name);
+                    }}
+                    data-testid={`vars-remove-${v.name}`}
+                  >
+                    <IconTrash size={14} />
+                  </ActionIcon>
+                </Tooltip>
+              </Group>
+            );
+          })}
         </Stack>
       </Stack>
     </Card>
@@ -304,28 +355,12 @@ function ExtractedFields({ source, onChange }: ExtractedFieldsProps) {
 interface DefinitionPaneProps {
   variable: Variable;
   onChange: (next: Variable) => void;
-  onRemove: () => void;
 }
 
-function DefinitionPane({
-  variable,
-  onChange,
-  onRemove,
-}: DefinitionPaneProps) {
+function DefinitionPane({ variable, onChange }: DefinitionPaneProps) {
   return (
     <Card withBorder padding="md" style={{ flex: 1, minWidth: 320 }}>
       <Stack gap="md">
-        <Group justify="space-between">
-          <Title order={5}>{variable.name}</Title>
-          <ActionIcon
-            variant="subtle"
-            color="red"
-            onClick={onRemove}
-            aria-label="Remove variable"
-          >
-            <IconTrash size={14} />
-          </ActionIcon>
-        </Group>
         <TextInput
           label="Name"
           value={variable.name}
@@ -430,7 +465,13 @@ function UsagePane({ refs, onJump }: UsagePaneProps) {
 export function VariablesTab() {
   const draft = useScenarioDraftStore((s) => s.draft);
   const setVariables = useScenarioDraftStore((s) => s.setVariables);
+  const updateVariable = useScenarioDraftStore((s) => s.updateVariable);
+  const removeVariable = useScenarioDraftStore((s) => s.removeVariable);
   const [, setParams] = useSearchParams();
+  const [pendingDelete, setPendingDelete] = useState<{
+    name: string;
+    usages: UsageRef[];
+  } | null>(null);
 
   const system = listSystemVariables();
   const user = draft?.variables ?? [];
@@ -479,18 +520,51 @@ export function VariablesTab() {
 
   function handleChange(updated: Variable) {
     if (!selectedUser) return;
-    const next = user.map((v) => (v.name === selectedUser.name ? updated : v));
-    setVariables(next);
-    if (updated.name !== selectedUser.name) {
-      setSelected(`user:${updated.name}`);
+    const trimmed = updated.name.trim();
+    const isRename = trimmed !== selectedUser.name;
+    if (isRename) {
+      // Reject empty names and collisions with another existing
+      // variable (system or user) so refactor stays unambiguous.
+      if (trimmed === '') {
+        notifications.show({
+          color: 'red',
+          title: 'Name cannot be empty',
+          message: 'Variable names must contain at least one character.',
+        });
+        return;
+      }
+      if (
+        trimmed !== selectedUser.name &&
+        allByName.has(trimmed)
+      ) {
+        notifications.show({
+          color: 'red',
+          title: 'Name already in use',
+          message: `Another variable is already called "${trimmed}".`,
+        });
+        return;
+      }
     }
+    // Atomic rename + propagate (single undo step).
+    updateVariable(selectedUser.name, { ...updated, name: trimmed });
+    if (isRename) setSelected(`user:${trimmed}`);
   }
 
-  function handleRemove() {
-    if (!selectedUser) return;
-    const next = user.filter((v) => v.name !== selectedUser.name);
-    setVariables(next);
-    setSelected(next.length > 0 ? `user:${next[0].name}` : '');
+  function requestRemove(name: string) {
+    if (!draft) return;
+    const refs = findUsages(draft, name);
+    // Open the modal whether or not usages exist; modal renders the
+    // appropriate "blocked, in use" or "confirm delete" body based on
+    // refs.length.
+    setPendingDelete({ name, usages: refs });
+  }
+
+  function confirmDelete() {
+    if (!pendingDelete || pendingDelete.usages.length > 0) return;
+    removeVariable(pendingDelete.name);
+    const remaining = user.filter((v) => v.name !== pendingDelete.name);
+    setSelected(remaining.length > 0 ? `user:${remaining[0].name}` : '');
+    setPendingDelete(null);
   }
 
   function handleJump(ref: UsageRef) {
@@ -508,17 +582,26 @@ export function VariablesTab() {
     );
   }
 
+  // Per-user-variable usage count, computed once and threaded into the
+  // sidebar so each row's trash can decide enabled vs disabled.
+  const userUsageCounts: Record<string, number> = {};
+  for (const v of user) {
+    userUsageCounts[v.name] = findUsages(draft, v.name).length;
+  }
+
   return (
     <Group align="flex-start" gap="lg" wrap="nowrap">
       <Sidebar
         system={system}
         user={user}
         selected={selected}
+        userUsageCounts={userUsageCounts}
         onSelect={(n, isSystem) =>
           setSelected(`${isSystem ? 'system' : 'user'}:${n}`)
         }
         onAdd={handleAdd}
         onProvision={handleProvision}
+        onRequestRemove={requestRemove}
       />
       {selectedSystem && (
         <Card withBorder padding="md" style={{ flex: 1, minWidth: 320 }}>
@@ -541,7 +624,6 @@ export function VariablesTab() {
         <DefinitionPane
           variable={selectedUser}
           onChange={handleChange}
-          onRemove={handleRemove}
         />
       )}
       {!selectedSystem && !selectedUser && (
@@ -552,6 +634,57 @@ export function VariablesTab() {
         </Card>
       )}
       <UsagePane refs={usages} onJump={handleJump} />
+
+      <Modal
+        opened={Boolean(pendingDelete)}
+        onClose={() => setPendingDelete(null)}
+        title={
+          pendingDelete && pendingDelete.usages.length > 0
+            ? 'Cannot remove variable'
+            : 'Remove variable'
+        }
+        centered
+      >
+        {pendingDelete && pendingDelete.usages.length > 0 ? (
+          <Stack gap="md">
+            <Text size="sm">
+              <strong>{pendingDelete.name}</strong> is referenced in{' '}
+              {pendingDelete.usages.length}{' '}
+              {pendingDelete.usages.length === 1 ? 'place' : 'places'}.
+              Remove or replace those references first, then delete.
+            </Text>
+            <Stack gap={4}>
+              {pendingDelete.usages.map((u, i) => (
+                <Text key={i} size="sm" c="dimmed">
+                  • {u.label}
+                </Text>
+              ))}
+            </Stack>
+            <Group justify="flex-end">
+              <Button onClick={() => setPendingDelete(null)}>OK</Button>
+            </Group>
+          </Stack>
+        ) : (
+          <Stack gap="md">
+            <Text size="sm">
+              Remove <strong>{pendingDelete?.name ?? ''}</strong>? This
+              cannot be undone outside of Discard.
+            </Text>
+            <Group justify="flex-end">
+              <Button variant="subtle" onClick={() => setPendingDelete(null)}>
+                Cancel
+              </Button>
+              <Button
+                color="red"
+                onClick={confirmDelete}
+                data-testid="vars-remove-confirm"
+              >
+                Remove
+              </Button>
+            </Group>
+          </Stack>
+        )}
+      </Modal>
     </Group>
   );
 }

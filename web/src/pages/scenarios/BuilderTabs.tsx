@@ -15,9 +15,9 @@ import { ServicesTab } from './tabs/ServicesTab';
 import { StepsTab } from './tabs/StepsTab';
 import { VariablesTab } from './tabs/VariablesTab';
 
-export type BuilderTabId = 'steps' | 'frame' | 'services' | 'variables';
+export type BuilderTabId = 'steps' | 'variables' | 'frame' | 'services';
 
-const TAB_IDS: BuilderTabId[] = ['steps', 'frame', 'services', 'variables'];
+const TAB_IDS: BuilderTabId[] = ['steps', 'variables', 'frame', 'services'];
 
 function isTab(value: string | null): value is BuilderTabId {
   return value !== null && (TAB_IDS as string[]).includes(value);
@@ -53,19 +53,24 @@ export function BuilderTabs() {
           <Tabs.Tab value="steps" data-testid="builder-tab-steps">
             Steps
           </Tabs.Tab>
+          <Tabs.Tab value="variables" data-testid="builder-tab-variables">
+            Variables
+          </Tabs.Tab>
           <Tabs.Tab value="frame" data-testid="builder-tab-frame">
             Frame
           </Tabs.Tab>
           <Tabs.Tab value="services" data-testid="builder-tab-services">
             Services
           </Tabs.Tab>
-          <Tabs.Tab value="variables" data-testid="builder-tab-variables">
-            Variables
-          </Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="steps" pt="md">
           <Stack gap="md">
             <StepsTab />
+          </Stack>
+        </Tabs.Panel>
+        <Tabs.Panel value="variables" pt="md">
+          <Stack gap="md">
+            <VariablesTab />
           </Stack>
         </Tabs.Panel>
         <Tabs.Panel value="frame" pt="md">
@@ -76,11 +81,6 @@ export function BuilderTabs() {
         <Tabs.Panel value="services" pt="md">
           <Stack gap="md">
             <ServicesTab />
-          </Stack>
-        </Tabs.Panel>
-        <Tabs.Panel value="variables" pt="md">
-          <Stack gap="md">
-            <VariablesTab />
           </Stack>
         </Tabs.Panel>
       </Tabs>

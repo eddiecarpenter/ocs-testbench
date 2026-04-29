@@ -13,11 +13,7 @@
 import './fakeApi/dashboardFakeApi';
 import './fakeApi/peersFakeApi';
 import './fakeApi/subscribersFakeApi';
-// Full scenario CRUD lives in the scenarios feature module — see
-// `src/features/scenarios/mocks/scenariosHandlers.ts`. The legacy
-// `fakeApi/scenariosFakeApi.ts` only stubbed GET /scenarios; the
-// feature module supersedes it.
-import '../features/scenarios/mocks/scenariosHandlers';
+import './fakeApi/scenariosFakeApi';
 import './fakeApi/executionsFakeApi';
 import './fakeApi/metricsFakeApi';
 

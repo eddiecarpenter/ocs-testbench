@@ -14,6 +14,7 @@
 import { create } from 'zustand';
 
 import { createHistory } from './history';
+import { renameUsages } from './selectors';
 import type {
   AvpNode,
   Scenario,
@@ -62,6 +63,23 @@ export interface ScenarioDraftState {
   setAvpTree: (avpTree: AvpNode[]) => void;
   setServices: (services: Service[]) => void;
   setVariables: (variables: Variable[]) => void;
+
+  /**
+   * Replace a variable identified by `oldName` with `updated` in a
+   * single atomic store action. If the name changed, every reference
+   * (AVP valueRefs, service fields, step override keys) is rewritten
+   * to point at the new name as part of the same commit — so a single
+   * Undo reverses the whole operation.
+   */
+  updateVariable: (oldName: string, updated: Variable) => void;
+
+  /**
+   * Remove a variable by name and remove the variable record itself.
+   * Does NOT check for in-use references — that's the caller's
+   * responsibility (the VariablesTab blocks deletion when usages
+   * exist; this action assumes the caller has already verified).
+   */
+  removeVariable: (name: string) => void;
 
   // ------------------------------------------------------------------
   // history
@@ -126,17 +144,47 @@ export const useScenarioDraftStore = create<ScenarioDraftState>((set, get) => ({
   setServices: (services) => commit(set, get, (d) => ({ ...d, services })),
   setVariables: (variables) => commit(set, get, (d) => ({ ...d, variables })),
 
+  updateVariable(oldName, updated) {
+    commit(set, get, (d) => {
+      // First propagate the rename across every reference surface,
+      // then replace the variable's record. Both happen inside a
+      // single `commit`, so the history records one undo step.
+      const propagated =
+        oldName !== updated.name ? renameUsages(d, oldName, updated.name) : d;
+      return {
+        ...propagated,
+        variables: propagated.variables.map((v) =>
+          v.name === oldName ? updated : v,
+        ),
+      };
+    });
+  },
+
+  removeVariable(name) {
+    commit(set, get, (d) => ({
+      ...d,
+      variables: d.variables.filter((v) => v.name !== name),
+    }));
+  },
+
   undo() {
     const cur = get();
     if (!cur.draft) return;
     const prev = cur._history.undo(cur.draft);
-    if (prev) set(() => ({ draft: prev, dirty: true }));
+    if (!prev) return;
+    // After undoing, the draft is dirty iff there are still earlier
+    // snapshots on the stack. When the stack empties we're back at
+    // the loaded / last-saved state — the dirty flag must clear.
+    set(() => ({ draft: prev, dirty: cur._history.canUndo() }));
   },
   redo() {
     const cur = get();
     if (!cur.draft) return;
     const next = cur._history.redo(cur.draft);
-    if (next) set(() => ({ draft: next, dirty: true }));
+    if (!next) return;
+    // Redo always pushes the previous state back onto the undo
+    // stack, so the draft is at least one step ahead of saved.
+    set(() => ({ draft: next, dirty: true }));
   },
   canUndo: () => get()._history.canUndo(),
   canRedo: () => get()._history.canRedo(),

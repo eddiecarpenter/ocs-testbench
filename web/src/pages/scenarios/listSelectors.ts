@@ -3,7 +3,7 @@
  * `ScenariosListPage` and exercised by unit tests so AC-1 / AC-2 /
  * AC-3 (grouping + search + peer filter) have explicit coverage.
  */
-import type { ScenarioSummary, UnitType } from '../store/types';
+import type { ScenarioSummary, UnitType } from './types';
 
 export const UNIT_GROUP_ORDER: UnitType[] = ['OCTET', 'TIME', 'UNITS'];
 
