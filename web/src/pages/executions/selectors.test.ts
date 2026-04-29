@@ -13,10 +13,15 @@ import type { ExecutionSummary } from '../../api/resources/executions';
 import type { ScenarioSummary } from '../scenarios/types';
 
 import {
+  applyTableFilters,
+  countByStatusFilter,
   countRunsByScenario,
   filterScenariosByName,
   lastRunByScenario,
+  parseStatusFilter,
+  selectLatestRunForScenario,
   selectScenarioForHeader,
+  statusFilterMatches,
 } from './selectors';
 
 function row(overrides: Partial<ScenarioSummary>): ScenarioSummary {
@@ -111,6 +116,118 @@ describe('lastRunByScenario', () => {
 
   it('returns an empty map for empty input', () => {
     expect(lastRunByScenario([]).size).toBe(0);
+  });
+});
+
+describe('parseStatusFilter', () => {
+  it('returns the typed filter for valid params', () => {
+    expect(parseStatusFilter('running')).toBe('running');
+    expect(parseStatusFilter('completed')).toBe('completed');
+    expect(parseStatusFilter('failed')).toBe('failed');
+    expect(parseStatusFilter('all')).toBe('all');
+  });
+
+  it('falls back to "all" for unknown / missing values', () => {
+    expect(parseStatusFilter(null)).toBe('all');
+    expect(parseStatusFilter('')).toBe('all');
+    expect(parseStatusFilter('garbage')).toBe('all');
+  });
+});
+
+describe('statusFilterMatches', () => {
+  it('all matches every state', () => {
+    for (const state of ['running', 'success', 'failure', 'aborted'] as const) {
+      expect(statusFilterMatches('all', state)).toBe(true);
+    }
+  });
+
+  it('running matches running / paused / pending', () => {
+    expect(statusFilterMatches('running', 'running')).toBe(true);
+    expect(statusFilterMatches('running', 'paused')).toBe(true);
+    expect(statusFilterMatches('running', 'pending')).toBe(true);
+    expect(statusFilterMatches('running', 'success')).toBe(false);
+  });
+
+  it('completed maps to success only', () => {
+    expect(statusFilterMatches('completed', 'success')).toBe(true);
+    expect(statusFilterMatches('completed', 'failure')).toBe(false);
+  });
+
+  it('failed maps to failure / error / aborted', () => {
+    expect(statusFilterMatches('failed', 'failure')).toBe(true);
+    expect(statusFilterMatches('failed', 'error')).toBe(true);
+    expect(statusFilterMatches('failed', 'aborted')).toBe(true);
+    expect(statusFilterMatches('failed', 'success')).toBe(false);
+  });
+});
+
+describe('countByStatusFilter', () => {
+  it('counts each bucket independently', () => {
+    const counts = countByStatusFilter([
+      exec({ state: 'running' }),
+      exec({ state: 'paused' }),
+      exec({ state: 'success' }),
+      exec({ state: 'failure' }),
+      exec({ state: 'aborted' }),
+    ]);
+    expect(counts.all).toBe(5);
+    expect(counts.running).toBe(2); // running + paused
+    expect(counts.completed).toBe(1);
+    expect(counts.failed).toBe(2); // failure + aborted
+  });
+
+  it('returns all-zero buckets for empty input', () => {
+    const counts = countByStatusFilter([]);
+    expect(counts).toEqual({ all: 0, running: 0, completed: 0, failed: 0 });
+  });
+});
+
+describe('applyTableFilters', () => {
+  const rows = [
+    exec({ id: '1', state: 'running', peerId: 'peer-01' }),
+    exec({ id: '2', state: 'success', peerId: 'peer-01' }),
+    exec({ id: '3', state: 'failure', peerId: 'peer-02' }),
+    exec({ id: '4', state: 'success', peerId: 'peer-02' }),
+  ];
+
+  it('filters by status only', () => {
+    const out = applyTableFilters(rows, { status: 'completed', peerId: null });
+    expect(out.map((r) => r.id)).toEqual(['2', '4']);
+  });
+
+  it('filters by peer only', () => {
+    const out = applyTableFilters(rows, { status: 'all', peerId: 'peer-02' });
+    expect(out.map((r) => r.id)).toEqual(['3', '4']);
+  });
+
+  it('combines status and peer filters with AND', () => {
+    const out = applyTableFilters(rows, {
+      status: 'completed',
+      peerId: 'peer-01',
+    });
+    expect(out.map((r) => r.id)).toEqual(['2']);
+  });
+
+  it('returns the input set when both filters are open', () => {
+    const out = applyTableFilters(rows, { status: 'all', peerId: null });
+    expect(out).toHaveLength(rows.length);
+  });
+});
+
+describe('selectLatestRunForScenario', () => {
+  it('returns the highest startedAt for the scenario', () => {
+    const rows = [
+      exec({ id: '1', scenarioId: 'a', startedAt: '2026-04-28T10:00:00Z' }),
+      exec({ id: '2', scenarioId: 'a', startedAt: '2026-04-29T10:00:00Z' }),
+      exec({ id: '3', scenarioId: 'b', startedAt: '2026-04-29T11:00:00Z' }),
+    ];
+    expect(selectLatestRunForScenario(rows, 'a')?.id).toBe('2');
+  });
+
+  it('returns undefined for a scenario with no runs', () => {
+    expect(
+      selectLatestRunForScenario([exec({ scenarioId: 'a' })], 'b'),
+    ).toBeUndefined();
   });
 });
 

@@ -66,3 +66,99 @@ export function filterScenariosByName<T extends { name: string }>(
   if (!needle) return [...scenarios];
   return scenarios.filter((s) => s.name.toLowerCase().includes(needle));
 }
+
+/**
+ * Filter-chip status keys. The page UI exposes four chips matching
+ * design — `all` is the reset, the rest map to OpenAPI v0.2 execution
+ * states grouped to user-facing buckets.
+ */
+export type StatusFilter = 'all' | 'running' | 'completed' | 'failed';
+
+const VALID_STATUS_FILTERS: ReadonlySet<StatusFilter> = new Set([
+  'all',
+  'running',
+  'completed',
+  'failed',
+]);
+
+/**
+ * Map a URL `?status=` value onto the typed filter, falling back to
+ * `'all'` when the param is missing or unrecognised.
+ */
+export function parseStatusFilter(raw: string | null): StatusFilter {
+  if (raw && VALID_STATUS_FILTERS.has(raw as StatusFilter)) {
+    return raw as StatusFilter;
+  }
+  return 'all';
+}
+
+/** True when the chip's filter bucket includes `state`. */
+export function statusFilterMatches(
+  filter: StatusFilter,
+  state: ExecutionSummary['state'],
+): boolean {
+  switch (filter) {
+    case 'all':
+      return true;
+    case 'running':
+      return state === 'running' || state === 'paused' || state === 'pending';
+    case 'completed':
+      return state === 'success';
+    case 'failed':
+      return state === 'failure' || state === 'error' || state === 'aborted';
+    default:
+      return true;
+  }
+}
+
+/**
+ * Per-bucket counts for the filter chips. `all` reflects the entire
+ * input set; the rest count rows in their respective buckets.
+ */
+export function countByStatusFilter(
+  executions: readonly ExecutionSummary[],
+): Record<StatusFilter, number> {
+  const out: Record<StatusFilter, number> = {
+    all: executions.length,
+    running: 0,
+    completed: 0,
+    failed: 0,
+  };
+  for (const exec of executions) {
+    if (statusFilterMatches('running', exec.state)) out.running += 1;
+    if (statusFilterMatches('completed', exec.state)) out.completed += 1;
+    if (statusFilterMatches('failed', exec.state)) out.failed += 1;
+  }
+  return out;
+}
+
+/**
+ * Apply both the status chip and the peer dropdown to the candidate
+ * executions list — pure, so tests can drive it directly.
+ */
+export function applyTableFilters(
+  executions: readonly ExecutionSummary[],
+  filters: { status: StatusFilter; peerId: string | null },
+): ExecutionSummary[] {
+  return executions.filter((e) => {
+    if (!statusFilterMatches(filters.status, e.state)) return false;
+    if (filters.peerId && e.peerId !== filters.peerId) return false;
+    return true;
+  });
+}
+
+/**
+ * Pick the most-recent run for a given scenario. Used by Re-run
+ * latest. Returns `undefined` when the scenario has never been run.
+ */
+export function selectLatestRunForScenario(
+  executions: readonly ExecutionSummary[],
+  scenarioId: string,
+): ExecutionSummary | undefined {
+  let best: ExecutionSummary | undefined;
+  for (const exec of executions) {
+    if (exec.scenarioId !== scenarioId) continue;
+    if (!best || exec.startedAt > best.startedAt) best = exec;
+  }
+  return best;
+}

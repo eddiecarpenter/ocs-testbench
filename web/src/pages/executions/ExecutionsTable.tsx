@@ -2,15 +2,25 @@
  * Run table for the Executions list page.
  *
  * Columns: # · [Scenario] · Status · Mode · Subscriber · Progress ·
- * Duration · Started — sorted by Started descending. The Scenario
- * column is only shown in the "All runs" view (when no specific
- * scenario is selected). Row click navigates to /executions/<id>.
+ * Duration · Started · [Actions] — sorted by Started descending. The
+ * Scenario column is only shown in the "All runs" view (when no
+ * specific scenario is selected). Row click navigates to
+ * /executions/<id>; the kebab in the actions column fires a Re-run
+ * intent and never bubbles a navigation.
  *
  * Pure presentation surface; the parent feeds in a pre-filtered
  * `executions` array. Sorting and progress formatting come from
  * `runTableHelpers.ts`, where they're unit-tested.
  */
-import { Badge, Group, Table, Text } from '@mantine/core';
+import {
+  ActionIcon,
+  Badge,
+  Group,
+  Menu,
+  Table,
+  Text,
+} from '@mantine/core';
+import { IconDots, IconPlayerPlay } from '@tabler/icons-react';
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -31,11 +41,18 @@ interface ExecutionsTableProps {
   executions: readonly ExecutionSummary[];
   /** When true, render the additional "Scenario" column ("All runs" view). */
   showScenarioColumn: boolean;
+  /**
+   * Fired when the user picks Re-run from a row's kebab. The parent
+   * decides whether to launch silently (Interactive) or open a confirm
+   * modal (Continuous).
+   */
+  onRerunRow(row: ExecutionSummary): void;
 }
 
 export function ExecutionsTable({
   executions,
   showScenarioColumn,
+  onRerunRow,
 }: ExecutionsTableProps) {
   const navigate = useNavigate();
 
@@ -62,6 +79,7 @@ export function ExecutionsTable({
           <Table.Th>Progress</Table.Th>
           <Table.Th>Duration</Table.Th>
           <Table.Th>Started</Table.Th>
+          <Table.Th aria-label="Actions" style={{ width: 48 }} />
         </Table.Tr>
       </Table.Thead>
       <Table.Tbody>
@@ -123,6 +141,33 @@ export function ExecutionsTable({
               <Group gap={4} wrap="nowrap">
                 <Text size="sm">{relativeTime(row.startedAt)}</Text>
               </Group>
+            </Table.Td>
+            <Table.Td>
+              <Menu position="bottom-end" withinPortal>
+                <Menu.Target>
+                  <ActionIcon
+                    variant="subtle"
+                    color="gray"
+                    aria-label={`Run actions for #${row.id}`}
+                    data-testid={`executions-row-${row.id}-kebab`}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <IconDots size={16} />
+                  </ActionIcon>
+                </Menu.Target>
+                <Menu.Dropdown>
+                  <Menu.Item
+                    leftSection={<IconPlayerPlay size={14} />}
+                    data-testid={`executions-row-${row.id}-rerun`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRerunRow(row);
+                    }}
+                  >
+                    Re-run
+                  </Menu.Item>
+                </Menu.Dropdown>
+              </Menu>
             </Table.Td>
           </Table.Tr>
         ))}

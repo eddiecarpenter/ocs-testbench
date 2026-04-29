@@ -2,15 +2,18 @@
  * Executions list — replaces the legacy `/executions` placeholder.
  *
  * Two-pane shell: a scenario sidebar on the left (selection drives the
- * right-pane filter), a header + table on the right. URL search params
- * own the page state so deep-links and refresh round-trip cleanly:
+ * right-pane filter), a header + filter bar + run table on the right.
+ * URL search params own the page state so deep-links and refresh
+ * round-trip cleanly:
  *
  *   ?scenario=<id>           — sidebar selection (omit = "All runs")
- *   &state=<state>           — filter chip selection (matches OpenAPI v0.2)
+ *   &status=<filter>         — filter chip selection (all / running /
+ *                              completed / failed)
  *   &peer=<id>               — peer filter dropdown
  *
- * Subsequent tasks fill in the table (Task 4), filters + actions
- * (Task 5), and Start-Run dialog (Tasks 6 / 7).
+ * Task 6 / 7 plug in the Start-Run dialog; this task wires up the
+ * filter chips, peer dropdown, header CTAs, and per-row Re-run
+ * affordances.
  */
 import {
   Alert,
@@ -22,25 +25,46 @@ import {
   Text,
   Title,
 } from '@mantine/core';
-import { IconAlertTriangle, IconPencil } from '@tabler/icons-react';
-import { useCallback, useMemo } from 'react';
+import { notifications } from '@mantine/notifications';
+import {
+  IconAlertTriangle,
+  IconPencil,
+  IconPlayerPlay,
+  IconRotate,
+} from '@tabler/icons-react';
+import { useCallback, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 
 import { ApiError } from '../../api/errors';
 import { usePeers } from '../../api/resources/peers';
-import { useExecutions } from '../../api/resources/executions';
+import {
+  useExecutions,
+  useRerunExecution,
+  type ExecutionSummary,
+} from '../../api/resources/executions';
 import { useScenarios } from '../../api/resources/scenarios';
 import type { ScenarioSummary } from '../scenarios/types';
 
 import { buildSubHeader } from './buildSubHeader';
+import { ExecutionsFilterBar } from './ExecutionsFilterBar';
 import { ExecutionsSidebar } from './ExecutionsSidebar';
 import { ExecutionsTable } from './ExecutionsTable';
-import { selectScenarioForHeader } from './selectors';
+import { RerunConfirmModal } from './RerunConfirmModal';
+import {
+  applyTableFilters,
+  countByStatusFilter,
+  parseStatusFilter,
+  selectLatestRunForScenario,
+  selectScenarioForHeader,
+} from './selectors';
 
 export function ExecutionsPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+
   const scenarioId = searchParams.get('scenario');
+  const statusFilter = parseStatusFilter(searchParams.get('status'));
+  const peerFilter = searchParams.get('peer');
 
   const scenariosQuery = useScenarios();
   const peersQuery = usePeers();
@@ -50,6 +74,11 @@ export function ExecutionsPage() {
   const allExecutionsQuery = useExecutions({ limit: 500 });
   const tableQuery = useExecutions(
     scenarioId ? { scenarioId, limit: 500 } : { limit: 500 },
+  );
+  const rerun = useRerunExecution();
+
+  const [pendingRerun, setPendingRerun] = useState<ExecutionSummary | null>(
+    null,
   );
 
   const peerNameById = useMemo(() => {
@@ -63,18 +92,122 @@ export function ExecutionsPage() {
     [scenariosQuery.data, scenarioId],
   );
 
-  const handleSidebarSelect = useCallback(
-    (nextId: string | null) => {
+  const tableRows = useMemo(
+    () => tableQuery.data?.items ?? [],
+    [tableQuery.data],
+  );
+
+  const filteredRows = useMemo(
+    () =>
+      applyTableFilters(tableRows, {
+        status: statusFilter,
+        peerId: peerFilter,
+      }),
+    [tableRows, statusFilter, peerFilter],
+  );
+
+  const chipCounts = useMemo(() => countByStatusFilter(tableRows), [tableRows]);
+
+  const peerOptions = useMemo(() => {
+    const ids = new Set<string>();
+    for (const r of tableRows) {
+      if (r.peerId) ids.add(r.peerId);
+    }
+    return Array.from(ids).map((id) => ({
+      value: id,
+      label: peerNameById.get(id) ?? id,
+    }));
+  }, [tableRows, peerNameById]);
+
+  const latestRunForSelected = useMemo(
+    () =>
+      selectedScenario
+        ? selectLatestRunForScenario(tableRows, selectedScenario.id)
+        : undefined,
+    [selectedScenario, tableRows],
+  );
+
+  // ---------------------------------------------------------------------------
+  // URL helpers
+  // ---------------------------------------------------------------------------
+
+  const setParam = useCallback(
+    (key: string, value: string | null) => {
       const next = new URLSearchParams(searchParams);
-      if (nextId === null) {
-        next.delete('scenario');
+      if (value === null) {
+        next.delete(key);
       } else {
-        next.set('scenario', nextId);
+        next.set(key, value);
       }
       setSearchParams(next, { replace: false });
     },
     [searchParams, setSearchParams],
   );
+
+  const handleSidebarSelect = useCallback(
+    (nextId: string | null) => setParam('scenario', nextId),
+    [setParam],
+  );
+
+  // ---------------------------------------------------------------------------
+  // Run-launch handlers
+  // ---------------------------------------------------------------------------
+
+  const launchRerun = useCallback(
+    async (source: ExecutionSummary) => {
+      try {
+        const res = await rerun.mutateAsync(source.id);
+        const newId = res.items[0]?.id;
+        notifications.show({
+          color: 'green',
+          title: `Re-running #${source.id}…`,
+          message: newId
+            ? `New run #${newId} queued for ${source.scenarioName}`
+            : `New run queued for ${source.scenarioName}`,
+        });
+        if (newId && source.mode === 'interactive') {
+          navigate(`/executions/${encodeURIComponent(newId)}`);
+        }
+      } catch (err) {
+        notifications.show({
+          color: 'red',
+          title: 'Re-run failed',
+          message: (err as ApiError | Error).message,
+        });
+      }
+    },
+    [rerun, navigate],
+  );
+
+  const handleRerunRow = useCallback(
+    (row: ExecutionSummary) => {
+      if (row.mode === 'continuous') {
+        setPendingRerun(row);
+      } else {
+        void launchRerun(row);
+      }
+    },
+    [launchRerun],
+  );
+
+  const handleRerunLatest = useCallback(() => {
+    if (!latestRunForSelected) return;
+    void launchRerun(latestRunForSelected);
+  }, [launchRerun, latestRunForSelected]);
+
+  const handleStartRun = useCallback(() => {
+    // Task 6 / 7 wires the Start-Run dialog. For now, surface the
+    // intent so QA can see the CTA is reachable.
+    notifications.show({
+      color: 'blue',
+      title: 'Start-Run dialog',
+      message: 'The Start-Run dialog ships in Task 6.',
+    });
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
 
   if (scenariosQuery.isError) {
     return (
@@ -133,19 +266,51 @@ export function ExecutionsPage() {
             )}
           </Stack>
 
-          {selectedScenario && (
+          <Group gap="xs" wrap="nowrap">
+            {selectedScenario && (
+              <>
+                <Button
+                  variant="default"
+                  leftSection={<IconPencil size={14} />}
+                  onClick={() =>
+                    navigate(`/scenarios/${encodeURIComponent(selectedScenario.id)}`)
+                  }
+                  data-testid="executions-edit-scenario"
+                >
+                  Edit scenario
+                </Button>
+                <Button
+                  variant="default"
+                  leftSection={<IconRotate size={14} />}
+                  onClick={handleRerunLatest}
+                  disabled={!latestRunForSelected || rerun.isPending}
+                  loading={rerun.isPending}
+                  data-testid="executions-rerun-latest"
+                >
+                  Re-run latest
+                </Button>
+              </>
+            )}
             <Button
-              variant="default"
-              leftSection={<IconPencil size={14} />}
-              onClick={() =>
-                navigate(`/scenarios/${encodeURIComponent(selectedScenario.id)}`)
-              }
-              data-testid="executions-edit-scenario"
+              leftSection={<IconPlayerPlay size={14} />}
+              onClick={handleStartRun}
+              data-testid="executions-start-run"
             >
-              Edit scenario
+              Run scenario
             </Button>
-          )}
+          </Group>
         </Group>
+
+        <ExecutionsFilterBar
+          status={statusFilter}
+          counts={chipCounts}
+          onStatusChange={(next) =>
+            setParam('status', next === 'all' ? null : next)
+          }
+          peerOptions={peerOptions}
+          peerId={peerFilter}
+          onPeerChange={(next) => setParam('peer', next)}
+        />
 
         <Card withBorder padding="md" data-testid="executions-table">
           {tableQuery.isLoading ? (
@@ -163,12 +328,25 @@ export function ExecutionsPage() {
             </Alert>
           ) : (
             <ExecutionsTable
-              executions={tableQuery.data?.items ?? []}
+              executions={filteredRows}
               showScenarioColumn={!scenarioId}
+              onRerunRow={handleRerunRow}
             />
           )}
         </Card>
       </Stack>
+
+      <RerunConfirmModal
+        source={pendingRerun}
+        isPending={rerun.isPending}
+        onClose={() => {
+          if (!rerun.isPending) setPendingRerun(null);
+        }}
+        onConfirm={() => {
+          if (!pendingRerun) return;
+          void launchRerun(pendingRerun).finally(() => setPendingRerun(null));
+        }}
+      />
     </Group>
   );
 }
