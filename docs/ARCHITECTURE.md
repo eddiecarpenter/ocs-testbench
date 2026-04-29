@@ -920,6 +920,14 @@ client.
 Dark mode / theme switching is included in the MVP. Storybook is used for
 component prototyping and visual verification during development.
 
+#### UX/UI specification
+
+Visual and interaction rules — colour palette, typography, button
+variants, form patterns, modal behaviour, toast persistence, accessibility
+requirements — live in **[`docs/UX_DESIGN.md`](UX_DESIGN.md)**. That file is
+the canonical reference for screen and component design and is consumed
+by humans and AI agents when authoring or reviewing frontend code.
+
 #### CRUD UI conventions
 
 Applies to all list-resource pages (peers, subscribers, scenarios, …):
@@ -929,9 +937,9 @@ Applies to all list-resource pages (peers, subscribers, scenarios, …):
 - **Create and edit** open a right-hand **Drawer** with a sectioned form
   body and footer actions.
 - **Delete** is not a row action. It lives inside the edit drawer footer
-  (red subtle button, left-aligned) so the resource's identity is visible
-  at confirmation time. Delete itself routes through a small confirmation
-  modal.
+  so the resource's identity is visible at confirmation time, and routes
+  through a small confirmation modal. Visual style of the destructive
+  button is specified in `UX_DESIGN.md` §4.2.
 - Field-level validation errors (RFC 7807 422 with `errors` map keyed by
   JSON Pointer) are routed onto form fields via `@mantine/form`'s
   `setErrors()`; non-field errors surface as toasts.
