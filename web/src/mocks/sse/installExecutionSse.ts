@@ -38,6 +38,10 @@ import type {
 } from '../../api/resources/executions';
 import type { Scenario } from '../../pages/scenarios/types';
 import type { SseEventPayload } from '../../pages/debugger/executionStore';
+import {
+  expandScenarioSteps,
+  type ExpandedStep,
+} from '../../pages/scenarios/expandSteps';
 
 // ---------------------------------------------------------------------------
 // Public surface
@@ -241,11 +245,17 @@ interface BuildPlanInput {
 export function buildPlan(input: BuildPlanInput): DriverEvent[] {
   const out: DriverEvent[] = [];
 
+  // Pre-expand the scenario steps so a repeating UPDATE produces one
+  // timeline slot per round. Both the step-event indices and the
+  // terminal `totalSteps` count off this expanded length, so the
+  // Progress pane and the cursor stay coherent.
+  const expanded = expandScenarioSteps(input.scenario.steps);
+
   // 1. Always lead with `execution.started` (paced[0] — fired
   //    synchronously by `installExecutionSse`).
   out.push({
     type: 'execution.started',
-    data: snapshotForState(input, 'running', 0, []),
+    data: snapshotForState(input, 'running', 0, [], expanded.length),
   });
 
   if (input.mode === 'continuous') {
@@ -261,60 +271,47 @@ export function buildPlan(input: BuildPlanInput): DriverEvent[] {
       data: snapshotForState(
         input,
         terminalState(input.outcome),
-        input.scenario.steps.length,
-        completedSteps(input),
+        expanded.length,
+        completedSteps(input, expanded),
+        expanded.length,
       ),
     });
     return out;
   }
 
-  // Interactive: per-step (sending → responded), then terminal.
+  // Interactive: per-expanded-step (sending → responded), then terminal.
   const steps: StepRecord[] = [];
-  for (let i = 0; i < input.scenario.steps.length; i += 1) {
+  for (let i = 0; i < expanded.length; i += 1) {
     out.push({
       type: 'step.sending',
       data: { executionId: input.executionId, stepIndex: i },
     });
-    const step = buildStepRecord(input, i);
+    const step = buildStepRecord(input, expanded, i);
     steps.push(step);
     out.push({
       type: 'step.responded',
       data: { executionId: input.executionId, step },
     });
   }
+  const total = expanded.length;
   // Terminal: the outcome decides which event variant fires.
   if (input.outcome === 'failure') {
     out.push({
       type: 'execution.failed',
       data: {
-        ...snapshotForState(
-          input,
-          'failure',
-          input.scenario.steps.length,
-          steps,
-        ),
+        ...snapshotForState(input, 'failure', total, steps, total),
         failureReason: 'Assertion failed (mock fixture)',
       },
     });
   } else if (input.outcome === 'aborted') {
     out.push({
       type: 'execution.aborted',
-      data: snapshotForState(
-        input,
-        'aborted',
-        input.scenario.steps.length,
-        steps,
-      ),
+      data: snapshotForState(input, 'aborted', total, steps, total),
     });
   } else {
     out.push({
       type: 'execution.completed',
-      data: snapshotForState(
-        input,
-        'success',
-        input.scenario.steps.length,
-        steps,
-      ),
+      data: snapshotForState(input, 'success', total, steps, total),
     });
   }
   return out;
@@ -331,6 +328,7 @@ function snapshotForState(
   state: ExecutionState,
   cursor: number,
   steps: StepRecord[],
+  totalSteps: number,
 ): Execution {
   return {
     id: input.executionId,
@@ -342,24 +340,28 @@ function snapshotForState(
     finishedAt:
       state === 'success' || state === 'failure' || state === 'aborted'
         ? new Date(
-            input.startedAtMs +
-              input.scenario.steps.length * input.tickMs * 2,
+            input.startedAtMs + totalSteps * input.tickMs * 2,
           ).toISOString()
         : undefined,
     currentStep: cursor,
-    totalSteps: input.scenario.steps.length,
+    totalSteps,
     steps,
     context: { system: {}, user: {}, extracted: {} },
   };
 }
 
-function buildStepRecord(input: BuildPlanInput, i: number): StepRecord {
-  const scenarioStep = input.scenario.steps[i];
+function buildStepRecord(
+  input: BuildPlanInput,
+  expanded: ExpandedStep[],
+  i: number,
+): StepRecord {
+  const slot = expanded[i];
+  const scenarioStep = slot.source;
   const startedAtMs = input.startedAtMs + i * input.tickMs * 2;
   const finishedAtMs = startedAtMs + input.tickMs;
-  // Only the LAST step honours `failure` outcome; intermediate steps
-  // always succeed. Mirrors the existing fixtures' behaviour.
-  const lastIndex = input.scenario.steps.length - 1;
+  // Only the LAST timeline slot honours `failure` outcome; intermediate
+  // steps always succeed. Mirrors the existing fixtures' behaviour.
+  const lastIndex = expanded.length - 1;
   const isTerminalFail = input.outcome === 'failure' && i === lastIndex;
   const state: StepRecord['state'] = isTerminalFail ? 'failure' : 'success';
 
@@ -369,7 +371,7 @@ function buildStepRecord(input: BuildPlanInput, i: number): StepRecord {
   return {
     n: i + 1,
     kind: scenarioStep.kind,
-    label: deriveLabel(scenarioStep, requestType),
+    label: deriveLabel(scenarioStep, requestType, slot),
     state,
     startedAt: new Date(startedAtMs).toISOString(),
     finishedAt: new Date(finishedAtMs).toISOString(),
@@ -393,22 +395,32 @@ function buildStepRecord(input: BuildPlanInput, i: number): StepRecord {
 function deriveLabel(
   step: BuildPlanInput['scenario']['steps'][number],
   requestType: string | undefined,
+  slot?: ExpandedStep,
 ): string {
   if (step.kind === 'request' && requestType) {
     // Map the RequestType enum to the wire-CCR shorthand the rest of
     // the UI uses ('CCR-I' / 'CCR-U' / 'CCR-T' / 'CCR-E').
-    switch (requestType) {
-      case 'INITIAL':
-        return 'CCR-I';
-      case 'UPDATE':
-        return 'CCR-U';
-      case 'TERMINATE':
-        return 'CCR-T';
-      case 'EVENT':
-        return 'CCR-E';
-      default:
-        return requestType;
+    const base = (() => {
+      switch (requestType) {
+        case 'INITIAL':
+          return 'CCR-I';
+        case 'UPDATE':
+          return 'CCR-U';
+        case 'TERMINATE':
+          return 'CCR-T';
+        case 'EVENT':
+          return 'CCR-E';
+        default:
+          return requestType;
+      }
+    })();
+    // For repeating UPDATE rounds, suffix the round position so the
+    // Progress pane reads `CCR-U (round 2/4)` rather than 4 identical
+    // `CCR-U` rows. Single-shot UPDATEs render unsuffixed.
+    if (slot?.roundIndex && slot?.totalRounds) {
+      return `${base} (round ${slot.roundIndex}/${slot.totalRounds})`;
     }
+    return base;
   }
   if (step.kind === 'pause') return step.label ?? 'pause';
   if (step.kind === 'wait') return 'wait';
@@ -416,8 +428,11 @@ function deriveLabel(
   return step.kind;
 }
 
-function completedSteps(input: BuildPlanInput): StepRecord[] {
-  return input.scenario.steps.map((_, i) => buildStepRecord(input, i));
+function completedSteps(
+  input: BuildPlanInput,
+  expanded: ExpandedStep[],
+): StepRecord[] {
+  return expanded.map((_, i) => buildStepRecord(input, expanded, i));
 }
 
 // ---------------------------------------------------------------------------

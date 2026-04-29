@@ -40,4 +40,18 @@ export type PauseStep = components['schemas']['PauseStep'];
 export type ServiceSelection = components['schemas']['ServiceSelection'];
 export type VarValue = components['schemas']['VarValue'];
 
+/**
+ * Repeat policy for an UPDATE step. Causes the engine to expand the
+ * step at runtime into a series of CCR-UPDATEs separated by
+ * `delayMs`, bounded by `times` and/or `until`.
+ *
+ * The schema-level `if/then/else` constraint scopes this to UPDATE
+ * steps only — INITIAL / TERMINATE / EVENT cannot carry it.
+ */
+export type UpdateRepeatPolicy =
+  components['schemas']['UpdateRepeatPolicy'];
+
+/** Structured comparison predicate used by `repeat.until`. */
+export type Predicate = components['schemas']['Predicate'];
+
 export type Problem = components['schemas']['Problem'];

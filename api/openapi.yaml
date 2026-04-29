@@ -1663,6 +1663,75 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ResultHandler'
+        repeat:
+          $ref: '#/components/schemas/UpdateRepeatPolicy'
+          description: |
+            Repeat policy. Legal ONLY when `requestType: UPDATE`. Causes
+            the engine to expand this step at runtime into N CCR-UPDATEs
+            separated by `delayMs`, bounded by `times` and/or `until`.
+            INITIAL / TERMINATE / EVENT steps reject this field — see
+            the conditional schema below.
+      # Type narrowing — `repeat` is only legal on UPDATE steps.
+      if:
+        properties:
+          requestType:
+            const: UPDATE
+      then: {}
+      else:
+        not:
+          required: [repeat]
+
+    UpdateRepeatPolicy:
+      type: object
+      description: |
+        Repeat policy for an UPDATE step. The step expands into a
+        series of CCR-UPDATEs, separated by `delayMs`, bounded by
+        `times` (hard cap on iterations) and/or `until` (exit
+        predicate evaluated after each CCA). At least one bound must
+        be present — an unbounded loop is invalid.
+      properties:
+        times:
+          type: integer
+          minimum: 1
+          description: |
+            Maximum number of UPDATE iterations. Includes the first
+            CCR-UPDATE (i.e. `times: 1` is equivalent to no repeat).
+        until:
+          $ref: '#/components/schemas/Predicate'
+          description: |
+            Predicate evaluated against the live context after each
+            CCA. When true, the loop exits.
+        delayMs:
+          type: integer
+          minimum: 0
+          default: 0
+          description: |
+            Sleep between iterations — after CCA arrives, before the
+            next CCR is sent. No leading or trailing delay; insert a
+            `wait` step before/after for those.
+      anyOf:
+        - required: [times]
+        - required: [until]
+
+    Predicate:
+      type: object
+      description: |
+        Structured comparison predicate used by `repeat.until`. The
+        `variable` must be the name of a declared scenario variable
+        (system or user). `value` is compared with the named operator;
+        type coercion follows the variable's declared type.
+      required: [variable, op, value]
+      properties:
+        variable:
+          type: string
+        op:
+          type: string
+          enum: [eq, ne, lt, lte, gt, gte]
+        value:
+          oneOf:
+            - type: number
+            - type: string
+            - type: boolean
 
     ConsumeStep:
       type: object

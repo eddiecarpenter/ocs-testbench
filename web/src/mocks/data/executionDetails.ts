@@ -18,6 +18,10 @@ import type {
   ExecutionContextSnapshot,
   StepRecord,
 } from '../../api/resources/executions';
+import {
+  expandScenarioSteps,
+  type ExpandedStep,
+} from '../../pages/scenarios/expandSteps';
 import type { Scenario } from '../../pages/scenarios/types';
 import { executionFixtures } from './executions';
 import { scenarioFixtures } from './scenarios';
@@ -36,10 +40,32 @@ function scenarioFor(scenarioId: string): Scenario {
   );
 }
 
-/** Display label for a step row. CCR-INITIAL / CCR-UPDATE / etc. for requests; kind for others. */
-function labelFor(step: Scenario['steps'][number]): string {
+/**
+ * Display label for an expanded step — matches the SSE driver's
+ * `deriveLabel` shorthand (`CCR-I` / `CCR-U` / `CCR-T` / `CCR-E`)
+ * and suffixes `(round N/M)` for repeating UPDATE rounds.
+ */
+function labelForExpanded(slot: ExpandedStep): string {
+  const step = slot.source;
   if (step.kind === 'request' && step.requestType) {
-    return `CCR-${step.requestType}`;
+    const base = (() => {
+      switch (step.requestType) {
+        case 'INITIAL':
+          return 'CCR-I';
+        case 'UPDATE':
+          return 'CCR-U';
+        case 'TERMINATE':
+          return 'CCR-T';
+        case 'EVENT':
+          return 'CCR-E';
+        default:
+          return step.requestType;
+      }
+    })();
+    if (slot.roundIndex && slot.totalRounds) {
+      return `${base} (round ${slot.roundIndex}/${slot.totalRounds})`;
+    }
+    return base;
   }
   if (step.kind === 'pause') return step.label ?? 'pause';
   if (step.kind === 'wait') return 'wait';
@@ -47,9 +73,12 @@ function labelFor(step: Scenario['steps'][number]): string {
   return step.kind;
 }
 
-/** Step count for an execution's source scenario. Used by the executions list. */
+/**
+ * Step count for an execution's source scenario, after `repeat`
+ * expansion. Used by the executions list to render `n / total`.
+ */
 export function defaultTotalStepsForScenario(scenarioId: string): number {
-  return scenarioFor(scenarioId).steps.length;
+  return expandScenarioSteps(scenarioFor(scenarioId).steps).length;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,26 +164,60 @@ function buildSampleAssertions(
 }
 
 /**
- * Pick the per-step variant used to colour the CCR/CCA payloads.
+ * Pick the per-slot variant used to colour the CCR/CCA payloads.
  *
- *   - The LAST step of a failure-outcome run → `terminal-fail` (red).
- *   - The UPDATE step (if the scenario has one) → `assertion-fail`
- *     so the right pane's failed-assertion branch is reachable on
- *     a *successful* run.
+ *   - The LAST timeline slot of a failure-outcome run → `terminal-fail` (red).
+ *   - Any UPDATE slot → `assertion-fail` so the right pane's failed-
+ *     assertion branch is reachable on a *successful* run.
  *   - Everything else → `success`.
  */
-function variantForStep(
-  scenario: Scenario,
+function variantForExpanded(
+  expanded: ExpandedStep[],
   i: number,
   outcome: 'success' | 'failure',
 ): 'success' | 'assertion-fail' | 'terminal-fail' {
-  const lastIndex = scenario.steps.length - 1;
+  const lastIndex = expanded.length - 1;
   if (outcome === 'failure' && i === lastIndex) return 'terminal-fail';
-  const step = scenario.steps[i];
+  const step = expanded[i].source;
   if (step.kind === 'request' && step.requestType === 'UPDATE') {
-    return 'assertion-fail';
+    // For repeating UPDATEs, only flag the first round as assertion-
+    // fail so the right pane has one example without burying it under
+    // every round of a noisy scenario.
+    const slot = expanded[i];
+    if (!slot.roundIndex || slot.roundIndex === 1) return 'assertion-fail';
   }
   return 'success';
+}
+
+function recordFor(
+  slot: ExpandedStep,
+  i: number,
+  variant: 'success' | 'assertion-fail' | 'terminal-fail',
+  startedAt: string,
+  finishedAt: string,
+  durationMs: number,
+  state: StepRecord['state'],
+): StepRecord {
+  const step = slot.source;
+  const isTerminalFail = variant === 'terminal-fail';
+  return {
+    n: i + 1,
+    kind: step.kind,
+    ...(step.kind === 'request' && step.requestType
+      ? { requestType: step.requestType }
+      : {}),
+    label: labelForExpanded(slot),
+    state,
+    startedAt,
+    finishedAt,
+    durationMs,
+    request: buildSampleRequest(step, i),
+    response: buildSampleResponse(step, i, variant),
+    assertionResults: buildSampleAssertions(variant),
+    ...(isTerminalFail
+      ? { errorDetail: 'DIAMETER_UNABLE_TO_COMPLY (5012)' }
+      : {}),
+  };
 }
 
 function buildCompletedSteps(
@@ -163,32 +226,24 @@ function buildCompletedSteps(
   finishedAtMs: number,
   outcome: 'success' | 'failure',
 ): StepRecord[] {
-  const total = scenario.steps.length;
+  const expanded = expandScenarioSteps(scenario.steps);
+  const total = expanded.length;
   const span = Math.max(1, finishedAtMs - startedAtMs);
   const bucket = Math.max(1, Math.floor(span / total));
-  return scenario.steps.map((step, i): StepRecord => {
+  return expanded.map((slot, i): StepRecord => {
     const started = startedAtMs + i * bucket;
     const finished = i === total - 1 ? finishedAtMs : started + bucket;
-    const variant = variantForStep(scenario, i, outcome);
+    const variant = variantForExpanded(expanded, i, outcome);
     const isTerminalFail = variant === 'terminal-fail';
-    return {
-      n: i + 1,
-      kind: step.kind,
-      ...(step.kind === 'request' && step.requestType
-        ? { requestType: step.requestType }
-        : {}),
-      label: labelFor(step),
-      state: isTerminalFail ? 'failure' : 'success',
-      startedAt: new Date(started).toISOString(),
-      finishedAt: new Date(finished).toISOString(),
-      durationMs: finished - started,
-      request: buildSampleRequest(step, i),
-      response: buildSampleResponse(step, i, variant),
-      assertionResults: buildSampleAssertions(variant),
-      ...(isTerminalFail
-        ? { errorDetail: 'DIAMETER_UNABLE_TO_COMPLY (5012)' }
-        : {}),
-    };
+    return recordFor(
+      slot,
+      i,
+      variant,
+      new Date(started).toISOString(),
+      new Date(finished).toISOString(),
+      finished - started,
+      isTerminalFail ? 'failure' : 'success',
+    );
   });
 }
 
@@ -197,30 +252,27 @@ function buildRunningSteps(
   startedAtMs: number,
   completedSoFar: number,
 ): StepRecord[] {
+  const expanded = expandScenarioSteps(scenario.steps);
   const out: StepRecord[] = [];
   let cursor = startedAtMs;
-  const limit = Math.min(completedSoFar, scenario.steps.length);
+  const limit = Math.min(completedSoFar, expanded.length);
   for (let i = 0; i < limit; i++) {
-    const step = scenario.steps[i];
-    const variant = variantForStep(scenario, i, 'success');
+    const slot = expanded[i];
+    const variant = variantForExpanded(expanded, i, 'success');
     const duration = 20 + ((i * 7) % 35); // deterministic-ish jitter
     const started = cursor;
     const finished = cursor + duration;
-    out.push({
-      n: i + 1,
-      kind: step.kind,
-      ...(step.kind === 'request' && step.requestType
-        ? { requestType: step.requestType }
-        : {}),
-      label: labelFor(step),
-      state: 'success',
-      startedAt: new Date(started).toISOString(),
-      finishedAt: new Date(finished).toISOString(),
-      durationMs: duration,
-      request: buildSampleRequest(step, i),
-      response: buildSampleResponse(step, i, variant),
-      assertionResults: buildSampleAssertions(variant),
-    });
+    out.push(
+      recordFor(
+        slot,
+        i,
+        variant,
+        new Date(started).toISOString(),
+        new Date(finished).toISOString(),
+        duration,
+        'success',
+      ),
+    );
     cursor = finished;
   }
   return out;
@@ -239,7 +291,9 @@ export function buildExecutionDetail(
   const summary = executionFixtures.find((e) => e.id === id);
   if (!summary) return undefined;
   const scenario = scenarioFor(summary.scenarioId);
-  const total = scenario.steps.length;
+  // Total reflects the post-expansion timeline so a repeating UPDATE
+  // counts each round.
+  const total = expandScenarioSteps(scenario.steps).length;
 
   if (summary.state === 'running') {
     const startedAtMs = Date.parse(summary.startedAt);

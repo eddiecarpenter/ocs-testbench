@@ -1030,6 +1030,52 @@ export interface components {
             /** @description Pre-send predicates. On failure the step is skipped. */
             guards?: string[];
             resultHandlers?: components["schemas"]["ResultHandler"][];
+            /**
+             * @description Repeat policy. Legal ONLY when `requestType: UPDATE`. Causes
+             *     the engine to expand this step at runtime into N CCR-UPDATEs
+             *     separated by `delayMs`, bounded by `times` and/or `until`.
+             *     INITIAL / TERMINATE / EVENT steps reject this field — see
+             *     the conditional schema below.
+             */
+            repeat?: components["schemas"]["UpdateRepeatPolicy"];
+        };
+        /**
+         * @description Repeat policy for an UPDATE step. The step expands into a
+         *     series of CCR-UPDATEs, separated by `delayMs`, bounded by
+         *     `times` (hard cap on iterations) and/or `until` (exit
+         *     predicate evaluated after each CCA). At least one bound must
+         *     be present — an unbounded loop is invalid.
+         */
+        UpdateRepeatPolicy: {
+            /**
+             * @description Maximum number of UPDATE iterations. Includes the first
+             *     CCR-UPDATE (i.e. `times: 1` is equivalent to no repeat).
+             */
+            times?: number;
+            /**
+             * @description Predicate evaluated against the live context after each
+             *     CCA. When true, the loop exits.
+             */
+            until?: components["schemas"]["Predicate"];
+            /**
+             * @description Sleep between iterations — after CCA arrives, before the
+             *     next CCR is sent. No leading or trailing delay; insert a
+             *     `wait` step before/after for those.
+             * @default 0
+             */
+            delayMs: number;
+        } | unknown | unknown;
+        /**
+         * @description Structured comparison predicate used by `repeat.until`. The
+         *     `variable` must be the name of a declared scenario variable
+         *     (system or user). `value` is compared with the named operator;
+         *     type coercion follows the variable's declared type.
+         */
+        Predicate: {
+            variable: string;
+            /** @enum {string} */
+            op: "eq" | "ne" | "lt" | "lte" | "gt" | "gte";
+            value: number | string | boolean;
         };
         /**
          * @description Only legal in `sessionMode: session`. Expands at run time into an

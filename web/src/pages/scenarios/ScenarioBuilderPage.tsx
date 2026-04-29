@@ -53,6 +53,7 @@ import { BuilderFooter } from './BuilderFooter';
 import { BuilderHeader } from './BuilderHeader';
 import { BuilderTabs } from './BuilderTabs';
 import { DirtyGuard } from './DirtyGuard';
+import { validateSteps } from './tabs/stepsValidation';
 import { makeNewScenarioDraft, toScenarioInput } from './defaults';
 
 /** Strip server-owned fields from a Scenario to use as a duplicate seed. */
@@ -159,6 +160,18 @@ export function ScenarioBuilderPage() {
     if (!draft) return;
     const input = toScenarioInput(draft);
     setFieldErrors({});
+    // UX-layer step validation runs first — surface a single rolled-up
+    // toast for things like an unbounded UPDATE repeat policy before
+    // we hit the schema's `if/then/else` / `anyOf` constraints at the
+    // mock handler. The schema is still the contractual backstop.
+    const stepProblems = validateSteps(draft.steps, draft.sessionMode);
+    if (stepProblems.length > 0) {
+      notifyError({
+        title: 'Step validation failed',
+        message: stepProblems.join('\n'),
+      });
+      return;
+    }
     try {
       const saved = isNew
         ? await create.mutateAsync(input)

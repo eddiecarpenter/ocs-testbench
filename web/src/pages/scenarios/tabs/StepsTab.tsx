@@ -12,7 +12,9 @@
 import {
   ActionIcon,
   Badge,
+  Button,
   Card,
+  Checkbox,
   Group,
   Menu,
   NumberInput,
@@ -30,6 +32,7 @@ import {
   IconGripVertical,
   IconPlus,
   IconTrash,
+  IconX,
 } from '@tabler/icons-react';
 import {
   DndContext,
@@ -55,10 +58,12 @@ import { useScenarioDraftStore } from '../scenarioDraftStore';
 import type {
   ConsumeStep,
   PauseStep,
+  Predicate,
   RequestStep,
   RequestType,
   ScenarioStep,
   SessionMode,
+  UpdateRepeatPolicy,
   VarValue,
   WaitStep,
 } from '../types';
@@ -265,11 +270,21 @@ function StepEditor({
 
       <Select
         label="Step kind"
+        // `consume` is intentionally not offered for new steps — the
+        // "Update with repeat" affordance under Request·UPDATE captures
+        // the same capability with cleaner naming. Existing scenarios
+        // that already carry `consume` steps still load and edit (the
+        // ConsumeFields branch below renders for them); the user just
+        // can't *create* new consume steps from the dropdown.
         data={[
           { value: 'request', label: 'Request' },
-          { value: 'consume', label: 'Consume' },
           { value: 'wait', label: 'Wait' },
           { value: 'pause', label: 'Pause' },
+          // Surfaced only when the step is already a consume — keeps
+          // the dropdown from hiding the row's actual kind.
+          ...(step.kind === 'consume'
+            ? [{ value: 'consume', label: 'Consume (legacy)' }]
+            : []),
         ]}
         value={step.kind}
         onChange={(v) => {
@@ -281,9 +296,6 @@ function StepEditor({
                 sessionMode === 'session' ? 'UPDATE' : 'EVENT',
             };
             onChange(fresh);
-          } else if (v === 'consume') {
-            const fresh: ConsumeStep = { kind: 'consume', windowMs: 1000 };
-            onChange(fresh);
           } else if (v === 'wait') {
             const fresh: WaitStep = { kind: 'wait', durationMs: 1000 };
             onChange(fresh);
@@ -291,6 +303,7 @@ function StepEditor({
             const fresh: PauseStep = { kind: 'pause' };
             onChange(fresh);
           }
+          // No `consume` create path — see the dropdown comment above.
         }}
         allowDeselect={false}
       />
@@ -355,6 +368,8 @@ function RequestFields({ step, sessionMode, variableNames, onChange }: RequestFi
     ? `Request type ${step.requestType} is not legal under sessionMode ${sessionMode}`
     : null;
 
+  const isUpdate = step.requestType === 'UPDATE';
+
   return (
     <Stack gap="md">
       <Select
@@ -367,19 +382,228 @@ function RequestFields({ step, sessionMode, variableNames, onChange }: RequestFi
           }),
         )}
         value={step.requestType}
-        onChange={(v) =>
-          v && onChange({ ...step, requestType: v as RequestType })
-        }
+        onChange={(v) => {
+          if (!v) return;
+          const next: RequestStep = { ...step, requestType: v as RequestType };
+          // `repeat` is UPDATE-only per the schema's if/then/else
+          // narrowing — strip it when the user picks anything else
+          // so the saved scenario stays valid.
+          if (v !== 'UPDATE' && next.repeat !== undefined) {
+            delete next.repeat;
+          }
+          onChange(next);
+        }}
         error={requestTypeError}
         allowDeselect={false}
         data-testid="step-request-type"
       />
+
+      {isUpdate && (
+        <RepeatPolicyEditor
+          policy={step.repeat}
+          variableNames={variableNames}
+          onChange={(policy) => {
+            if (policy === undefined) {
+              const { repeat: _drop, ...rest } = step;
+              void _drop;
+              onChange(rest);
+            } else {
+              onChange({ ...step, repeat: policy });
+            }
+          }}
+        />
+      )}
 
       <OverridesEditor
         overrides={step.overrides ?? {}}
         variableNames={variableNames}
         onChange={(overrides) => onChange({ ...step, overrides })}
       />
+    </Stack>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Repeat-policy editor — UPDATE-only
+// ---------------------------------------------------------------------------
+
+interface RepeatPolicyEditorProps {
+  policy: UpdateRepeatPolicy | undefined;
+  variableNames: string[];
+  onChange: (policy: UpdateRepeatPolicy | undefined) => void;
+}
+
+const PREDICATE_OPS: { value: Predicate['op']; label: string }[] = [
+  { value: 'lt', label: '<' },
+  { value: 'lte', label: '≤' },
+  { value: 'eq', label: '=' },
+  { value: 'ne', label: '≠' },
+  { value: 'gte', label: '≥' },
+  { value: 'gt', label: '>' },
+];
+
+function RepeatPolicyEditor({
+  policy,
+  variableNames,
+  onChange,
+}: RepeatPolicyEditorProps) {
+  const enabled = policy !== undefined;
+  const hasTimes = policy?.times !== undefined;
+  const hasUntil = policy?.until !== undefined;
+  // Schema requires at least one bound — surface that as a form-level
+  // validation message so the user knows why the save would fail.
+  const missingBound = enabled && !hasTimes && !hasUntil;
+
+  return (
+    <Stack gap="xs" data-testid="step-repeat-editor">
+      <Checkbox
+        label="Repeat this step"
+        description="Send the CCR-UPDATE multiple times in a loop, optionally bounded by a count and/or an exit condition."
+        checked={enabled}
+        onChange={(e) => {
+          if (e.currentTarget.checked) {
+            onChange({ times: 1, delayMs: 0 });
+          } else {
+            onChange(undefined);
+          }
+        }}
+      />
+
+      {enabled && (
+        <Stack gap="sm" pl="md">
+          <Group gap="xs" align="flex-end" grow>
+            <NumberInput
+              label="Repeat (times)"
+              description="Hard cap on iterations. Includes the first CCR-UPDATE."
+              min={1}
+              value={policy?.times ?? ''}
+              onChange={(v) =>
+                onChange({
+                  ...(policy ?? {}),
+                  times: typeof v === 'number' && v >= 1 ? v : undefined,
+                })
+              }
+              data-testid="step-repeat-times"
+            />
+            <NumberInput
+              label="Delay between (ms)"
+              description="Sleep between iterations — after CCA, before next CCR."
+              min={0}
+              value={policy?.delayMs ?? 0}
+              onChange={(v) =>
+                onChange({
+                  ...(policy ?? {}),
+                  delayMs: typeof v === 'number' && v >= 0 ? v : 0,
+                })
+              }
+              data-testid="step-repeat-delay"
+            />
+          </Group>
+
+          <Stack gap={4}>
+            <Text size="sm" fw={500}>
+              Stop when (optional)
+            </Text>
+            {hasUntil ? (
+              <Group gap="xs" wrap="nowrap" align="center">
+                <Select
+                  data={variableNames.map((n) => ({ value: n, label: n }))}
+                  value={policy?.until?.variable ?? null}
+                  searchable
+                  placeholder="Variable"
+                  onChange={(v) =>
+                    v &&
+                    onChange({
+                      ...(policy ?? {}),
+                      until: {
+                        ...(policy?.until ?? { op: 'gte', value: 0 }),
+                        variable: v,
+                      },
+                    })
+                  }
+                  style={{ flex: 1 }}
+                  data-testid="step-repeat-until-variable"
+                />
+                <Select
+                  data={PREDICATE_OPS}
+                  value={policy?.until?.op ?? 'gte'}
+                  onChange={(v) =>
+                    v &&
+                    onChange({
+                      ...(policy ?? {}),
+                      until: {
+                        ...(policy?.until ?? { variable: '', value: 0 }),
+                        op: v as Predicate['op'],
+                      },
+                    })
+                  }
+                  allowDeselect={false}
+                  w={80}
+                  data-testid="step-repeat-until-op"
+                />
+                <input
+                  value={String(policy?.until?.value ?? '')}
+                  placeholder="Value"
+                  onChange={(e) => {
+                    const raw = e.currentTarget.value;
+                    // Cheap coercion — number when parseable, else string.
+                    const num = Number(raw);
+                    const value: Predicate['value'] =
+                      raw !== '' && Number.isFinite(num) ? num : raw;
+                    onChange({
+                      ...(policy ?? {}),
+                      until: {
+                        ...(policy?.until ?? { variable: '', op: 'gte' }),
+                        value,
+                      },
+                    });
+                  }}
+                  style={{ flex: 1, padding: '6px 8px' }}
+                  data-testid="step-repeat-until-value"
+                />
+                <ActionIcon
+                  variant="subtle"
+                  color="red"
+                  aria-label="Remove stop condition"
+                  onClick={() => {
+                    const next = { ...(policy ?? {}) };
+                    delete next.until;
+                    onChange(next);
+                  }}
+                >
+                  <IconX size={14} />
+                </ActionIcon>
+              </Group>
+            ) : (
+              <Button
+                variant="default"
+                size="xs"
+                leftSection={<IconPlus size={12} />}
+                onClick={() =>
+                  onChange({
+                    ...(policy ?? {}),
+                    until: {
+                      variable: variableNames[0] ?? '',
+                      op: 'gte',
+                      value: 0,
+                    },
+                  })
+                }
+                data-testid="step-repeat-add-until"
+              >
+                Add stop condition
+              </Button>
+            )}
+          </Stack>
+
+          {missingBound && (
+            <Text size="xs" c="red">
+              Provide either a `times` cap or a `stop when` condition —
+              an unbounded loop is invalid.
+            </Text>
+          )}
+        </Stack>
+      )}
     </Stack>
   );
 }

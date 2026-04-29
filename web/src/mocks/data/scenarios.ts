@@ -109,29 +109,39 @@ function makeScenario(opts: {
   origin?: Scenario['origin'];
   subscriberId?: string;
   peerId?: string;
+  /**
+   * Optional override for the UPDATE step's repeat policy. When set,
+   * the scenario's UPDATE step expands at run time into N CCR-UPDATEs
+   * separated by `delayMs`, bounded by `times` and/or `until` — see
+   * §6 of the architecture and the OpenAPI `UpdateRepeatPolicy`
+   * schema.
+   */
+  updateRepeat?: Scenario['steps'][number] extends infer S
+    ? S extends { kind: 'request'; requestType: 'UPDATE'; repeat?: infer R }
+      ? R
+      : never
+    : never;
 }): Scenario {
+  const updateStep =
+    opts.updateRepeat
+      ? ({
+          kind: 'request' as const,
+          requestType: 'UPDATE' as const,
+          repeat: opts.updateRepeat,
+        } as Scenario['steps'][number])
+      : ({
+          kind: 'request' as const,
+          requestType: 'UPDATE' as const,
+        } as Scenario['steps'][number]);
+
   const steps: Scenario['steps'] =
     opts.sessionMode === 'session'
       ? [
-          {
-            kind: 'request',
-            requestType: 'INITIAL',
-          },
-          {
-            kind: 'request',
-            requestType: 'UPDATE',
-          },
-          {
-            kind: 'request',
-            requestType: 'TERMINATE',
-          },
+          { kind: 'request', requestType: 'INITIAL' },
+          updateStep,
+          { kind: 'request', requestType: 'TERMINATE' },
         ]
-      : [
-          {
-            kind: 'request',
-            requestType: 'EVENT',
-          },
-        ];
+      : [{ kind: 'request', requestType: 'EVENT' }];
 
   return {
     id: opts.id,
@@ -190,7 +200,8 @@ export const scenarioFixtures: Scenario[] = [
   makeScenario({
     id: 'scn-time-root-001',
     name: 'TIME × root — voice-call CC-Time at root',
-    description: 'Legacy root-level RSU/USU using CC-Time.',
+    description:
+      'Legacy root-level RSU/USU using CC-Time. UPDATE repeats 4× to demo the per-round Debugger.',
     unitType: 'TIME',
     sessionMode: 'session',
     serviceModel: 'root',
@@ -200,6 +211,8 @@ export const scenarioFixtures: Scenario[] = [
       variableLib.rsuTotal('RSU_TOTAL', 600),
       variableLib.usuTotal('USU_TOTAL', 300),
     ],
+    // Demo: repeat the UPDATE 4 times with a 60s inter-round delay.
+    updateRepeat: { times: 4, delayMs: 60_000 },
   }),
   makeScenario({
     id: 'scn-time-single-001',
