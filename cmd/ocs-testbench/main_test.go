@@ -225,6 +225,98 @@ func TestBrowserURL_Localhost(t *testing.T) {
 	}
 }
 
+// TestSmoke_AutoOpenBrowser_GateClosed — covers AC-10. With
+// Headless=true the browser-open helper must NOT be called regardless
+// of AutoOpenBrowser, and with AutoOpenBrowser=false it must NOT be
+// called regardless of Headless.
+func TestSmoke_AutoOpenBrowser_GateClosed(t *testing.T) {
+	cases := []struct {
+		name     string
+		autoOpen bool
+		headless bool
+	}{
+		{"headless overrides autoOpen", true, true},
+		{"autoOpen disabled", false, false},
+		{"both off", false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := smokeConfig()
+			cfg.Frontend.AutoOpenBrowser = tc.autoOpen
+			cfg.Headless = tc.headless
+
+			var called int
+			prev := openBrowser
+			openBrowser = func(string) error { called++; return nil }
+			t.Cleanup(func() { openBrowser = prev })
+
+			ctx, cancel := context.WithCancel(context.Background())
+			addrCh := make(chan string, 1)
+			done := make(chan error, 1)
+			go func() { done <- runWith(ctx, cfg, store.NewTestStore(), fakeFrontendFS(), addrCh) }()
+
+			select {
+			case <-addrCh:
+			case <-time.After(2 * time.Second):
+				cancel()
+				<-done
+				t.Fatal("HTTP server did not bind")
+			}
+
+			cancel()
+			<-done
+
+			if called != 0 {
+				t.Errorf("openBrowser was called %d time(s); expected 0", called)
+			}
+		})
+	}
+}
+
+// TestSmoke_AutoOpenBrowser_GateOpen — covers AC-9. With
+// AutoOpenBrowser=true and Headless=false the browser-open helper IS
+// invoked exactly once with a localhost URL.
+func TestSmoke_AutoOpenBrowser_GateOpen(t *testing.T) {
+	cfg := smokeConfig()
+	cfg.Frontend.AutoOpenBrowser = true
+	cfg.Headless = false
+
+	var (
+		called int
+		gotURL string
+	)
+	prev := openBrowser
+	openBrowser = func(url string) error {
+		called++
+		gotURL = url
+		return nil
+	}
+	t.Cleanup(func() { openBrowser = prev })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	addrCh := make(chan string, 1)
+	done := make(chan error, 1)
+	go func() { done <- runWith(ctx, cfg, store.NewTestStore(), fakeFrontendFS(), addrCh) }()
+
+	select {
+	case <-addrCh:
+	case <-time.After(2 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("HTTP server did not bind")
+	}
+
+	cancel()
+	<-done
+
+	if called != 1 {
+		t.Errorf("openBrowser called %d time(s); expected 1", called)
+	}
+	if gotURL == "" || !strings.HasPrefix(gotURL, "http://") {
+		t.Errorf("openBrowser URL: got %q, expected http:// prefix", gotURL)
+	}
+}
+
 // TestResolveConfigPath — flag wins over default; default applies
 // when flag is empty. CONFIG_FILE override is verified inside
 // baseconfig.Load itself.

@@ -59,6 +59,13 @@ import (
 // via CONFIG_FILE.
 const defaultConfigPath = "cmd/ocs-testbench/config.yaml"
 
+// openBrowser is the function variable that runWith uses to launch
+// the operating system's default browser. Production wires it to
+// appl.OpenBrowser; tests override it to assert that the auto-open
+// gate (AutoOpenBrowser && !Headless) is honoured without spawning a
+// real subprocess.
+var openBrowser = appl.OpenBrowser
+
 func main() {
 	// Banner first — operators see what binary launched before any
 	// log output. PrintBanner uses figlet rendering directly; no
@@ -198,7 +205,7 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 
 	if cfg.Frontend.AutoOpenBrowser && !cfg.Headless {
 		url := browserURL(ln.Addr().String())
-		if err := appl.OpenBrowser(url); err != nil {
+		if err := openBrowser(url); err != nil {
 			logging.Warn("auto-open browser failed; continuing", "url", url, "err", err)
 		}
 	}
