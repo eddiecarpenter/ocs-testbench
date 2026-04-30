@@ -1,0 +1,5 @@
+# Tracked placeholder so go:embed has a non-empty target before the
+# frontend build pipeline (Feature #22) ships. The dist/ directory is
+# rebuilt by vite; .gitkeep and index.html are intentionally tracked
+# until then so `go build ./...` does not fail with an empty-pattern
+# error.

@@ -8,7 +8,13 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-dist
+# Ignore everything under dist/ except the tracked placeholders that
+# go:embed needs before the Vite build pipeline (Feature #22) ships.
+# Vite overwrites these on first build, but they must exist for
+# `go build ./...` to compile.
+dist/*
+!dist/.gitkeep
+!dist/index.html
 dist-ssr
 *.local
 

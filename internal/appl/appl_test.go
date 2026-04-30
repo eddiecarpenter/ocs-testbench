@@ -33,7 +33,6 @@ func newTestLifecycle(t *testing.T, metricsEnabled bool) *Lifecycle {
 		},
 	}
 	l := New(cfg)
-	l.bannerOut = io.Discard
 	l.signals = []os.Signal{syscall.SIGUSR1}
 	l.ShutdownTimeout = 200 * time.Millisecond
 	return l
@@ -174,42 +173,20 @@ func TestRun_SignalInjectionTriggersShutdown(t *testing.T) {
 	}
 }
 
-// TestRun_MetricsEndpointServesNonEmpty — when metrics are enabled
-// the configured path returns a non-empty body containing at least
-// one Go metric.
-func TestRun_MetricsEndpointServesNonEmpty(t *testing.T) {
+// TestStartMetrics_EndpointServesNonEmpty — when metrics are enabled
+// StartMetrics binds the listener and the configured path returns a
+// non-empty body containing at least one Go metric.
+func TestStartMetrics_EndpointServesNonEmpty(t *testing.T) {
 	l := newTestLifecycle(t, true)
 
-	addrCh := make(chan string, 1)
-	l.RegisterShutdown("publish-addr", func(context.Context) error {
-		addrCh <- l.MetricsAddr()
-		return nil
-	})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	done := make(chan error, 1)
-	go func() { done <- l.Run(ctx) }()
-
-	// Wait for the metrics server to bind and become reachable.
-	var addr string
-	deadline := time.After(2 * time.Second)
-poll:
-	for {
-		if a := l.MetricsAddr(); a != "" {
-			addr = a
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatal("metrics server did not bind within 2s")
-		case <-time.After(10 * time.Millisecond):
-			continue poll
-		}
+	if err := l.StartMetrics(); err != nil {
+		t.Fatalf("StartMetrics: %v", err)
+	}
+	if l.MetricsAddr() == "" {
+		t.Fatal("MetricsAddr is empty after StartMetrics")
 	}
 
-	resp, err := http.Get("http://" + addr + "/metrics")
+	resp, err := http.Get("http://" + l.MetricsAddr() + "/metrics")
 	if err != nil {
 		t.Fatalf("GET /metrics: %v", err)
 	}
@@ -225,52 +202,72 @@ poll:
 		t.Errorf("GET /metrics: expected Go metrics in body; got: %s", string(body))
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := <-done; err != nil {
+	if err := l.Run(ctx); err != nil {
 		t.Errorf("Run: unexpected error: %v", err)
-	}
-	// drain the addr channel to satisfy the registered shutdown
-	select {
-	case <-addrCh:
-	default:
 	}
 }
 
-// TestRun_MetricsDisabled_ServerNotStarted — when metrics are
-// disabled MetricsAddr stays empty and Run returns cleanly without
-// any listener.
-func TestRun_MetricsDisabled_ServerNotStarted(t *testing.T) {
+// TestStartMetrics_Disabled_NoOp — when metrics are disabled
+// StartMetrics is a no-op that returns nil; MetricsAddr stays empty.
+func TestStartMetrics_Disabled_NoOp(t *testing.T) {
 	l := newTestLifecycle(t, false)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	if err := l.Run(ctx); err != nil {
-		t.Fatalf("Run: unexpected error: %v", err)
+	if err := l.StartMetrics(); err != nil {
+		t.Errorf("StartMetrics(disabled): unexpected error: %v", err)
 	}
 	if l.MetricsAddr() != "" {
 		t.Errorf("MetricsAddr: expected empty when disabled; got %q", l.MetricsAddr())
 	}
-}
-
-// TestRun_BannerWritten — the ASCII banner appears in the configured
-// writer and contains the app name.
-func TestRun_BannerWritten(t *testing.T) {
-	l := newTestLifecycle(t, false)
-	buf := &bytes.Buffer{}
-	l.bannerOut = buf
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
+	if err := l.Run(ctx); err != nil {
+		t.Fatalf("Run: unexpected error: %v", err)
+	}
+}
 
+// TestStartMetrics_RejectsDoubleStart — calling StartMetrics twice
+// is a programmer error and is rejected.
+func TestStartMetrics_RejectsDoubleStart(t *testing.T) {
+	l := newTestLifecycle(t, true)
+	if err := l.StartMetrics(); err != nil {
+		t.Fatalf("first StartMetrics: %v", err)
+	}
+	if err := l.StartMetrics(); err == nil {
+		t.Error("expected error on second StartMetrics")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_ = l.Run(ctx)
+}
+
+// TestStartMetrics_AfterRunRejected — StartMetrics after Run is also
+// a programmer error; the lifecycle is past its setup phase.
+func TestStartMetrics_AfterRunRejected(t *testing.T) {
+	l := newTestLifecycle(t, true)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 	if err := l.Run(ctx); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if buf.Len() == 0 {
-		t.Error("banner was not written")
+	if err := l.StartMetrics(); err == nil {
+		t.Error("expected error on StartMetrics after Run")
 	}
-	// figlet renders glyphs by row, not the literal name, so we just
-	// assert non-empty output above.
+}
+
+// TestPrintBanner_RendersOutput — PrintBanner writes a non-empty
+// rendering of the supplied name to the writer. figlet renders glyphs
+// by row, not the literal name, so we just assert non-empty output.
+func TestPrintBanner_RendersOutput(t *testing.T) {
+	buf := &bytes.Buffer{}
+	PrintBanner(buf, "ocs-testbench")
+	if buf.Len() == 0 {
+		t.Error("PrintBanner wrote nothing")
+	}
 }
 
 // TestRun_RejectsSecondInvocation — the lifecycle is single-shot.
@@ -317,7 +314,7 @@ func TestNew_NilCfgPanics(t *testing.T) {
 }
 
 // TestStartMetrics_BadAddrFails — an unbindable metrics address
-// surfaces as a Run error and shutdown still drains.
+// surfaces as a StartMetrics error before Run is reached.
 func TestStartMetrics_BadAddrFails(t *testing.T) {
 	cfg := &baseconfig.Config{
 		BaseConfig: baseconfig.BaseConfig{
@@ -330,13 +327,12 @@ func TestStartMetrics_BadAddrFails(t *testing.T) {
 		},
 	}
 	l := New(cfg)
-	l.bannerOut = io.Discard
 	l.ShutdownTimeout = 50 * time.Millisecond
 	l.listenFn = func(string, string) (net.Listener, error) {
 		return nil, errors.New("listen-failed")
 	}
 
-	err := l.Run(context.Background())
+	err := l.StartMetrics()
 	if err == nil || !strings.Contains(err.Error(), "listen-failed") {
 		t.Errorf("expected listen-failed error; got %v", err)
 	}

@@ -72,10 +72,6 @@ type Lifecycle struct {
 	// internal seam to avoid colliding with the test runner.
 	signals []os.Signal
 
-	// bannerOut is the writer for the ASCII banner. Defaults to
-	// os.Stdout; tests redirect it.
-	bannerOut io.Writer
-
 	// listenFn binds the metrics server's listener. Production uses
 	// net.Listen; tests inject a hook to bind on ":0" for ephemeral
 	// ports.
@@ -83,6 +79,13 @@ type Lifecycle struct {
 
 	metricsAddrMu sync.RWMutex
 	metricsAddr   string
+
+	// metricsServer holds the started metrics http.Server when
+	// StartMetrics has been called. Tracked so StartMetrics is
+	// idempotent-rejecting and Run can read the goroutine error
+	// channel.
+	metricsServer *http.Server
+	metricsErrCh  chan error
 }
 
 // New constructs a Lifecycle bound to cfg. cfg must be non-nil.
@@ -94,9 +97,17 @@ func New(cfg *baseconfig.Config) *Lifecycle {
 		cfg:             cfg,
 		ShutdownTimeout: DefaultShutdownTimeout,
 		signals:         []os.Signal{syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT},
-		bannerOut:       os.Stdout,
 		listenFn:        net.Listen,
 	}
+}
+
+// PrintBanner renders the application name as a figlet ASCII banner
+// to w. Callers typically invoke this as the very first thing in
+// main(), before any logging is bootstrapped, so the banner appears
+// ahead of any other output.
+func PrintBanner(w io.Writer, name string) {
+	fig := figure.NewFigure(name, "standard", true)
+	figure.Write(w, fig)
 }
 
 // RegisterShutdown adds a named callback fired in reverse-registration
@@ -121,14 +132,66 @@ func (l *Lifecycle) MetricsAddr() string {
 	return l.metricsAddr
 }
 
-// Run prints the ASCII banner, starts the metrics server (when
-// enabled), blocks on the first trapped signal or ctx cancellation,
-// then drains the registered shutdown callbacks in reverse order
-// with a bounded per-callback timeout. Returns the aggregated
-// shutdown error (nil when every callback succeeded).
+// StartMetrics starts the Prometheus metrics server (when enabled in
+// configuration) and registers its shutdown as a normal shutdown
+// callback so the caller controls drain ordering via the surrounding
+// RegisterShutdown calls.
+//
+// When cfg.Metrics.Enabled is false, StartMetrics is a no-op that
+// returns nil — callers can invoke it unconditionally.
+//
+// Errors from the metrics server's goroutine after it has begun
+// serving are surfaced to Run, which treats them like a signal: the
+// lifecycle drops into the shutdown path and the error is included
+// in the aggregated return.
+func (l *Lifecycle) StartMetrics() error {
+	if !l.cfg.Metrics.Enabled {
+		return nil
+	}
+	l.mu.Lock()
+	if l.running {
+		l.mu.Unlock()
+		return errors.New("appl.Lifecycle: StartMetrics after Run")
+	}
+	if l.metricsServer != nil {
+		l.mu.Unlock()
+		return errors.New("appl.Lifecycle: StartMetrics already called")
+	}
+	l.mu.Unlock()
+
+	server, errCh, err := l.startMetricsServer()
+	if err != nil {
+		return fmt.Errorf("appl: start metrics server: %w", err)
+	}
+
+	l.mu.Lock()
+	l.metricsServer = server
+	l.metricsErrCh = errCh
+	l.mu.Unlock()
+
+	// Register the shutdown via the public path so it lives in the
+	// same drain queue as user-registered shutdowns. Drain order
+	// (reverse of registration) is therefore controlled by where the
+	// caller places StartMetrics relative to its other RegisterShutdown
+	// calls.
+	l.RegisterShutdown("metrics-server", func(shutCtx context.Context) error {
+		return server.Shutdown(shutCtx)
+	})
+	return nil
+}
+
+// Run blocks on the first trapped signal, ctx cancellation, or fatal
+// metrics-server error, then drains the registered shutdown callbacks
+// in reverse-registration order with a bounded per-callback timeout.
+// Returns the aggregated shutdown error (nil when every callback
+// succeeded).
 //
 // Run is single-shot — a second invocation on the same Lifecycle
 // returns an error without doing any work.
+//
+// Banner printing is the caller's responsibility (see PrintBanner).
+// Metrics-server startup is the caller's responsibility too — invoke
+// StartMetrics before Run if the metrics server should run.
 func (l *Lifecycle) Run(ctx context.Context) error {
 	l.mu.Lock()
 	if l.running {
@@ -136,34 +199,16 @@ func (l *Lifecycle) Run(ctx context.Context) error {
 		return errors.New("appl.Lifecycle: Run already called")
 	}
 	l.running = true
+	metricsErrCh := l.metricsErrCh
 	l.mu.Unlock()
-
-	// Banner first — operators want to see what binary launched
-	// before any other log output.
-	fig := figure.NewFigure(l.cfg.AppName, "standard", true)
-	figure.Write(l.bannerOut, fig)
 
 	// Signal-aware context: any trapped signal cancels sigCtx.
 	sigCtx, stopSig := signal.NotifyContext(ctx, l.signals...)
 	defer stopSig()
 
-	// Start the metrics server when enabled.
-	var (
-		metricsServer *http.Server
-		metricsErrCh  chan error
-	)
-	if l.cfg.Metrics.Enabled {
-		ms, errCh, err := l.startMetricsServer()
-		if err != nil {
-			return fmt.Errorf("appl: start metrics server: %w", err)
-		}
-		metricsServer = ms
-		metricsErrCh = errCh
-	}
-
 	// Block until the signal-aware context is canceled or the metrics
 	// server fails fatally. A nil channel blocks forever in select,
-	// so the disabled-metrics case naturally falls through to the
+	// so the metrics-disabled / not-started case falls through to the
 	// signal branch.
 	var runErr error
 	select {
@@ -176,15 +221,9 @@ func (l *Lifecycle) Run(ctx context.Context) error {
 		}
 	}
 
-	// Stop the metrics server first; its shutdown is bounded by the
-	// same per-callback timeout as user shutdowns.
-	if metricsServer != nil {
-		stopCtx, cancel := context.WithTimeout(context.Background(), l.shutdownTimeout())
-		_ = metricsServer.Shutdown(stopCtx)
-		cancel()
-	}
-
-	// Drain registered shutdowns in reverse-registration order.
+	// Drain registered shutdowns in reverse-registration order. The
+	// metrics-server shutdown (if StartMetrics was called) lives in
+	// this queue too, at whichever position the caller placed it.
 	l.mu.Lock()
 	entries := make([]shutdownEntry, len(l.shutdowns))
 	copy(entries, l.shutdowns)
