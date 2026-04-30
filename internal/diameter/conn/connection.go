@@ -74,6 +74,10 @@ func realDial(_ context.Context, cli *sm.Client, cfg diameter.PeerConfig) (diam.
 //   - Subscribe returns a typed StateEvent channel for fan-out.
 //   - Conn returns the live diam.Conn while connected (used by the
 //     Sender in task 4); returns nil otherwise.
+//   - HandleFunc registers a per-command incoming-message handler
+//     (e.g. "CCA") that is reapplied to every fresh sm.Client
+//     across reconnects. The Sender (task 4) uses this to install
+//     a CCA correlator before any messages are sent.
 //
 // Concurrency: every public method is goroutine-safe.
 type PeerConnection struct {
@@ -96,6 +100,16 @@ type PeerConnection struct {
 	// Sender (task 4) can read it under the same lock that the
 	// lifecycle goroutine uses to swap it in.
 	activeConn diam.Conn
+	// activeMgr is the sm.StateMachine bound to activeConn. The
+	// HandleFunc method applies user-registered handlers to it
+	// immediately so a Sender registering "CCA" after the
+	// connection is up still sees responses.
+	activeMgr *sm.StateMachine
+	// handlers is the slice of (command, handler) pairs the
+	// caller has registered via HandleFunc. Re-applied to every
+	// fresh sm.Client constructed in dialOnce so a reconnect
+	// preserves the user's handler installation.
+	handlers []handlerEntry
 
 	// Tunables — defaults applied in New. Exposed in the package
 	// (lower-case) so the test seam can override them without
@@ -107,6 +121,55 @@ type PeerConnection struct {
 
 	// dial is the seam used by tests; production uses realDial.
 	dial dialFunc
+}
+
+// handlerEntry is one user-registered command handler. The handler
+// is invoked by the underlying sm.StateMachine (which is itself a
+// ServeMux) when an incoming message matches the command.
+type handlerEntry struct {
+	cmd     string
+	handler diam.HandlerFunc
+}
+
+// HandleFunc registers a handler invoked for every incoming
+// Diameter message whose short command name equals cmd (e.g.
+// "CCA", "RAR"). The handler is reapplied to every fresh sm.Client
+// created across reconnects — callers register once at
+// construction time and the connection layer takes care of
+// re-installing on each dial attempt.
+//
+// HandleFunc is safe to call from any state. If the connection is
+// currently connected and a handler with the same command already
+// exists, the existing entry is replaced; otherwise the new
+// handler is appended. This matches the behaviour callers want
+// when they subscribe to a command after a reconnect.
+//
+// CER, CEA, DWR, DWA are reserved by go-diameter's StateMachine —
+// registering a handler for those commands will be silently
+// shadowed by the StateMachine's built-in handlers. The Sender
+// (task 4) registers "CCA" only; protocol-mandated handlers for
+// out-of-band CCRs (CCR-Terminate from FUI) flow back through the
+// same Sender path and do not need a separate registration.
+func (pc *PeerConnection) HandleFunc(cmd string, handler diam.HandlerFunc) {
+	pc.muLife.Lock()
+	defer pc.muLife.Unlock()
+	found := false
+	for i := range pc.handlers {
+		if pc.handlers[i].cmd == cmd {
+			pc.handlers[i].handler = handler
+			found = true
+			break
+		}
+	}
+	if !found {
+		pc.handlers = append(pc.handlers, handlerEntry{cmd: cmd, handler: handler})
+	}
+	// If a live StateMachine exists (the connection is up or
+	// connecting), apply the handler now so callers registering
+	// after Connect still see incoming messages.
+	if pc.activeMgr != nil {
+		pc.activeMgr.HandleFunc(cmd, handler)
+	}
 }
 
 // New constructs a PeerConnection bound to the given config and
@@ -262,6 +325,7 @@ func (pc *PeerConnection) run(ctx context.Context) {
 			pc.activeConn.Close()
 			pc.activeConn = nil
 		}
+		pc.activeMgr = nil
 		pc.muLife.Unlock()
 	}()
 
@@ -344,9 +408,19 @@ func (pc *PeerConnection) waitForDrop(ctx context.Context, c diam.Conn) bool {
 // dictionary, sm.Settings, and sm.Client are constructed fresh per
 // attempt because the underlying StateMachine is not safe to reuse
 // across reconnects (handshake-channel state is per-attempt).
+//
+// User-registered handlers (added via HandleFunc) are re-applied
+// to the fresh StateMachine before the dial — this is what gives
+// callers a stable handler set across reconnects.
 func (pc *PeerConnection) dialOnce(ctx context.Context) (diam.Conn, error) {
 	settings := buildSettings(pc.cfg, pc.parser)
 	mgr := sm.New(settings)
+	pc.muLife.Lock()
+	for _, h := range pc.handlers {
+		mgr.HandleFunc(h.cmd, h.handler)
+	}
+	pc.activeMgr = mgr
+	pc.muLife.Unlock()
 	client := &sm.Client{
 		Dict:               pc.parser,
 		Handler:            mgr,
@@ -455,4 +529,3 @@ func nextBackoff(cur time.Duration, factor float64, cap time.Duration) time.Dura
 	}
 	return next
 }
-

@@ -44,8 +44,9 @@ func newFakePeerConnection(cfg diameter.PeerConfig) *fakePeerConnection {
 	}
 }
 
-func (f *fakePeerConnection) Config() diameter.PeerConfig { return f.cfg }
-func (f *fakePeerConnection) Conn() diam.Conn             { return nil }
+func (f *fakePeerConnection) Config() diameter.PeerConfig             { return f.cfg }
+func (f *fakePeerConnection) Conn() diam.Conn                         { return nil }
+func (f *fakePeerConnection) HandleFunc(_ string, _ diam.HandlerFunc) {}
 
 func (f *fakePeerConnection) State() diameter.ConnectionState {
 	f.mu.Lock()
