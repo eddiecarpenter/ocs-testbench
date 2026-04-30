@@ -1,0 +1,82 @@
+# Quality scan — SonarCloud analysis on every PR + every push to main.
+# Generates coverage from both lanes (Go native, web lcov), then runs
+# the Sonar scanner with the config in sonar-project.properties.
+#
+# Repo-side prerequisites (see sonar-project.properties for context):
+#   - SonarCloud project created with the keys in that file.
+#   - SONAR_TOKEN secret added to the repo.
+#
+# Independent of `Build and Test` — runs in parallel for faster
+# feedback. Both must pass for a clean PR (once branch protection
+# requires them).
+#
+# Quality gate: SonarCloud's project quality gate is the threshold
+# enforcement. This workflow uploads results; the gate is configured
+# server-side on SonarCloud (default "Sonar way" is a sensible
+# starting point — 80% coverage on new code, 0 new bugs, A-rating
+# maintainability).
+name: Quality
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  sonar:
+    name: SonarCloud scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Sonar's blame analysis needs full history. Default fetch
+          # depth is 1 which makes Sonar warn about "shallow clone";
+          # 0 = full history.
+          fetch-depth: 0
+          submodules: false
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Generate Go coverage
+        run: go test -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Install web deps
+        working-directory: web
+        run: npm ci
+
+      - name: Generate web coverage (vitest --coverage, lcov)
+        working-directory: web
+        run: |
+          # Use --coverage with the v8 provider already installed.
+          # Default reporter set includes lcov; sonar reads
+          # web/coverage/lcov.info per sonar-project.properties.
+          npm test -- --run --coverage --coverage.reporter=lcov
+
+      - name: SonarCloud scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
