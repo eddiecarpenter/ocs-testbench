@@ -27,11 +27,11 @@
 //     HTTP → metrics → store.
 //  9. Start the HTTP server on cfg.Server.Addr.
 //  10. Optionally auto-open the default browser (gated by
-//      cfg.Frontend.AutoOpenBrowser && !cfg.Headless).
+//     cfg.Frontend.AutoOpenBrowser && !cfg.Headless).
 //  11. Block on lifecycle.Run, which installs the SIGTERM/SIGINT/SIGQUIT
-//      handler and waits for any of them (or ctx cancellation).
+//     handler and waits for any of them (or ctx cancellation).
 //  12. Shutdown drains the registered callbacks in reverse order:
-//      HTTP server → metrics server → store close.
+//     HTTP server → metrics server → store close.
 package main
 
 import (
@@ -239,4 +239,3 @@ func browserURL(addr string) string {
 	}
 	return "http://" + net.JoinHostPort(host, port)
 }
-
