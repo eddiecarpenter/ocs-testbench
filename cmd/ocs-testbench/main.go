@@ -143,9 +143,20 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 	if err != nil {
 		return fmt.Errorf("ocs-testbench: resolve embedded frontend: %w", err)
 	}
-	frontHandler, err := appl.FrontendHandler(dist)
+
+	// Dev mode (only compiled with `-tags dev`) returns a reverse-proxy
+	// handler aimed at a Vite dev server, and registers Vite's lifecycle
+	// on `lc`. In prod builds devFrontendHandler returns (nil, nil) and
+	// the embedded FS path runs.
+	frontHandler, err := devFrontendHandler(lc, dist)
 	if err != nil {
-		return fmt.Errorf("ocs-testbench: frontend handler: %w", err)
+		return fmt.Errorf("ocs-testbench: dev frontend: %w", err)
+	}
+	if frontHandler == nil {
+		frontHandler, err = appl.FrontendHandler(dist)
+		if err != nil {
+			return fmt.Errorf("ocs-testbench: frontend handler: %w", err)
+		}
 	}
 
 	router := chi.NewRouter()
