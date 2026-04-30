@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/fiorix/go-diameter/v4/diam/dict"
+
+	"github.com/eddiecarpenter/ocs-testbench/internal/diameter"
 )
 
 // fakeSource is a static stand-in for the production StoreSource.
@@ -82,7 +84,7 @@ func TestBuiltInsAvailableInDefaultParser(t *testing.T) {
 		t.Errorf("expected AVP name Origin-Host, got %q", originHost.Name)
 	}
 
-	svcCtx, err := dict.Default.FindAVP(AppIDCreditControl, AVPCodeServiceContextID)
+	svcCtx, err := dict.Default.FindAVP(diameter.AppIDCreditControl, AVPCodeServiceContextID)
 	if err != nil {
 		t.Fatalf("Service-Context-Id (461) not resolvable in app 4: %v", err)
 	}
@@ -93,7 +95,7 @@ func TestBuiltInsAvailableInDefaultParser(t *testing.T) {
 	// Service-Information (873, vendor 10415) is the canonical
 	// 3GPP TS 32.299 AVP. Its presence in dict.Default proves the
 	// TGPP dictionary loaded.
-	svcInfo, err := dict.Default.FindAVP(AppIDCreditControl, uint32(873))
+	svcInfo, err := dict.Default.FindAVP(diameter.AppIDCreditControl, uint32(873))
 	if err != nil {
 		t.Fatalf("Service-Information (873) not resolvable in app 4: %v", err)
 	}
@@ -226,7 +228,7 @@ func TestLoad_AllCustomsInvalid_BaseStillUsable(t *testing.T) {
 	if _, err := p.FindAVP(uint32(0), AVPCodeOriginHost); err != nil {
 		t.Errorf("base Origin-Host not resolvable after all-customs-failed load: %v", err)
 	}
-	if _, err := p.FindAVP(AppIDCreditControl, AVPCodeServiceContextID); err != nil {
+	if _, err := p.FindAVP(diameter.AppIDCreditControl, AVPCodeServiceContextID); err != nil {
 		t.Errorf("base Service-Context-Id not resolvable after all-customs-failed load: %v", err)
 	}
 }

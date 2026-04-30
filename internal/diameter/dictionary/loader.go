@@ -23,7 +23,7 @@ import (
 // (Credit-Control); the loader does not use it as a sentinel because
 // FindAVP(0, 461) does not walk into child apps. Callers that want
 // to assert the credit-control dictionary is present should resolve
-// it via FindAVP(4, AVPCodeServiceContextID).
+// it via FindAVP(diameter.AppIDCreditControl, AVPCodeServiceContextID).
 const (
 	// AVPCodeOriginHost is the AVP code for Origin-Host (RFC 6733
 	// base, application id 0).
@@ -31,9 +31,6 @@ const (
 	// AVPCodeServiceContextID is the AVP code for Service-Context-Id
 	// (RFC 4006 credit-control, application id 4).
 	AVPCodeServiceContextID = uint32(461)
-	// AppIDCreditControl is the application id assigned to the
-	// Diameter Credit-Control application by RFC 4006 §3.
-	AppIDCreditControl = uint32(4)
 )
 
 // Record is the loader's view of a single custom_dictionary row.
