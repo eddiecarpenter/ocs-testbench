@@ -1,0 +1,49 @@
+# OCS Testbench — local-development configuration.
+#
+# Operators may copy this file to a deployment-specific path and point
+# the binary at it via CLI flag or the CONFIG_FILE environment
+# variable. Every field documented in internal/baseconfig is shown
+# below with a realistic local-dev value.
+
+app_name: ocs-testbench
+
+# PostgreSQL connection string consumed by internal/store. Mandatory.
+database_url: postgres://ocs:ocs@localhost:5432/ocs?sslmode=disable
+
+# Structured logging configuration.
+#   format: "json" for production / "text" for local development.
+#   level:  "debug" | "info" | "warn" | "error".
+logging:
+  format: text
+  level: info
+
+# Prometheus metrics server. When enabled the lifecycle layer starts
+# a separate HTTP server on metrics.addr exposing metrics.path.
+metrics:
+  enabled: true
+  addr: ":9090"
+  path: /metrics
+
+# Application HTTP server (REST + SSE + embedded SPA). Mandatory.
+server:
+  addr: ":8080"
+  read_timeout: 10s
+  write_timeout: 30s
+  idle_timeout: 60s
+
+# Embedded React/TypeScript frontend.
+frontend:
+  # Open the default browser automatically when the server starts —
+  # gated by the top-level `headless` flag.
+  auto_open_browser: true
+  # Path on disk to the frontend build output. Used at compile time
+  # by go:embed; runtime serving uses the embedded filesystem.
+  embedded_assets_path: web/dist
+
+# Suppress all interactive behaviour (e.g. auto-open browser). Useful
+# in containerised or CI runs.
+headless: false
+
+# Diameter peer list. Empty in this Feature; later Features wiring
+# the Diameter stack will populate the schema with concrete fields.
+peers: []
