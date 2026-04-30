@@ -20,22 +20,27 @@
 //     internal/diameter/dictionary.Loader, then construct and start
 //     the multi-peer Diameter Manager — peers come from the store
 //     via StorePeerProvider; AutoConnect=true peers initiate their
-//     lifecycle inside Start.
+//     lifecycle inside Start. Build the engine-facing Sender as a
+//     protocol.Behaviour-wrapped messaging.Sender so the
+//     protocol-mandated CCA behaviours (FUI-TERMINATE,
+//     Validity-Time, 5xxx) fire automatically.
 //  6. (TODO) Mount the REST API router — placeholder until Feature lands.
 //  7. Build the chi HTTP router with the request-logging middleware
 //     and mount the embedded frontend handler as the not-found
 //     fallback (so API routes added in step 6 take precedence).
 //  8. Start the metrics server via appl.Lifecycle.StartMetrics, placed
-//     between the diameter-manager shutdown registration and the
+//     between the diameter-protocol shutdown registration and the
 //     HTTP-shutdown registration so the reverse-of-registration drain
-//     order yields HTTP → metrics → diameter-manager → store.
+//     order yields
+//     HTTP → metrics → diameter-protocol → diameter-manager → store.
 //  9. Start the HTTP server on cfg.Server.Addr.
 //  10. Optionally auto-open the default browser (gated by
 //     cfg.Frontend.AutoOpenBrowser && !cfg.Headless).
 //  11. Block on lifecycle.Run, which installs the SIGTERM/SIGINT/SIGQUIT
 //     handler and waits for any of them (or ctx cancellation).
 //  12. Shutdown drains the registered callbacks in reverse order:
-//     HTTP server → metrics server → diameter-manager → store close.
+//     HTTP server → metrics server → diameter-protocol →
+//     diameter-manager → store close.
 package main
 
 import (
@@ -56,6 +61,8 @@ import (
 	"github.com/eddiecarpenter/ocs-testbench/internal/baseconfig"
 	"github.com/eddiecarpenter/ocs-testbench/internal/diameter/dictionary"
 	"github.com/eddiecarpenter/ocs-testbench/internal/diameter/manager"
+	"github.com/eddiecarpenter/ocs-testbench/internal/diameter/messaging"
+	"github.com/eddiecarpenter/ocs-testbench/internal/diameter/protocol"
 	"github.com/eddiecarpenter/ocs-testbench/internal/logging"
 	"github.com/eddiecarpenter/ocs-testbench/internal/store"
 	"github.com/eddiecarpenter/ocs-testbench/web"
@@ -193,12 +200,28 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 		return fmt.Errorf("ocs-testbench: start diameter manager: %w", err)
 	}
 
+	// Build the engine-facing Sender: a messaging.Sender wrapped
+	// by protocol.Behaviour. The engine layer (when it lands)
+	// receives the wrapped sender; protocol-mandated CCA actions
+	// (FUI-TERMINATE → CCR-T, Validity-Time → CCR-U, 5xxx →
+	// terminate) happen behind the scenes.
+	//
+	// The CCRTerminate / CCRUpdate builders are not yet wired —
+	// they require engine-side per-session state (Service-Context-
+	// Id, Subscription-Id, MSCC) which lands with the engine
+	// itself. The Behaviour still tracks session state and marks
+	// terminated sessions correctly; the auto out-of-band CCRs
+	// are no-ops until the builders are supplied.
+	sender := messaging.NewSender(dmgr)
+	behaviour := protocol.New(sender, protocol.Options{})
+	_ = behaviour // engine consumer lands in a later feature
+
 	router := chi.NewRouter()
 	router.Use(logging.RequestLogger)
 
 	// TODO(feature: api): mount the REST + SSE routes here when
 	// internal/api lands. Expected shape:
-	//   api.Mount(router, s, dmgr, ...)
+	//   api.Mount(router, s, dmgr, behaviour, ...)
 
 	// SPA fallback last — chi's NotFound handler runs after every
 	// explicit route declared above (none yet, by design).
@@ -227,10 +250,13 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 	}()
 
 	// Shutdown registration order is the REVERSE of desired drain
-	// order. Drain order: HTTP → metrics → diameter-manager → store.
-	// Therefore registration order: store, diameter-manager, metrics,
-	// HTTP. The manager's Stop() drains reconnect goroutines and
-	// closes every per-peer transport before the store is closed.
+	// order. Drain order:
+	//   HTTP → metrics → diameter-protocol → diameter-manager → store.
+	// Therefore registration order: store, diameter-manager,
+	// diameter-protocol, metrics, HTTP. The protocol Behaviour
+	// stops first (cancels outstanding re-auth timers) so the
+	// manager can then drain transports cleanly before the store
+	// is closed.
 	lc.RegisterShutdown("store", func(context.Context) error {
 		s.Close()
 		return nil
@@ -239,9 +265,14 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 		dmgr.Stop()
 		return nil
 	})
+	lc.RegisterShutdown("diameter-protocol", func(context.Context) error {
+		behaviour.Stop()
+		return nil
+	})
 	if err := lc.StartMetrics(); err != nil {
 		// Best-effort drain of what's been registered so far before
 		// returning the error.
+		behaviour.Stop()
 		dmgr.Stop()
 		s.Close()
 		return fmt.Errorf("ocs-testbench: start metrics: %w", err)
