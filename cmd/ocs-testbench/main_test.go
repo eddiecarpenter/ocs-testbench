@@ -1,3 +1,12 @@
+// `runWith` is a bootstrap test that walks the full lifecycle on a
+// fake store + fake embedded FS. Under `-tags dev`, runWith spawns
+// a Vite subprocess via the dev frontend hook — that's intentional
+// for the runtime path but breaks tests (no npm or web/ dir context
+// to spawn from). Tag this file `!dev` so the dev-mode build skips
+// it; the prod build (default `go test`) keeps full coverage.
+//
+//go:build !dev
+
 package main
 
 import (
