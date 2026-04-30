@@ -35,17 +35,17 @@ import (
 // without race-condition surprises.
 func NewTestStore() Store {
 	return &testStore{
-		peers:        map[[16]byte]Peer{},
-		peerByName:   map[string][16]byte{},
-		subs:         map[[16]byte]Subscriber{},
-		templates:    map[[16]byte]AVPTemplate{},
-		tplByName:    map[string][16]byte{},
-		scenarios:    map[[16]byte]Scenario{},
-		scenByName:   map[string][16]byte{},
-		dicts:        map[[16]byte]CustomDictionary{},
-		dictByName:   map[string][16]byte{},
-		now:          func() time.Time { return time.Now().UTC() },
-		newID:        randomUUID,
+		peers:      map[[16]byte]Peer{},
+		peerByName: map[string][16]byte{},
+		subs:       map[[16]byte]Subscriber{},
+		templates:  map[[16]byte]AVPTemplate{},
+		tplByName:  map[string][16]byte{},
+		scenarios:  map[[16]byte]Scenario{},
+		scenByName: map[string][16]byte{},
+		dicts:      map[[16]byte]CustomDictionary{},
+		dictByName: map[string][16]byte{},
+		now:        func() time.Time { return time.Now().UTC() },
+		newID:      randomUUID,
 	}
 }
 
@@ -63,8 +63,8 @@ type testStore struct {
 	// matches the production query (LIMIT 1 with ORDER BY id).
 	subs map[[16]byte]Subscriber
 
-	templates  map[[16]byte]AVPTemplate
-	tplByName  map[string][16]byte
+	templates map[[16]byte]AVPTemplate
+	tplByName map[string][16]byte
 
 	scenarios  map[[16]byte]Scenario
 	scenByName map[string][16]byte

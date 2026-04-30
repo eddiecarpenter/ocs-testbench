@@ -18,8 +18,8 @@ import (
 // "dist", matching what runWith does in main.
 func fakeFrontendFS() fstest.MapFS {
 	return fstest.MapFS{
-		"dist/index.html":      {Data: []byte("<!doctype html><body>spa-placeholder</body>")},
-		"dist/assets/app.js":   {Data: []byte("console.log('app');")},
+		"dist/index.html":    {Data: []byte("<!doctype html><body>spa-placeholder</body>")},
+		"dist/assets/app.js": {Data: []byte("console.log('app');")},
 	}
 }
 
