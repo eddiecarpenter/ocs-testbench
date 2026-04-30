@@ -65,6 +65,7 @@ type PeerConnection interface {
 	Subscribe() <-chan diameter.StateEvent
 	Config() diameter.PeerConfig
 	Conn() diam.Conn
+	HandleFunc(cmd string, handler diam.HandlerFunc)
 }
 
 // ConnectionFactory is the seam tests use to substitute a fake
