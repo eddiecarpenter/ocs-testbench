@@ -455,4 +455,3 @@ func nextBackoff(cur time.Duration, factor float64, cap time.Duration) time.Dura
 	}
 	return next
 }
-
