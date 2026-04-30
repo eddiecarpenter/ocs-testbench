@@ -1,13 +1,13 @@
-# Continuous integration — build/test/lint on every PR + every push
+# Build and Test — runs build/test/lint on every PR + every push
 # to main. Parallel Go and frontend jobs. Coverage artifacts are
 # uploaded for inspection but no quality gate is enforced here yet
 # (that's a follow-up Feature: SonarCloud + thresholds + branch
 # protection).
 #
 # Integration tests (Go: build-tag `integration`, requires Docker /
-# testcontainers) are NOT run here; they're a separate lane that we
-# can wire later when we have a container runtime ready in CI.
-name: CI
+# testcontainers) are NOT run here; they're a separate lane that
+# we can wire later when we have a container runtime ready.
+name: Build and Test
 
 on:
   pull_request:
@@ -22,7 +22,7 @@ on:
 # Cancel in-progress runs of the same PR/branch when a newer commit
 # lands — saves runner minutes during fast-fix iteration.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: build-and-test-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
