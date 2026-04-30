@@ -118,7 +118,7 @@ func TestLoader_Load_AllFourValueSources(t *testing.T) {
 	l := newTestLoader(s, &fakeGenerator{})
 	input, err := l.Load(context.Background(), id, ScenarioCtx{
 		Variables: map[string]string{
-			"OVERRIDE_KEY":  "variable-value",  // overrides static
+			"OVERRIDE_KEY":  "variable-value",   // overrides static
 			"OVERRIDE_KEY2": "variable-value-2", // will be overridden by step
 			"VARIABLE_ONLY": "from-context",
 		},
@@ -160,11 +160,11 @@ func TestLoader_Load_StepOverrideIsolation(t *testing.T) {
 			{RatingGroup: 200, ServiceIdentifier: 2, Requested: "{{RG200_REQUESTED}}", Used: "{{RG200_USED}}"},
 		},
 		StaticValues: map[string]string{
-			"ORIGIN_HOST":    "ocs.local",
+			"ORIGIN_HOST":     "ocs.local",
 			"RG100_REQUESTED": "1024",
-			"RG100_USED":     "512",
+			"RG100_USED":      "512",
 			"RG200_REQUESTED": "2048",
-			"RG200_USED":     "1024",
+			"RG200_USED":      "1024",
 		},
 	}
 	id := makeTemplate(t, s, "step-override-isolation", body)

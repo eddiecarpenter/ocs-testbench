@@ -132,7 +132,7 @@ func TestEngine_Render_AC1_StaticTemplate_CorrectTypes(t *testing.T) {
 
 func TestEngine_Render_AC2_PlaceholderSubstitution(t *testing.T) {
 	d := newEngineDict2(map[string]AVPMetadata{
-		"Origin-Host": {Code: 264, DataType: "UTF8String"},
+		"Origin-Host":  {Code: 264, DataType: "UTF8String"},
 		"Rating-Group": {Code: 432, DataType: "Unsigned32"},
 	})
 	tree := []AVPNode{

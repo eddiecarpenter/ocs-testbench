@@ -172,9 +172,9 @@ func TestParseTemplateBody_AcceptsGroupedNode(t *testing.T) {
 // round-trip.
 func TestParseTemplateBody_AcceptsVendorIDPermutations(t *testing.T) {
 	tests := []struct {
-		name     string
-		node     AVPNode
-		wantVID  int64
+		name    string
+		node    AVPNode
+		wantVID int64
 	}{
 		{
 			name:    "leaf with vendor-id",

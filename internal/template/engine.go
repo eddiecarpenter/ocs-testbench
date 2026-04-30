@@ -262,7 +262,7 @@ func (e *Engine) buildServiceUnitPair(
 
 	// Requested-Service-Unit
 	emitRSU, resolvedReq, err := e.shouldEmitServiceUnit(block.Requested, values, reqType,
-		/* allowTerminate */ false, /* requireUpdate */ false)
+		/* allowTerminate */ false /* requireUpdate */, false)
 	if err != nil {
 		return nil, err
 	}
