@@ -16,22 +16,26 @@
 //  3. Reconfigure logging from cfg.Logging.
 //  4. Open the production store (pgx pool) and register its close as
 //     the first shutdown callback.
-//  5. (TODO) Wire the Diameter stack — placeholder until Feature lands.
+//  5. Load AVP dictionaries (built-in + active custom) via
+//     internal/diameter/dictionary.Loader, then construct and start
+//     the multi-peer Diameter Manager — peers come from the store
+//     via StorePeerProvider; AutoConnect=true peers initiate their
+//     lifecycle inside Start.
 //  6. (TODO) Mount the REST API router — placeholder until Feature lands.
 //  7. Build the chi HTTP router with the request-logging middleware
 //     and mount the embedded frontend handler as the not-found
 //     fallback (so API routes added in step 6 take precedence).
 //  8. Start the metrics server via appl.Lifecycle.StartMetrics, placed
-//     between the store-shutdown registration and the HTTP-shutdown
-//     registration so the reverse-of-registration drain order yields
-//     HTTP → metrics → store.
+//     between the diameter-manager shutdown registration and the
+//     HTTP-shutdown registration so the reverse-of-registration drain
+//     order yields HTTP → metrics → diameter-manager → store.
 //  9. Start the HTTP server on cfg.Server.Addr.
 //  10. Optionally auto-open the default browser (gated by
 //     cfg.Frontend.AutoOpenBrowser && !cfg.Headless).
 //  11. Block on lifecycle.Run, which installs the SIGTERM/SIGINT/SIGQUIT
 //     handler and waits for any of them (or ctx cancellation).
 //  12. Shutdown drains the registered callbacks in reverse order:
-//     HTTP server → metrics server → store close.
+//     HTTP server → metrics server → diameter-manager → store close.
 package main
 
 import (
@@ -44,11 +48,14 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/fiorix/go-diameter/v4/diam/dict"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/eddiecarpenter/ocs-testbench/internal/appl"
 	"github.com/eddiecarpenter/ocs-testbench/internal/baseconfig"
+	"github.com/eddiecarpenter/ocs-testbench/internal/diameter/dictionary"
+	"github.com/eddiecarpenter/ocs-testbench/internal/diameter/manager"
 	"github.com/eddiecarpenter/ocs-testbench/internal/logging"
 	"github.com/eddiecarpenter/ocs-testbench/internal/store"
 	"github.com/eddiecarpenter/ocs-testbench/web"
@@ -159,17 +166,39 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 		}
 	}
 
+	// Load AVP dictionaries (built-in + active custom) before any
+	// peer connection is opened. Per Feature #17 design plan and
+	// AC-7/AC-8/AC-9: built-ins are loaded by go-diameter's package
+	// init(); the loader extends dict.Default with active custom
+	// dictionaries from the store and fails-soft on per-record XML
+	// errors.
+	loader := dictionary.NewLoader(dictionary.NewStoreSource(s))
+	if _, err := loader.Load(ctx); err != nil {
+		// A loader fatal error (built-ins missing, store list
+		// failed) is non-recoverable — fail startup. Per-record
+		// XML errors are logged-and-skipped inside Load and never
+		// surface here.
+		s.Close()
+		return fmt.Errorf("ocs-testbench: load diameter dictionaries: %w", err)
+	}
+
+	// Construct and start the Diameter Manager. Peers come from
+	// the store via StorePeerProvider; auto-connect peers initiate
+	// their lifecycle inside Start. Manager.Stop is registered as
+	// a shutdown callback so the reverse-drain order is
+	// HTTP → manager → metrics → store.
+	dmgr := manager.New(dict.Default, manager.NewStorePeerProvider(s))
+	if err := dmgr.Start(ctx); err != nil {
+		s.Close()
+		return fmt.Errorf("ocs-testbench: start diameter manager: %w", err)
+	}
+
 	router := chi.NewRouter()
 	router.Use(logging.RequestLogger)
 
-	// TODO(feature: diameter): wire the Diameter stack here when
-	// internal/diameter lands. Expected shape:
-	//   stack, err := diameter.New(cfg.Peers, ...)
-	//   lc.RegisterShutdown("diameter", stack.Close)
-
 	// TODO(feature: api): mount the REST + SSE routes here when
 	// internal/api lands. Expected shape:
-	//   api.Mount(router, s, ...)
+	//   api.Mount(router, s, dmgr, ...)
 
 	// SPA fallback last — chi's NotFound handler runs after every
 	// explicit route declared above (none yet, by design).
@@ -198,15 +227,22 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 	}()
 
 	// Shutdown registration order is the REVERSE of desired drain
-	// order. Drain order per Feature scope: HTTP → metrics → store.
-	// Therefore registration order: store, metrics, HTTP.
+	// order. Drain order: HTTP → metrics → diameter-manager → store.
+	// Therefore registration order: store, diameter-manager, metrics,
+	// HTTP. The manager's Stop() drains reconnect goroutines and
+	// closes every per-peer transport before the store is closed.
 	lc.RegisterShutdown("store", func(context.Context) error {
 		s.Close()
+		return nil
+	})
+	lc.RegisterShutdown("diameter-manager", func(context.Context) error {
+		dmgr.Stop()
 		return nil
 	})
 	if err := lc.StartMetrics(); err != nil {
 		// Best-effort drain of what's been registered so far before
 		// returning the error.
+		dmgr.Stop()
 		s.Close()
 		return fmt.Errorf("ocs-testbench: start metrics: %w", err)
 	}
