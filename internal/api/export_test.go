@@ -5,8 +5,11 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // DecodeJSONTestHandler returns an http.Handler that calls the internal
@@ -25,3 +28,13 @@ func DecodeJSONTestHandler() http.Handler {
 		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
 	})
 }
+
+// UUIDStr converts a pgtype.UUID to its string representation.
+// Exposed for use in test packages that need to build URL paths.
+func UUIDStr(id pgtype.UUID) string {
+	return uuidToString(id)
+}
+
+// BytesReader wraps a *bytes.Buffer as an io.Reader suitable for
+// json.NewDecoder. Provided to reduce boilerplate in test assertions.
+func BytesReader(b *bytes.Buffer) *bytes.Buffer { return b }

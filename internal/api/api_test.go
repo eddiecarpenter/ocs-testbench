@@ -31,47 +31,70 @@ func newTestRouter(t *testing.T) http.Handler {
 func TestRouter_AC1_AllRoutesRegistered(t *testing.T) {
 	r := newTestRouter(t)
 
-	knownRoutes := []struct {
+	// Routes are divided into two categories:
+	// - Collection routes (no {id}): should NOT return 404 (route missing)
+	//   nor 405 (method not allowed). Real handlers return 200/201; stubs
+	//   return 501.
+	// - Entity routes (with {id}): a 404 from the handler means the route
+	//   IS registered but the entity doesn't exist — that's correct behaviour.
+	//   We only reject 405 (method not allowed) as a sign the route is missing.
+	collectionRoutes := []struct {
 		method string
 		path   string
 	}{
 		{http.MethodGet, "/peers"},
 		{http.MethodPost, "/peers"},
+		{http.MethodGet, "/subscribers"},
+		{http.MethodPost, "/subscribers"},
+		{http.MethodGet, "/templates"},
+		{http.MethodPost, "/templates"},
+		{http.MethodGet, "/scenarios"},
+		{http.MethodPost, "/scenarios"},
+		{http.MethodGet, "/dictionaries"},
+		{http.MethodPost, "/dictionaries"},
+	}
+	entityRoutes := []struct {
+		method string
+		path   string
+	}{
 		{http.MethodGet, "/peers/00000000-0000-0000-0000-000000000001"},
 		{http.MethodPut, "/peers/00000000-0000-0000-0000-000000000001"},
 		{http.MethodDelete, "/peers/00000000-0000-0000-0000-000000000001"},
-		{http.MethodGet, "/subscribers"},
-		{http.MethodPost, "/subscribers"},
 		{http.MethodGet, "/subscribers/00000000-0000-0000-0000-000000000001"},
 		{http.MethodPut, "/subscribers/00000000-0000-0000-0000-000000000001"},
 		{http.MethodDelete, "/subscribers/00000000-0000-0000-0000-000000000001"},
-		{http.MethodGet, "/templates"},
-		{http.MethodPost, "/templates"},
 		{http.MethodGet, "/templates/00000000-0000-0000-0000-000000000001"},
 		{http.MethodPut, "/templates/00000000-0000-0000-0000-000000000001"},
 		{http.MethodDelete, "/templates/00000000-0000-0000-0000-000000000001"},
-		{http.MethodGet, "/scenarios"},
-		{http.MethodPost, "/scenarios"},
 		{http.MethodGet, "/scenarios/00000000-0000-0000-0000-000000000001"},
 		{http.MethodPut, "/scenarios/00000000-0000-0000-0000-000000000001"},
 		{http.MethodDelete, "/scenarios/00000000-0000-0000-0000-000000000001"},
-		{http.MethodGet, "/dictionaries"},
-		{http.MethodPost, "/dictionaries"},
 		{http.MethodGet, "/dictionaries/00000000-0000-0000-0000-000000000001"},
 		{http.MethodPut, "/dictionaries/00000000-0000-0000-0000-000000000001"},
 		{http.MethodDelete, "/dictionaries/00000000-0000-0000-0000-000000000001"},
 	}
 
-	for _, tc := range knownRoutes {
+	for _, tc := range collectionRoutes {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
 			req := httptest.NewRequest(tc.method, tc.path, nil)
 			rr := httptest.NewRecorder()
 			r.ServeHTTP(rr, req)
-			// Routes should be registered (any response except 405
-			// Method Not Allowed or 404 is acceptable for pre-wired
-			// stubs; currently all return 501 Not Implemented).
 			assert.NotEqual(t, http.StatusNotFound, rr.Code,
-				"route %s %s should be registered (got 404)", tc.method, tc.path)
+				"collection route %s %s should be registered (got 404)", tc.method, tc.path)
+			assert.NotEqual(t, http.StatusMethodNotAllowed, rr.Code,
+				"collection route %s %s method should be allowed", tc.method, tc.path)
+		})
+	}
+
+	for _, tc := range entityRoutes {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			rr := httptest.NewRecorder()
+			r.ServeHTTP(rr, req)
+			// 404 from a real handler (entity not found) means the route
+			// IS registered. Only 405 would indicate the route is missing.
+			assert.NotEqual(t, http.StatusMethodNotAllowed, rr.Code,
+				"entity route %s %s method should be allowed (got 405)", tc.method, tc.path)
 		})
 	}
 }
