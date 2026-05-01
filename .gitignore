@@ -10,9 +10,6 @@ CATALOGUE.md
 # Build artefacts
 ocs-testbench
 
-# Agent session artefacts (Goose tooling, compiled binaries)
-.agents/
-
 # Frontend test coverage
 web/coverage/
 
