@@ -64,6 +64,16 @@ func uuidToString(id pgtype.UUID) string {
 	return uuid.UUID(id.Bytes).String()
 }
 
+// uuidFromString parses a UUID string and returns a pgtype.UUID.
+// Returns an error when the string is not a valid UUID.
+func uuidFromString(s string) (pgtype.UUID, error) {
+	id, err := uuid.Parse(s)
+	if err != nil {
+		return pgtype.UUID{}, err
+	}
+	return pgtype.UUID{Bytes: id, Valid: true}, nil
+}
+
 // mapStoreError maps a store error to the appropriate HTTP response.
 // Returns the original error so callers can short-circuit with
 // `if err := mapStoreError(w, err); err != nil { return }`.
