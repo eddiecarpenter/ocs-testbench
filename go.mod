@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
+	github.com/eddiecarpenter/ruleevaluator v1.0.0
 	github.com/fiorix/go-diameter/v4 v4.3.0
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/golang-migrate/migrate/v4 v4.19.1
