@@ -1,7 +1,9 @@
-# AGENTS.md
-
-@.ai/RULEBOOK.md
-@AGENTS.local.md
+# AGENTS.md:OK
+ 
+# LOAD ORDER (ENFORCED)
+1. .ai/RULEBOOK.md
+2. LOCALRULES.md
+3. skills/session-init/SKILL.md
 
 ## Bootstrap Rule
 
