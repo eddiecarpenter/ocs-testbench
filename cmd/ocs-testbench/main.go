@@ -57,6 +57,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/eddiecarpenter/ocs-testbench/internal/api"
 	"github.com/eddiecarpenter/ocs-testbench/internal/appl"
 	"github.com/eddiecarpenter/ocs-testbench/internal/baseconfig"
 	"github.com/eddiecarpenter/ocs-testbench/internal/diameter/dictionary"
@@ -216,15 +217,18 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 	behaviour := protocol.New(sender, protocol.Options{})
 	_ = behaviour // engine consumer lands in a later feature
 
+	// Build the REST API router. The api.Router includes its own
+	// middleware stack (Recovery, RequestID, logging.RequestLogger) and
+	// all CRUD + connection-control + SSE endpoints.
+	apiRouter := api.Router(s, dmgr)
+
+	// Mount the API router at /api. All routes within api.Router are
+	// relative to the router's root; the Mount prefix adds /api.
 	router := chi.NewRouter()
-	router.Use(logging.RequestLogger)
+	router.Mount("/api", apiRouter)
 
-	// TODO(feature: api): mount the REST + SSE routes here when
-	// internal/api lands. Expected shape:
-	//   api.Mount(router, s, dmgr, behaviour, ...)
-
-	// SPA fallback last — chi's NotFound handler runs after every
-	// explicit route declared above (none yet, by design).
+	// SPA fallback: any request not handled by the API routes above
+	// is served by the frontend handler (React SPA).
 	router.NotFound(frontHandler.ServeHTTP)
 
 	server := &http.Server{
