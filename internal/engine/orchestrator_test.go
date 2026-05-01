@@ -161,7 +161,7 @@ func TestOrchestrator_RunContinuous_ActionRetry_RetriesWithDelay(t *testing.T) {
 
 	start := time.Now()
 	err := orch.RunContinuous(context.Background(), sc, steps, RunOptions{
-		MaxIterations: 5,  // won't complete — retries exhaust first
+		MaxIterations: 5, // won't complete — retries exhaust first
 		MaxRetries:    2,
 		RetryDelay:    5 * time.Millisecond,
 	})
