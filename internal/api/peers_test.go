@@ -17,11 +17,11 @@ import (
 )
 
 // newTestRouterWithStore constructs an api.Router wired with the
-// given store, for tests that need to pre-populate the store before
-// issuing requests.
+// given store and no PeerManager, for tests that need to
+// pre-populate the store before issuing requests.
 func newTestRouterWithStore(t *testing.T, s store.Store) http.Handler {
 	t.Helper()
-	return api.Router(s)
+	return api.Router(s, nil)
 }
 
 // seedPeer creates a peer via POST /peers. Fails the test if not 201.

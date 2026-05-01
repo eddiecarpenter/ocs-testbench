@@ -2,27 +2,29 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/eddiecarpenter/ocs-testbench/internal/diameter/manager"
 	"github.com/eddiecarpenter/ocs-testbench/internal/store"
 )
 
 // mountPeers registers all /peers and /peers/{id} routes on r.
-// CRUD handlers are implemented here; connection-control handlers are
-// added by Task 7 when the Manager dependency is wired in.
-func mountPeers(r chi.Router, s store.Store) {
+// CRUD handlers are implemented here. Connection-control handlers
+// require a non-nil mgr; if mgr is nil they return 503.
+func mountPeers(r chi.Router, s store.Store, mgr PeerManager) {
 	r.Get("/peers", listPeers(s))
 	r.Post("/peers", createPeer(s))
 	r.Get("/peers/{id}", getPeer(s))
 	r.Put("/peers/{id}", updatePeer(s))
 	r.Delete("/peers/{id}", deletePeer(s))
 
-	// Connection control — implemented by Task 7
-	r.Post("/peers/{id}/connect", notImplemented)
-	r.Post("/peers/{id}/disconnect", notImplemented)
-	r.Get("/peers/{id}/status", notImplemented)
+	// Connection control — implemented in this task.
+	r.Post("/peers/{id}/connect", connectPeer(s, mgr))
+	r.Post("/peers/{id}/disconnect", disconnectPeer(s, mgr))
+	r.Get("/peers/{id}/status", peerStatus(s, mgr))
 }
 
 // peerRequest is the JSON request body for Peer create and update.
@@ -36,6 +38,14 @@ type peerResponse struct {
 	ID   string          `json:"id"`
 	Name string          `json:"name"`
 	Body json.RawMessage `json:"body"`
+}
+
+// peerStatusResponse is the JSON response shape for the peer status
+// endpoint.
+type peerStatusResponse struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
 }
 
 // toPeerResponse converts a store.Peer to a peerResponse.
@@ -132,5 +142,104 @@ func deletePeer(s store.Store) http.HandlerFunc {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// connectPeer handles POST /peers/{id}/connect.
+// Looks up the peer name from the store, then delegates to the Manager.
+func connectPeer(s store.Store, mgr PeerManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if mgr == nil {
+			managerUnavailable(w)
+			return
+		}
+		id, ok := parseUUIDParam(w, r, "id")
+		if !ok {
+			return
+		}
+		peer, err := s.GetPeer(r.Context(), id)
+		if mapStoreError(w, err) != nil {
+			return
+		}
+		if err := mgr.Connect(peer.Name); err != nil {
+			mapManagerError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}
+}
+
+// disconnectPeer handles POST /peers/{id}/disconnect.
+func disconnectPeer(s store.Store, mgr PeerManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if mgr == nil {
+			managerUnavailable(w)
+			return
+		}
+		id, ok := parseUUIDParam(w, r, "id")
+		if !ok {
+			return
+		}
+		peer, err := s.GetPeer(r.Context(), id)
+		if mapStoreError(w, err) != nil {
+			return
+		}
+		if err := mgr.Disconnect(peer.Name); err != nil {
+			mapManagerError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+// peerStatus handles GET /peers/{id}/status.
+func peerStatus(s store.Store, mgr PeerManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if mgr == nil {
+			managerUnavailable(w)
+			return
+		}
+		id, ok := parseUUIDParam(w, r, "id")
+		if !ok {
+			return
+		}
+		peer, err := s.GetPeer(r.Context(), id)
+		if mapStoreError(w, err) != nil {
+			return
+		}
+		state, err := mgr.State(peer.Name)
+		if err != nil {
+			// Peer exists in store but not registered in Manager —
+			// treat as stopped (not managed by the live stack).
+			if errors.Is(err, manager.ErrUnknownPeer) {
+				respondJSON(w, http.StatusOK, peerStatusResponse{
+					ID:     uuidToString(id),
+					Name:   peer.Name,
+					Status: "stopped",
+				})
+				return
+			}
+			mapManagerError(w, err)
+			return
+		}
+		respondJSON(w, http.StatusOK, peerStatusResponse{
+			ID:     uuidToString(id),
+			Name:   peer.Name,
+			Status: state.String(),
+		})
+	}
+}
+
+// mapManagerError maps a manager error to the appropriate HTTP response.
+func mapManagerError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, manager.ErrUnknownPeer):
+		respondNotFoundMsg(w, "peer not found in connection manager")
+	case errors.Is(err, manager.ErrNotStarted):
+		respondError(w, http.StatusServiceUnavailable, CodeInternalError, "manager not started")
+	case errors.Is(err, manager.ErrStopped):
+		respondError(w, http.StatusServiceUnavailable, CodeInternalError, "manager stopped")
+	default:
+		respondInternalError(w)
 	}
 }

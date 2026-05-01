@@ -37,7 +37,7 @@ func newScenarioFixture(t *testing.T) *scenarioFixture {
 	require.NoError(t, err)
 	return &scenarioFixture{
 		s:      s,
-		r:      api.Router(s),
+		r:      api.Router(s, nil),
 		peerID: api.UUIDStr(peer.ID),
 		tplID:  api.UUIDStr(tpl.ID),
 	}

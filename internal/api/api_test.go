@@ -15,11 +15,12 @@ import (
 )
 
 // newTestRouter constructs an api.Router wired with an in-memory test
-// store. Tests that only exercise the routing and middleware layers
-// (not entity logic) use this helper.
+// store and no PeerManager. Tests that only exercise the routing and
+// middleware layers (not entity or connection-control logic) use this
+// helper.
 func newTestRouter(t *testing.T) http.Handler {
 	t.Helper()
-	return api.Router(store.NewTestStore())
+	return api.Router(store.NewTestStore(), nil)
 }
 
 // TestRouter_AC1_AllRoutesRegistered verifies that the router accepts
