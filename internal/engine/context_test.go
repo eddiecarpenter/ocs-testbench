@@ -23,9 +23,19 @@ type fakeSender struct {
 	delay time.Duration
 }
 
-func (f *fakeSender) Send(_ context.Context, _ string, _ *messaging.CCR) (*messaging.CCA, error) {
+func (f *fakeSender) Send(ctx context.Context, _ string, _ *messaging.CCR) (*messaging.CCA, error) {
 	if f.delay > 0 {
-		time.Sleep(f.delay)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(f.delay):
+		}
+	}
+	// Check context even without a delay so tests can cancel mid-execution.
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
 	}
 	return f.cca, f.err
 }
