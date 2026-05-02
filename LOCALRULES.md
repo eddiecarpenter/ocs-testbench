@@ -15,7 +15,7 @@ Template: eddiecarpenter/ai-native-delivery
 
 - **Name:** ocs-testbench
 - **Topology:** Single
-- **Stack:** Go
+- **Stack:** Go, TypeScript, React
 - **Description:** OCS Testbench — Diameter Gy Credit-Control traffic generator and test tool
 
 ## Repo
