@@ -22,7 +22,7 @@ on:
 
 jobs:
   pipeline:
-    uses: eddiecarpenter/gh-agentic/.github/workflows/agentic-pipeline.yml@v2.6.3
+    uses: eddiecarpenter/gh-agentic/.github/workflows/agentic-pipeline.yml@v2.6.4
     with:
       pr_number: ${{ inputs.pr_number || '' }}
       branch_name: ${{ inputs.branch_name || '' }}
