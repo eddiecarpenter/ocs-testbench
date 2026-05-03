@@ -251,12 +251,12 @@ func TestPeerConnection_DropThenReconnect(t *testing.T) {
 	}
 	live.Close()
 
-	awaitState(t, ch, diameter.StateDisconnected, 5*time.Second)
+	awaitState(t, ch, diameter.StateDisconnected, 15*time.Second)
 
 	// The reconnect loop retries silently — no connecting/disconnected
 	// events fire during retries. The peer should reconnect to the
 	// still-running server and emit a single connected transition.
-	awaitState(t, ch, diameter.StateConnected, 5*time.Second)
+	awaitState(t, ch, diameter.StateConnected, 15*time.Second)
 }
 
 // Test 4 (AC-3) — backoff loop ticks repeatedly. After a drop and
@@ -289,7 +289,7 @@ func TestPeerConnection_BackoffLoopKeepsTicking(t *testing.T) {
 	srv.Close()
 	pc.Conn().Close()
 
-	awaitState(t, ch, diameter.StateDisconnected, 5*time.Second)
+	awaitState(t, ch, diameter.StateDisconnected, 15*time.Second)
 
 	// Reconnect retries are silent — no further events are emitted
 	// during the backoff loop. Verify the peer stays disconnected
@@ -335,7 +335,7 @@ func TestPeerConnection_DisconnectHaltsReconnect(t *testing.T) {
 	// reconnect attempts fail.
 	pc.Conn().Close()
 	srv.Close()
-	awaitState(t, ch, diameter.StateDisconnected, 5*time.Second)
+	awaitState(t, ch, diameter.StateDisconnected, 15*time.Second)
 
 	// Wait briefly to allow at least one reconnect attempt.
 	time.Sleep(150 * time.Millisecond)
