@@ -26,7 +26,7 @@ func seedSubscriber(t *testing.T, r http.Handler, msisdn, iccid string) map[stri
 		"iccid":  iccid,
 	})
 	require.NoError(t, err)
-	req := httptest.NewRequest(http.MethodPost, "/subscribers", bytes.NewReader(reqBody))
+	req := httptest.NewRequest(http.MethodPost, "/v1/subscribers", bytes.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
@@ -44,7 +44,7 @@ func TestSubscriber_CreateSubscriber_AllRequiredFields_Returns201(t *testing.T) 
 	reqBody, _ := json.Marshal(map[string]any{
 		"name": "alice", "msisdn": "27821234567", "iccid": "8927010000123456789",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/subscribers", bytes.NewReader(reqBody))
+	req := httptest.NewRequest(http.MethodPost, "/v1/subscribers", bytes.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
@@ -61,7 +61,7 @@ func TestSubscriber_CreateSubscriber_AllRequiredFields_Returns201(t *testing.T) 
 func TestSubscriber_CreateSubscriber_MissingMsisdn_Returns400(t *testing.T) {
 	r := newTestRouter(t)
 	reqBody, _ := json.Marshal(map[string]any{"iccid": "8927010000123456789"})
-	req := httptest.NewRequest(http.MethodPost, "/subscribers", bytes.NewReader(reqBody))
+	req := httptest.NewRequest(http.MethodPost, "/v1/subscribers", bytes.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
@@ -75,7 +75,7 @@ func TestSubscriber_CreateSubscriber_MissingMsisdn_Returns400(t *testing.T) {
 func TestSubscriber_CreateSubscriber_MissingIccid_Returns400(t *testing.T) {
 	r := newTestRouter(t)
 	reqBody, _ := json.Marshal(map[string]any{"msisdn": "27821234567"})
-	req := httptest.NewRequest(http.MethodPost, "/subscribers", bytes.NewReader(reqBody))
+	req := httptest.NewRequest(http.MethodPost, "/v1/subscribers", bytes.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
@@ -92,7 +92,7 @@ func TestSubscriber_ListSubscribers_Returns200(t *testing.T) {
 	seedSubscriber(t, r, "27821111111", "8927010000000000001")
 	seedSubscriber(t, r, "27822222222", "8927010000000000002")
 
-	req := httptest.NewRequest(http.MethodGet, "/subscribers", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/subscribers", nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
@@ -110,7 +110,7 @@ func TestSubscriber_GetSubscriber_Existing_Returns200(t *testing.T) {
 	created := seedSubscriber(t, r, "27820000001", "8927010000000000099")
 	id := created["id"].(string)
 
-	req := httptest.NewRequest(http.MethodGet, "/subscribers/"+id, nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/subscribers/"+id, nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
@@ -123,7 +123,7 @@ func TestSubscriber_GetSubscriber_Existing_Returns200(t *testing.T) {
 // TestSubscriber_GetSubscriber_NonExistent_Returns404 tests AC-7.
 func TestSubscriber_GetSubscriber_NonExistent_Returns404(t *testing.T) {
 	r := newTestRouter(t)
-	req := httptest.NewRequest(http.MethodGet, "/subscribers/00000000-0000-0000-0000-000000000099", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/subscribers/00000000-0000-0000-0000-000000000099", nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
@@ -142,7 +142,7 @@ func TestSubscriber_UpdateSubscriber_ValidBody_Returns200(t *testing.T) {
 	reqBody, _ := json.Marshal(map[string]any{
 		"name": "updated", "msisdn": "27820000099", "iccid": "8927010000000000088",
 	})
-	req := httptest.NewRequest(http.MethodPut, "/subscribers/"+id, bytes.NewReader(reqBody))
+	req := httptest.NewRequest(http.MethodPut, "/v1/subscribers/"+id, bytes.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
@@ -161,7 +161,7 @@ func TestSubscriber_DeleteSubscriber_Existing_Returns204(t *testing.T) {
 	created := seedSubscriber(t, r, "27820000003", "8927010000000000077")
 	id := created["id"].(string)
 
-	req := httptest.NewRequest(http.MethodDelete, "/subscribers/"+id, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/v1/subscribers/"+id, nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
@@ -169,24 +169,23 @@ func TestSubscriber_DeleteSubscriber_Existing_Returns204(t *testing.T) {
 }
 
 // TestSubscriber_OptionalFields_StoredCorrectly verifies that optional
-// fields (imei, deviceMake, deviceModel) are stored and returned.
+// fields (imei, tac) are stored and returned.
 func TestSubscriber_OptionalFields_StoredCorrectly(t *testing.T) {
 	s := store.NewTestStore()
 	ctx := context.Background()
 
 	sub, err := s.InsertSubscriber(ctx, store.InsertSubscriberParams{
-		Name:        "device-user",
-		Msisdn:      "27820000004",
-		Iccid:       "8927010000000000066",
-		Imei:        pgTextFrom("123456789012345"),
-		DeviceMake:  pgTextFrom("Apple"),
-		DeviceModel: pgTextFrom("iPhone 14"),
+		Name:   "device-user",
+		Msisdn: "27820000004",
+		Iccid:  "8927010000000000066",
+		Imei:   pgTextFrom("123456789012345"),
+		Tac:    pgTextFrom("35617109"),
 	})
 	require.NoError(t, err)
 
 	r := newTestRouterWithStore(t, s)
 	req := httptest.NewRequest(http.MethodGet,
-		fmt.Sprintf("/subscribers/%s", api.UUIDStr(sub.ID)), nil)
+		fmt.Sprintf("/v1/subscribers/%s", api.UUIDStr(sub.ID)), nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
@@ -194,6 +193,5 @@ func TestSubscriber_OptionalFields_StoredCorrectly(t *testing.T) {
 	var resp map[string]any
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 	assert.Equal(t, "123456789012345", resp["imei"])
-	assert.Equal(t, "Apple", resp["deviceMake"])
-	assert.Equal(t, "iPhone 14", resp["deviceModel"])
+	assert.Equal(t, "35617109", resp["tac"])
 }

@@ -63,6 +63,7 @@ type PeerConnection interface {
 	Disconnect()
 	State() diameter.ConnectionState
 	Subscribe() <-chan diameter.StateEvent
+	Unsubscribe(ch <-chan diameter.StateEvent)
 	Config() diameter.PeerConfig
 	Conn() diam.Conn
 	HandleFunc(cmd string, handler diam.HandlerFunc)
@@ -381,6 +382,7 @@ func (m *Manager) Connect(name string) error {
 	}
 	entry, ok := m.peers[name]
 	rootCtx := m.rootCtx
+	fanCtx := m.fanCtx
 	m.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("%w: %q", ErrUnknownPeer, name)
@@ -388,7 +390,18 @@ func (m *Manager) Connect(name string) error {
 	if rootCtx == nil {
 		return ErrStopped
 	}
-	return entry.conn.Connect(rootCtx)
+	// Subscribe before Connect so no early events are missed. A new
+	// subscriber channel is created by the connection on each Connect
+	// call (the previous one was closed by Disconnect). We then start
+	// a fresh fan-out goroutine for it.
+	ch := entry.conn.Subscribe()
+	if err := entry.conn.Connect(rootCtx); err != nil {
+		entry.conn.Unsubscribe(ch)
+		return err
+	}
+	m.fanWG.Add(1)
+	go m.fanOut(fanCtx, name, ch)
+	return nil
 }
 
 // Disconnect cancels the lifecycle goroutine for the named peer.

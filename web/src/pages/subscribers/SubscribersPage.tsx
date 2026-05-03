@@ -228,8 +228,15 @@ function SubscriberRow({
   catalog: TacEntry[];
   onEdit: () => void;
 }) {
-  const device = sub.tac
-    ? catalog.find((e) => e.tac === sub.tac)?.model ?? `TAC ${sub.tac}`
+  // Use stored TAC directly, or fall back to inferring it from the IMEI
+  // prefix (for subscribers created before the tac column was added).
+  const effectiveTac =
+    sub.tac ??
+    (sub.imei?.length === 15
+      ? catalog.find((e) => sub.imei!.startsWith(e.tac))?.tac
+      : undefined);
+  const device = effectiveTac
+    ? catalog.find((e) => e.tac === effectiveTac)?.model ?? `TAC ${effectiveTac}`
     : '—';
   return (
     <Table.Tr>

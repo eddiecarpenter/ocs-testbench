@@ -210,15 +210,14 @@ func (t *testStore) InsertSubscriber(ctx context.Context, arg InsertSubscriberPa
 	id := t.newID()
 	now := timestamptz(t.now())
 	row := Subscriber{
-		ID:          id,
-		Name:        arg.Name,
-		Msisdn:      arg.Msisdn,
-		Iccid:       arg.Iccid,
-		Imei:        arg.Imei,
-		DeviceMake:  arg.DeviceMake,
-		DeviceModel: arg.DeviceModel,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:        id,
+		Name:      arg.Name,
+		Msisdn:    arg.Msisdn,
+		Iccid:     arg.Iccid,
+		Imei:      arg.Imei,
+		Tac:       arg.Tac,
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 	t.subs[uuidKey(id)] = row
 	return row, nil
@@ -279,8 +278,7 @@ func (t *testStore) UpdateSubscriber(ctx context.Context, arg UpdateSubscriberPa
 	row.Msisdn = arg.Msisdn
 	row.Iccid = arg.Iccid
 	row.Imei = arg.Imei
-	row.DeviceMake = arg.DeviceMake
-	row.DeviceModel = arg.DeviceModel
+	row.Tac = arg.Tac
 	row.UpdatedAt = timestamptz(t.now())
 	t.subs[uuidKey(arg.ID)] = row
 	return row, nil
@@ -387,29 +385,33 @@ func (t *testStore) DeleteAVPTemplate(ctx context.Context, id pgtype.UUID) error
 
 // ----- scenario -------------------------------------------------
 
-func (t *testStore) InsertScenario(ctx context.Context, name string, templateID, peerID pgtype.UUID, body []byte) (Scenario, error) {
+func (t *testStore) InsertScenario(ctx context.Context, name string, peerID, subscriberID pgtype.UUID, body []byte) (Scenario, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	if _, taken := t.scenByName[name]; taken {
 		return Scenario{}, duplicate("scenario", name)
 	}
-	if _, ok := t.templates[uuidKey(templateID)]; !ok {
-		return Scenario{}, foreignKey("scenario", "template_id")
+	if peerID.Valid {
+		if _, ok := t.peers[uuidKey(peerID)]; !ok {
+			return Scenario{}, foreignKey("scenario", "peer_id")
+		}
 	}
-	if _, ok := t.peers[uuidKey(peerID)]; !ok {
-		return Scenario{}, foreignKey("scenario", "peer_id")
+	if subscriberID.Valid {
+		if _, ok := t.subs[uuidKey(subscriberID)]; !ok {
+			return Scenario{}, foreignKey("scenario", "subscriber_id")
+		}
 	}
 	id := t.newID()
 	now := timestamptz(t.now())
 	row := Scenario{
-		ID:         id,
-		Name:       name,
-		TemplateID: templateID,
-		PeerID:     peerID,
-		Body:       cloneBytes(body),
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		ID:           id,
+		Name:         name,
+		PeerID:       peerID,
+		SubscriberID: subscriberID,
+		Body:         cloneBytes(body),
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 	t.scenarios[uuidKey(id)] = row
 	t.scenByName[name] = uuidKey(id)
@@ -457,16 +459,15 @@ func (t *testStore) UpdateScenario(ctx context.Context, arg UpdateScenarioParams
 	if other, taken := t.scenByName[arg.Name]; taken && other != uuidKey(arg.ID) {
 		return Scenario{}, duplicate("scenario", arg.Name)
 	}
-	if _, ok := t.templates[uuidKey(arg.TemplateID)]; !ok {
-		return Scenario{}, foreignKey("scenario", "template_id")
-	}
-	if _, ok := t.peers[uuidKey(arg.PeerID)]; !ok {
-		return Scenario{}, foreignKey("scenario", "peer_id")
+	if arg.PeerID.Valid {
+		if _, ok := t.peers[uuidKey(arg.PeerID)]; !ok {
+			return Scenario{}, foreignKey("scenario", "peer_id")
+		}
 	}
 	delete(t.scenByName, row.Name)
 	row.Name = arg.Name
-	row.TemplateID = arg.TemplateID
 	row.PeerID = arg.PeerID
+	row.SubscriberID = arg.SubscriberID
 	row.Body = cloneBytes(arg.Body)
 	row.UpdatedAt = timestamptz(t.now())
 	t.scenarios[uuidKey(arg.ID)] = row

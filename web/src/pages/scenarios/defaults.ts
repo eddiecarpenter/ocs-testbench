@@ -46,6 +46,16 @@ const DEFAULT_VARIABLES: Variable[] = [
       params: { value: 1_048_576 },
     },
   },
+  {
+    name: 'USU_TOTAL',
+    description: 'Used service-units quantity reported in UPDATE and TERMINATE requests.',
+    source: {
+      kind: 'generator',
+      strategy: 'literal',
+      refresh: 'once',
+      params: { value: 1_048_576 },
+    },
+  },
 ];
 
 const DEFAULT_SERVICE: Service = {
@@ -69,8 +79,8 @@ export function makeNewScenarioDraft(): Scenario {
     serviceModel: 'single-mscc',
     origin: 'user',
     favourite: false,
-    subscriberId: 'sub-001',
-    peerId: 'peer-01',
+    subscriberId: '',
+    peerId: '',
     stepCount: 1,
     updatedAt: new Date().toISOString(),
     avpTree: DEFAULT_AVP_TREE,

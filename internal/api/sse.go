@@ -18,17 +18,11 @@ import (
 // Execution SSE (GET /events/executions/{id}) is not yet implemented;
 // it depends on Feature #19 (internal/engine/) which has not yet landed.
 func mountSSE(r chi.Router, s store.Store, mgr PeerManager) {
+	// Combined event stream — the frontend subscribes here for all event types.
+	r.Get("/events", peerSSE(s, mgr))
+	// Scoped sub-streams kept for backwards compatibility.
 	r.Get("/events/peers", peerSSE(s, mgr))
 	r.Get("/events/executions/{id}", notImplemented) // blocked on Feature #19
-}
-
-// peerSSEEvent is the JSON payload emitted for each peer state
-// transition in the peer SSE stream.
-type peerSSEEvent struct {
-	PeerID string `json:"peerId"`
-	Name   string `json:"peerName"`
-	Status string `json:"status"`
-	At     string `json:"at"`
 }
 
 // peerSSE handles GET /events/peers.
@@ -87,6 +81,26 @@ func peerSSE(s store.Store, mgr PeerManager) http.HandlerFunc {
 			peerIDByName[p.Name] = uuidToString(p.ID)
 		}
 
+		// Emit the current state of every known peer immediately so the
+		// frontend does not miss transitions that happened before the
+		// SSE stream was opened (e.g. auto-connect on startup).
+		for _, p := range peers {
+			resp := toPeerResponse(p, peerStateString(mgr, p.Name))
+			data, err := json.Marshal(resp)
+			if err != nil {
+				continue
+			}
+			fmt.Fprintf(w, "event: peer.updated\ndata: %s\n\n", data)
+		}
+		flusher.Flush()
+
+		// Build a name→store.Peer map so live events can build a full
+		// peer response without an additional store round-trip.
+		peerByName := make(map[string]store.Peer, len(peers))
+		for _, p := range peers {
+			peerByName[p.Name] = p
+		}
+
 		for {
 			select {
 			case evt, open := <-ch:
@@ -94,18 +108,17 @@ func peerSSE(s store.Store, mgr PeerManager) http.HandlerFunc {
 					// Manager stopped; end the stream.
 					return
 				}
-				peerID := peerIDByName[evt.PeerName]
-				payload := peerSSEEvent{
-					PeerID: peerID,
-					Name:   evt.PeerName,
-					Status: evt.To.String(),
-					At:     evt.Time.UTC().Format(time.RFC3339),
+				p, known := peerByName[evt.PeerName]
+				if !known {
+					continue
 				}
-				data, err := json.Marshal(payload)
+				resp := toPeerResponse(p, evt.To.String())
+				resp.LastChangeAt = evt.Time.UTC().Format(time.RFC3339)
+				data, err := json.Marshal(resp)
 				if err != nil {
 					continue
 				}
-				fmt.Fprintf(w, "event: peer-status\ndata: %s\n\n", data)
+				fmt.Fprintf(w, "event: peer.updated\ndata: %s\n\n", data)
 				flusher.Flush()
 
 			case <-r.Context().Done():

@@ -43,36 +43,36 @@ func TestRouter_AC1_AllRoutesRegistered(t *testing.T) {
 		method string
 		path   string
 	}{
-		{http.MethodGet, "/peers"},
-		{http.MethodPost, "/peers"},
-		{http.MethodGet, "/subscribers"},
-		{http.MethodPost, "/subscribers"},
-		{http.MethodGet, "/templates"},
-		{http.MethodPost, "/templates"},
-		{http.MethodGet, "/scenarios"},
-		{http.MethodPost, "/scenarios"},
-		{http.MethodGet, "/dictionaries"},
-		{http.MethodPost, "/dictionaries"},
+		{http.MethodGet, "/v1/peers"},
+		{http.MethodPost, "/v1/peers"},
+		{http.MethodGet, "/v1/subscribers"},
+		{http.MethodPost, "/v1/subscribers"},
+		{http.MethodGet, "/v1/templates"},
+		{http.MethodPost, "/v1/templates"},
+		{http.MethodGet, "/v1/scenarios"},
+		{http.MethodPost, "/v1/scenarios"},
+		{http.MethodGet, "/v1/dictionaries"},
+		{http.MethodPost, "/v1/dictionaries"},
 	}
 	entityRoutes := []struct {
 		method string
 		path   string
 	}{
-		{http.MethodGet, "/peers/00000000-0000-0000-0000-000000000001"},
-		{http.MethodPut, "/peers/00000000-0000-0000-0000-000000000001"},
-		{http.MethodDelete, "/peers/00000000-0000-0000-0000-000000000001"},
-		{http.MethodGet, "/subscribers/00000000-0000-0000-0000-000000000001"},
-		{http.MethodPut, "/subscribers/00000000-0000-0000-0000-000000000001"},
-		{http.MethodDelete, "/subscribers/00000000-0000-0000-0000-000000000001"},
-		{http.MethodGet, "/templates/00000000-0000-0000-0000-000000000001"},
-		{http.MethodPut, "/templates/00000000-0000-0000-0000-000000000001"},
-		{http.MethodDelete, "/templates/00000000-0000-0000-0000-000000000001"},
-		{http.MethodGet, "/scenarios/00000000-0000-0000-0000-000000000001"},
-		{http.MethodPut, "/scenarios/00000000-0000-0000-0000-000000000001"},
-		{http.MethodDelete, "/scenarios/00000000-0000-0000-0000-000000000001"},
-		{http.MethodGet, "/dictionaries/00000000-0000-0000-0000-000000000001"},
-		{http.MethodPut, "/dictionaries/00000000-0000-0000-0000-000000000001"},
-		{http.MethodDelete, "/dictionaries/00000000-0000-0000-0000-000000000001"},
+		{http.MethodGet, "/v1/peers/00000000-0000-0000-0000-000000000001"},
+		{http.MethodPut, "/v1/peers/00000000-0000-0000-0000-000000000001"},
+		{http.MethodDelete, "/v1/peers/00000000-0000-0000-0000-000000000001"},
+		{http.MethodGet, "/v1/subscribers/00000000-0000-0000-0000-000000000001"},
+		{http.MethodPut, "/v1/subscribers/00000000-0000-0000-0000-000000000001"},
+		{http.MethodDelete, "/v1/subscribers/00000000-0000-0000-0000-000000000001"},
+		{http.MethodGet, "/v1/templates/00000000-0000-0000-0000-000000000001"},
+		{http.MethodPut, "/v1/templates/00000000-0000-0000-0000-000000000001"},
+		{http.MethodDelete, "/v1/templates/00000000-0000-0000-0000-000000000001"},
+		{http.MethodGet, "/v1/scenarios/00000000-0000-0000-0000-000000000001"},
+		{http.MethodPut, "/v1/scenarios/00000000-0000-0000-0000-000000000001"},
+		{http.MethodDelete, "/v1/scenarios/00000000-0000-0000-0000-000000000001"},
+		{http.MethodGet, "/v1/dictionaries/00000000-0000-0000-0000-000000000001"},
+		{http.MethodPut, "/v1/dictionaries/00000000-0000-0000-0000-000000000001"},
+		{http.MethodDelete, "/v1/dictionaries/00000000-0000-0000-0000-000000000001"},
 	}
 
 	for _, tc := range collectionRoutes {
@@ -163,7 +163,7 @@ func TestRouter_AC3_InvalidJSONBody400(t *testing.T) {
 func TestRequestIDMiddleware_SetsXRequestIDHeader(t *testing.T) {
 	r := newTestRouter(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/peers", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/peers", nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 

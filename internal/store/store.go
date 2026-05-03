@@ -135,10 +135,10 @@ type Store interface {
 
 	// ----- scenario -----------------------------------------------
 
-	// InsertScenario creates a new scenario referencing the given
-	// template and peer. Returns ErrDuplicateName if name is taken,
-	// ErrForeignKey if templateID or peerID does not resolve.
-	InsertScenario(ctx context.Context, name string, templateID, peerID pgtype.UUID, body []byte) (Scenario, error)
+	// InsertScenario creates a new scenario. Returns ErrDuplicateName
+	// if name is taken, ErrForeignKey if peerID or subscriberID does
+	// not resolve.
+	InsertScenario(ctx context.Context, name string, peerID, subscriberID pgtype.UUID, body []byte) (Scenario, error)
 	// GetScenario fetches a scenario by id. Returns ErrNotFound if
 	// missing.
 	GetScenario(ctx context.Context, id pgtype.UUID) (Scenario, error)

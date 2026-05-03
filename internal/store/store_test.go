@@ -217,8 +217,7 @@ func TestPeer_DeleteWithReferencingScenario_ReturnsForeignKey(t *testing.T) {
 	s := NewTestStore()
 	defer s.Close()
 	peer := seedPeer(t, s, "referenced")
-	tpl := seedTemplate(t, s, "tpl-1")
-	if _, err := s.InsertScenario(context.Background(), "scenario", tpl.ID, peer.ID, []byte(`{}`)); err != nil {
+	if _, err := s.InsertScenario(context.Background(), "scenario", peer.ID, pgtype.UUID{}, []byte(`{}`)); err != nil {
 		t.Fatalf("InsertScenario: %v", err)
 	}
 	err := s.DeletePeer(context.Background(), peer.ID)
@@ -233,12 +232,11 @@ func TestSubscriber_InsertAndGetByID_RoundTripsIncludingNullableFields(t *testin
 	s := NewTestStore()
 	defer s.Close()
 	in := InsertSubscriberParams{
-		Name:        "alice",
-		Msisdn:      "27821234567",
-		Iccid:       "8927000000000000001",
-		Imei:        nullText(),
-		DeviceMake:  nullText(),
-		DeviceModel: nullText(),
+		Name:   "alice",
+		Msisdn: "27821234567",
+		Iccid:  "8927000000000000001",
+		Imei:   nullText(),
+		Tac:    nullText(),
 	}
 	got, err := s.InsertSubscriber(context.Background(), in)
 	if err != nil {
@@ -303,13 +301,12 @@ func TestSubscriber_Update_MutatesAllFields(t *testing.T) {
 	in := InsertSubscriberParams{Name: "u", Msisdn: "1", Iccid: "1"}
 	got, _ := s.InsertSubscriber(context.Background(), in)
 	updated, err := s.UpdateSubscriber(context.Background(), UpdateSubscriberParams{
-		ID:          got.ID,
-		Name:        "u-2",
-		Msisdn:      "9",
-		Iccid:       "9",
-		Imei:        textFrom("IMEI-9"),
-		DeviceMake:  textFrom("Acme"),
-		DeviceModel: textFrom("X1"),
+		ID:     got.ID,
+		Name:   "u-2",
+		Msisdn: "9",
+		Iccid:  "9",
+		Imei:   textFrom("IMEI-9"),
+		Tac:    textFrom("35617109"),
 	})
 	if err != nil {
 		t.Fatalf("UpdateSubscriber: %v", err)
@@ -392,17 +389,17 @@ func TestAVPTemplate_RoundTripAndDuplicate(t *testing.T) {
 	}
 }
 
-func TestAVPTemplate_DeleteWithReferencingScenario_ReturnsForeignKey(t *testing.T) {
+func TestAVPTemplate_DeleteWithReferencingScenario_Returns204(t *testing.T) {
 	s := NewTestStore()
 	defer s.Close()
 	peer := seedPeer(t, s, "p")
 	tpl := seedTemplate(t, s, "t")
-	if _, err := s.InsertScenario(context.Background(), "sc", tpl.ID, peer.ID, []byte(`{}`)); err != nil {
+	if _, err := s.InsertScenario(context.Background(), "sc", peer.ID, pgtype.UUID{}, []byte(`{}`)); err != nil {
 		t.Fatalf("Insert scenario: %v", err)
 	}
 	err := s.DeleteAVPTemplate(context.Background(), tpl.ID)
-	if !errors.Is(err, ErrForeignKey) {
-		t.Fatalf("err: got %v want ErrForeignKey", err)
+	if err != nil {
+		t.Fatalf("err: got %v want nil (templates no longer FK'd to scenarios)", err)
 	}
 }
 
@@ -426,25 +423,24 @@ func TestAVPTemplate_Update_MutatesAndBumpsUpdatedAt(t *testing.T) {
 
 // ----- scenario -------------------------------------------------
 
-func TestScenario_InsertWithMissingTemplate_ReturnsForeignKey(t *testing.T) {
+func TestScenario_InsertWithMissingPeerID_ReturnsForeignKey(t *testing.T) {
 	s := NewTestStore()
 	defer s.Close()
-	peer := seedPeer(t, s, "p")
 	var ghost pgtype.UUID
 	ghost.Valid = true
-	_, err := s.InsertScenario(context.Background(), "sc", ghost, peer.ID, []byte(`{}`))
+	_, err := s.InsertScenario(context.Background(), "sc", ghost, pgtype.UUID{}, []byte(`{}`))
 	if !errors.Is(err, ErrForeignKey) {
 		t.Fatalf("err: got %v want ErrForeignKey", err)
 	}
 }
 
-func TestScenario_InsertWithMissingPeer_ReturnsForeignKey(t *testing.T) {
+func TestScenario_InsertWithMissingSubscriberID_ReturnsForeignKey(t *testing.T) {
 	s := NewTestStore()
 	defer s.Close()
-	tpl := seedTemplate(t, s, "t")
+	peer := seedPeer(t, s, "p")
 	var ghost pgtype.UUID
 	ghost.Valid = true
-	_, err := s.InsertScenario(context.Background(), "sc", tpl.ID, ghost, []byte(`{}`))
+	_, err := s.InsertScenario(context.Background(), "sc", peer.ID, ghost, []byte(`{}`))
 	if !errors.Is(err, ErrForeignKey) {
 		t.Fatalf("err: got %v want ErrForeignKey", err)
 	}
@@ -454,11 +450,10 @@ func TestScenario_InsertDuplicateName_ReturnsDuplicate(t *testing.T) {
 	s := NewTestStore()
 	defer s.Close()
 	peer := seedPeer(t, s, "p")
-	tpl := seedTemplate(t, s, "t")
-	if _, err := s.InsertScenario(context.Background(), "dup", tpl.ID, peer.ID, []byte(`{}`)); err != nil {
+	if _, err := s.InsertScenario(context.Background(), "dup", peer.ID, pgtype.UUID{}, []byte(`{}`)); err != nil {
 		t.Fatalf("first: %v", err)
 	}
-	_, err := s.InsertScenario(context.Background(), "dup", tpl.ID, peer.ID, []byte(`{}`))
+	_, err := s.InsertScenario(context.Background(), "dup", peer.ID, pgtype.UUID{}, []byte(`{}`))
 	if !errors.Is(err, ErrDuplicateName) {
 		t.Fatalf("err: got %v want ErrDuplicateName", err)
 	}
@@ -468,9 +463,7 @@ func TestScenario_RoundTripAndUpdate(t *testing.T) {
 	s := NewTestStore()
 	defer s.Close()
 	peer := seedPeer(t, s, "p")
-	tpl := seedTemplate(t, s, "t")
-	tpl2 := seedTemplate(t, s, "t2")
-	sc, err := s.InsertScenario(context.Background(), "sc", tpl.ID, peer.ID, []byte(`{"steps":[]}`))
+	sc, err := s.InsertScenario(context.Background(), "sc", peer.ID, pgtype.UUID{}, []byte(`{"steps":[]}`))
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
@@ -481,17 +474,14 @@ func TestScenario_RoundTripAndUpdate(t *testing.T) {
 	if string(got.Body) != `{"steps":[]}` {
 		t.Fatalf("body round-trip: %s", got.Body)
 	}
-	if got.TemplateID != tpl.ID {
-		t.Fatalf("template id mismatch")
+	if got.PeerID != peer.ID {
+		t.Fatalf("peer id mismatch")
 	}
 	updated, err := s.UpdateScenario(context.Background(), UpdateScenarioParams{
-		ID: sc.ID, Name: "sc-2", TemplateID: tpl2.ID, PeerID: peer.ID, Body: []byte(`{"v":2}`),
+		ID: sc.ID, Name: "sc-2", PeerID: peer.ID, Body: []byte(`{"v":2}`),
 	})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
-	}
-	if updated.TemplateID != tpl2.ID {
-		t.Fatalf("template id should change")
 	}
 	if updated.Name != "sc-2" {
 		t.Fatalf("name: %q", updated.Name)
@@ -513,8 +503,7 @@ func TestScenario_DeleteThenGet_ReturnsNotFound(t *testing.T) {
 	s := NewTestStore()
 	defer s.Close()
 	peer := seedPeer(t, s, "p")
-	tpl := seedTemplate(t, s, "t")
-	sc, _ := s.InsertScenario(context.Background(), "sc", tpl.ID, peer.ID, []byte(`{}`))
+	sc, _ := s.InsertScenario(context.Background(), "sc", peer.ID, pgtype.UUID{}, []byte(`{}`))
 	if err := s.DeleteScenario(context.Background(), sc.ID); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
@@ -527,9 +516,8 @@ func TestScenario_List_ReturnsInsertedSortedByName(t *testing.T) {
 	s := NewTestStore()
 	defer s.Close()
 	peer := seedPeer(t, s, "p")
-	tpl := seedTemplate(t, s, "t")
 	for _, n := range []string{"z", "a", "m"} {
-		if _, err := s.InsertScenario(context.Background(), n, tpl.ID, peer.ID, []byte(`{}`)); err != nil {
+		if _, err := s.InsertScenario(context.Background(), n, peer.ID, pgtype.UUID{}, []byte(`{}`)); err != nil {
 			t.Fatalf("Insert(%q): %v", n, err)
 		}
 	}

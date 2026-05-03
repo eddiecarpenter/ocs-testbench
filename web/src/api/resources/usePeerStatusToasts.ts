@@ -45,18 +45,27 @@ export function usePeerStatusToasts() {
       for (const peer of peers) {
         const prev = lastStatus.current.get(peer.id);
         if (prev === peer.status) continue;
-        lastStatus.current.set(peer.id, peer.status);
+
+        // Transient states are visible in the row badge but must not shift
+        // the baseline — if we record "connecting" as the last-known state
+        // and then see "connected", we'd fire a spurious toast even when the
+        // peer never left the connected state (e.g. during a backend restart
+        // that completes faster than the user can observe).
+        const isTransient =
+          peer.status === 'connecting' ||
+          peer.status === 'disconnecting' ||
+          peer.status === 'restarting';
+
+        if (!isTransient) {
+          lastStatus.current.set(peer.id, peer.status);
+        }
 
         // Skip the first observation of a peer — no meaningful transition.
         if (prev === undefined) continue;
 
         // Skip transients; we only toast settled outcomes. The row badge
         // communicates the in-flight state already.
-        if (
-          peer.status === 'connecting' ||
-          peer.status === 'disconnecting' ||
-          peer.status === 'restarting'
-        ) {
+        if (isTransient) {
           continue;
         }
 

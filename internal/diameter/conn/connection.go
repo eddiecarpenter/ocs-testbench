@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -31,8 +32,12 @@ type dialFunc func(ctx context.Context, cli *sm.Client, cfg diameter.PeerConfig)
 // (e.g. internal test peers).
 func realDial(_ context.Context, cli *sm.Client, cfg diameter.PeerConfig) (diam.Conn, error) {
 	addr := cfg.Address()
+	laddr := cfg.LocalAddress()
 	switch strings.ToLower(strings.TrimSpace(cfg.Transport)) {
 	case "", diameter.TransportTCP:
+		if laddr != "" {
+			return cli.DialNetworkBind("tcp", addr, laddr)
+		}
 		return cli.DialNetwork("tcp", addr)
 	case diameter.TransportTLS:
 		// We delegate to diam.DialTLSConfig directly so we can
@@ -188,7 +193,7 @@ func New(cfg diameter.PeerConfig, parser *dict.Parser) *PeerConnection {
 	return &PeerConnection{
 		cfg:            cfg,
 		parser:         parser,
-		state:          &stateBox{v: diameter.StateDisconnected},
+		state:          &stateBox{v: diameter.StateStopped},
 		subs:           newSubscriberSet(),
 		backoffInitial: diameter.DefaultBackoffInitial,
 		backoffCap:     diameter.DefaultBackoffCap,
@@ -274,10 +279,9 @@ func (pc *PeerConnection) Disconnect() {
 	pc.cancel = nil
 	pc.muLife.Unlock()
 	if cancel == nil {
-		// Never connected (or already disconnected). Still
-		// transition to disconnected so a stray "error" state from
-		// validate-fail is normalised.
-		_ = pc.transitionTo(diameter.StateDisconnected, "manual disconnect (idempotent)")
+		// Never connected (or already disconnected). Normalise to
+		// stopped so a stray "error" state from validate-fail is reset.
+		_ = pc.transitionTo(diameter.StateStopped, "manual disconnect (idempotent)")
 		return
 	}
 	cancel()
@@ -330,17 +334,22 @@ func (pc *PeerConnection) run(ctx context.Context) {
 	}()
 
 	backoff := pc.backoffInitial
+	// retrying tracks whether we are already in the disconnected/retry
+	// loop. When true, connecting and failed-dial transitions are
+	// suppressed so the frontend sees one "disconnected" per actual
+	// connection loss, not one per retry attempt.
+	retrying := false
 	for {
 		if ctx.Err() != nil {
-			pc.transitionTo(diameter.StateDisconnected, "manual disconnect")
+			pc.transitionTo(diameter.StateStopped, "manual disconnect")
 			return
 		}
 
-		pc.transitionTo(diameter.StateConnecting, "dialling "+pc.cfg.Address())
+		if !retrying {
+			pc.transitionTo(diameter.StateConnecting, "dialling "+pc.cfg.Address())
+		}
 		c, err := pc.dialOnce(ctx)
 		if err != nil {
-			detail := fmt.Sprintf("dial failed: %v", err)
-			pc.transitionTo(diameter.StateDisconnected, detail)
 			logging.Warn(
 				"diameter/conn: dial failed; backing off",
 				"peer", pc.cfg.Name,
@@ -348,8 +357,12 @@ func (pc *PeerConnection) run(ctx context.Context) {
 				"error", err.Error(),
 				"backoff", backoff.String(),
 			)
+			if !retrying {
+				pc.transitionTo(diameter.StateDisconnected, fmt.Sprintf("dial failed: %v", err))
+				retrying = true
+			}
 			if !sleepCtx(ctx, backoff) {
-				pc.transitionTo(diameter.StateDisconnected, "manual disconnect")
+				pc.transitionTo(diameter.StateStopped, "manual disconnect")
 				return
 			}
 			backoff = nextBackoff(backoff, pc.backoffFactor, pc.backoffCap)
@@ -358,6 +371,7 @@ func (pc *PeerConnection) run(ctx context.Context) {
 
 		// Connect succeeded — store the live conn, transition, reset
 		// backoff. On the next drop or cancel we go round.
+		retrying = false
 		pc.muLife.Lock()
 		pc.activeConn = c
 		pc.muLife.Unlock()
@@ -376,10 +390,11 @@ func (pc *PeerConnection) run(ctx context.Context) {
 
 		if !dropped {
 			// Context cancelled — clean exit.
-			pc.transitionTo(diameter.StateDisconnected, "manual disconnect")
+			pc.transitionTo(diameter.StateStopped, "manual disconnect")
 			return
 		}
 		pc.transitionTo(diameter.StateDisconnected, "connection dropped")
+		retrying = true
 		// Loop and reconnect with reset backoff.
 	}
 }
@@ -451,6 +466,11 @@ func buildSettings(cfg diameter.PeerConfig, parser *dict.Parser) *sm.Settings {
 		ProductName:   datatype.UTF8String(productName),
 		OriginStateID: datatype.Unsigned32(time.Now().Unix()),
 		Dict:          parser,
+	}
+	if cfg.OriginIP != "" {
+		if ip := net.ParseIP(cfg.OriginIP); ip != nil {
+			settings.HostIPAddresses = []datatype.Address{datatype.Address(ip)}
+		}
 	}
 	return settings
 }

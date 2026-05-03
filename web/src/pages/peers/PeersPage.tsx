@@ -418,7 +418,7 @@ function RowMenu({
             onClick={handleStop}
             disabled={isTransient || stop.isPending}
           >
-            Disconnect
+            Stop
           </Menu.Item>
         ) : (
           <Menu.Item
@@ -426,7 +426,7 @@ function RowMenu({
             onClick={handleStart}
             disabled={isTransient || start.isPending}
           >
-            Connect
+            Start
           </Menu.Item>
         )}
         <Menu.Item leftSection={<IconPencil size={14} />} onClick={onEdit}>

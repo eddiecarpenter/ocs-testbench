@@ -8,7 +8,7 @@
 app_name: ocs-testbench
 
 # PostgreSQL connection string consumed by internal/store. Mandatory.
-database_url: postgres://ocs:ocs@localhost:5432/ocs?sslmode=disable
+database_url: postgres://test:test@localhost:5432/ocstestbench?sslmode=disable
 
 # Structured logging configuration.
 #   format: "json" for production / "text" for local development.

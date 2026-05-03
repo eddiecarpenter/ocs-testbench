@@ -47,7 +47,7 @@ func TestPeerSSE_ContentTypeTextEventStream(t *testing.T) {
 	defer cancel()
 	close(mgr.ch) // immediately close to avoid blocking
 
-	req := httptest.NewRequest(http.MethodGet, "/events/peers", nil).WithContext(ctx)
+	req := httptest.NewRequest(http.MethodGet, "/v1/events/peers", nil).WithContext(ctx)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
@@ -77,11 +77,13 @@ func TestPeerSSE_EmitsEventOnStateChange(t *testing.T) {
 	reqCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	// Start a GET /events/peers request in a goroutine.
-	evtCh := make(chan map[string]any, 1)
+	// Start a GET /events/peers request in a goroutine. Read all events
+	// until we find one with status="connected" — the handler emits an
+	// initial sync event (status="disconnected") before the live event.
+	evtCh := make(chan map[string]any, 4)
 	go func() {
 		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet,
-			srv.URL+"/events/peers", nil)
+			srv.URL+"/v1/events/peers", nil)
 		if err != nil {
 			return
 		}
@@ -102,13 +104,14 @@ func TestPeerSSE_EmitsEventOnStateChange(t *testing.T) {
 				var payload map[string]any
 				if err := json.Unmarshal([]byte(dataLine), &payload); err == nil {
 					evtCh <- payload
-					return
+					dataLine = ""
 				}
 			}
 		}
 	}()
 
-	// Give the handler time to subscribe before emitting an event.
+	// Give the handler time to subscribe and emit initial sync before
+	// sending the live state-change event.
 	time.Sleep(50 * time.Millisecond)
 
 	// Emit a state-change event.
@@ -119,13 +122,20 @@ func TestPeerSSE_EmitsEventOnStateChange(t *testing.T) {
 		Time:     time.Now(),
 	}
 
-	select {
-	case payload := <-evtCh:
-		assert.Equal(t, peerIDStr, payload["peerId"])
-		assert.Equal(t, "ocs-01", payload["peerName"])
-		assert.Equal(t, "connected", payload["status"])
-	case <-time.After(1500 * time.Millisecond):
-		t.Fatal("timed out waiting for SSE event")
+	// Drain events until we see the connected transition (skip initial sync).
+	deadline := time.After(1500 * time.Millisecond)
+	for {
+		select {
+		case payload := <-evtCh:
+			if payload["status"] == "connected" {
+				assert.Equal(t, peerIDStr, payload["id"])
+				assert.Equal(t, "ocs-01", payload["name"])
+				assert.Equal(t, "connected", payload["status"])
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for SSE connected event")
+		}
 	}
 }
 
@@ -141,7 +151,7 @@ func TestPeerSSE_ClientDisconnect_HandlerExitsCleanly(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
 
-	req := httptest.NewRequest(http.MethodGet, "/events/peers", nil).WithContext(ctx)
+	req := httptest.NewRequest(http.MethodGet, "/v1/events/peers", nil).WithContext(ctx)
 	rr := httptest.NewRecorder()
 
 	// Should return without panicking.

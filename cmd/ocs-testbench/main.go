@@ -57,6 +57,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/eddiecarpenter/ocs-testbench/db"
 	"github.com/eddiecarpenter/ocs-testbench/internal/api"
 	"github.com/eddiecarpenter/ocs-testbench/internal/appl"
 	"github.com/eddiecarpenter/ocs-testbench/internal/baseconfig"
@@ -108,6 +109,10 @@ func main() {
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 	if err != nil {
 		logging.Error("connect database", "err", err)
+		os.Exit(1)
+	}
+	if err := store.RunMigrations(cfg.DatabaseURL, db.Migrations); err != nil {
+		logging.Error("run migrations", "err", err)
 		os.Exit(1)
 	}
 	s := store.NewStore(pool)
