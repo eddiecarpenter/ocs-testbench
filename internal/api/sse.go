@@ -14,15 +14,97 @@ import (
 
 // mountSSE registers the Server-Sent Events streaming endpoints.
 //
-// Peer SSE (GET /events/peers) is implemented here.
-// Execution SSE (GET /events/executions/{id}) is not yet implemented;
-// it depends on Feature #19 (internal/engine/) which has not yet landed.
-func mountSSE(r chi.Router, s store.Store, mgr PeerManager) {
+// Peer SSE (GET /events/peers) is fully implemented. Execution SSE
+// (GET /events/executions/{id}) requires a non-nil exec; when nil the
+// endpoint returns 503.
+func mountSSE(r chi.Router, s store.Store, mgr PeerManager, exec ExecutionEngine) {
 	// Combined event stream — the frontend subscribes here for all event types.
 	r.Get("/events", peerSSE(s, mgr))
-	// Scoped sub-streams kept for backwards compatibility.
+	// Scoped sub-streams.
 	r.Get("/events/peers", peerSSE(s, mgr))
-	r.Get("/events/executions/{id}", notImplemented) // blocked on Feature #19
+	r.Get("/events/executions/{id}", executionSSE(exec))
+}
+
+// executionSSE handles GET /events/executions/{id}.
+//
+// Opens a long-lived Server-Sent Events stream for a specific execution
+// session. As the session progresses the client receives events of the
+// form:
+//
+//	event: execution.progress
+//	data: {"type":"progress","sessionId":"...","state":"active","step":N,"metrics":{...}}
+//
+// The stream ends when the session reaches a terminal state or the
+// client disconnects. When exec is nil the endpoint returns 503.
+func executionSSE(exec ExecutionEngine) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if exec == nil {
+			executionUnavailable(w)
+			return
+		}
+
+		sessionID := chi.URLParam(r, "id")
+		if sessionID == "" {
+			respondInvalidRequest(w, "id is required")
+			return
+		}
+
+		// Set SSE headers before any write.
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			respondInternalError(w)
+			return
+		}
+
+		ch, err := exec.Subscribe(r.Context(), sessionID)
+		if err != nil {
+			// Headers are already committed — we can only close.
+			return
+		}
+
+		for {
+			select {
+			case evt, open := <-ch:
+				if !open {
+					// Session terminated; end the stream.
+					return
+				}
+				data, err := json.Marshal(struct {
+					Type      string            `json:"type"`
+					SessionID string            `json:"sessionId"`
+					State     string            `json:"state"`
+					Step      int               `json:"step"`
+					Metrics   executionMetricsJ `json:"metrics"`
+				}{
+					Type:      evt.Type,
+					SessionID: evt.SessionID,
+					State:     evt.State,
+					Step:      evt.Step,
+					Metrics: executionMetricsJ{
+						TotalRequests: evt.Metrics.TotalRequests,
+						SuccessCount:  evt.Metrics.SuccessCount,
+						FailureCount:  evt.Metrics.FailureCount,
+						MinRTTMs:      evt.Metrics.MinRTTMs,
+						MaxRTTMs:      evt.Metrics.MaxRTTMs,
+						AvgRTTMs:      evt.Metrics.AvgRTTMs,
+					},
+				})
+				if err != nil {
+					continue
+				}
+				fmt.Fprintf(w, "event: execution.progress\ndata: %s\n\n", data)
+				flusher.Flush()
+
+			case <-r.Context().Done():
+				// Client disconnected.
+				return
+			}
+		}
+	}
 }
 
 // peerSSE handles GET /events/peers.

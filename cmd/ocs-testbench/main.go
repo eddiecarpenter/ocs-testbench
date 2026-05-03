@@ -225,7 +225,11 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 	// Build the REST API router. The api.Router includes its own
 	// middleware stack (Recovery, RequestID, logging.RequestLogger) and
 	// all CRUD + connection-control + SSE endpoints.
-	apiRouter := api.Router(s, dmgr)
+	// The execution engine (ExecutionEngine) is not yet wired —
+	// it requires a concrete implementation that bridges the engine
+	// package with the store, manager, and template engine. The
+	// endpoint routes are registered and return 503 until it lands.
+	apiRouter := api.Router(s, dmgr, nil)
 
 	// Mount the API router at /api. All routes within api.Router are
 	// relative to the router's root; the Mount prefix adds /api.

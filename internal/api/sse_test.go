@@ -41,7 +41,7 @@ func (f *fakePeerManagerWithChannel) Subscribe() <-chan diameter.StateEvent {
 func TestPeerSSE_ContentTypeTextEventStream(t *testing.T) {
 	s := store.NewTestStore()
 	mgr := newFakePeerManagerWithChannel()
-	r := api.Router(s, mgr)
+	r := api.Router(s, mgr, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -67,7 +67,7 @@ func TestPeerSSE_EmitsEventOnStateChange(t *testing.T) {
 	peerIDStr := api.UUIDStr(peer.ID)
 
 	mgr := newFakePeerManagerWithChannel("ocs-01")
-	r := api.Router(s, mgr)
+	r := api.Router(s, mgr, nil)
 
 	// Use a real HTTP server so we can read the response body as a
 	// streaming reader.
@@ -145,7 +145,7 @@ func TestPeerSSE_EmitsEventOnStateChange(t *testing.T) {
 func TestPeerSSE_ClientDisconnect_HandlerExitsCleanly(t *testing.T) {
 	s := store.NewTestStore()
 	mgr := newFakePeerManagerWithChannel()
-	r := api.Router(s, mgr)
+	r := api.Router(s, mgr, nil)
 
 	// Cancel the request context to simulate a client disconnect.
 	ctx, cancel := context.WithCancel(context.Background())

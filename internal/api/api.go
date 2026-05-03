@@ -45,10 +45,15 @@ type PeerManager interface {
 // return 503 Service Unavailable until the Manager is wired in. In
 // practice, production always supplies a started Manager.
 //
+// exec may be nil — if nil, the execution control endpoints return 503
+// Service Unavailable. Production wires in an execution engine once
+// Feature #20 is fully implemented; passing nil keeps those endpoints
+// compiled and routable without a live engine.
+//
 // The caller is responsible for mounting the returned router onto an
 // outer chi.Router (typically in cmd/ocs-testbench/main.go) under the
 // /api prefix.
-func Router(s store.Store, mgr PeerManager) chi.Router {
+func Router(s store.Store, mgr PeerManager, exec ExecutionEngine) chi.Router {
 	r := chi.NewRouter()
 
 	// Middleware stack — innermost to outermost:
@@ -73,11 +78,8 @@ func Router(s store.Store, mgr PeerManager) chi.Router {
 		mountScenarios(v1, s)
 		mountDictionaries(v1, s)
 		mountDashboard(v1, s, mgr)
-
-		// Execution control (Task 8) — blocked on Feature #19 landing.
-		// SSE streaming (Task 9) — wired with peer SSE; execution SSE
-		// blocked on Feature #19.
-		mountSSE(v1, s, mgr)
+		mountExecutions(v1, exec)
+		mountSSE(v1, s, mgr, exec)
 	})
 
 	return r
