@@ -98,7 +98,7 @@ func TestPeerControl_Connect_DisconnectedPeer_Returns202(t *testing.T) {
 	f := newPeerControlFixture(t)
 
 	req := httptest.NewRequest(http.MethodPost,
-		fmt.Sprintf("/peers/%s/connect", f.peerID), nil)
+		fmt.Sprintf("/v1/peers/%s/connect", f.peerID), nil)
 	rr := httptest.NewRecorder()
 	f.r.ServeHTTP(rr, req)
 
@@ -115,7 +115,7 @@ func TestPeerControl_Connect_UnknownPeerID_Returns404(t *testing.T) {
 	f := newPeerControlFixture(t)
 
 	req := httptest.NewRequest(http.MethodPost,
-		"/peers/00000000-0000-0000-0000-000000000099/connect", nil)
+		"/v1/peers/00000000-0000-0000-0000-000000000099/connect", nil)
 	rr := httptest.NewRecorder()
 	f.r.ServeHTTP(rr, req)
 
@@ -129,7 +129,7 @@ func TestPeerControl_Disconnect_ConnectedPeer_Returns200(t *testing.T) {
 	f.mgr.states["ocs-01"] = diameter.StateConnected
 
 	req := httptest.NewRequest(http.MethodPost,
-		fmt.Sprintf("/peers/%s/disconnect", f.peerID), nil)
+		fmt.Sprintf("/v1/peers/%s/disconnect", f.peerID), nil)
 	rr := httptest.NewRecorder()
 	f.r.ServeHTTP(rr, req)
 
@@ -145,7 +145,7 @@ func TestPeerControl_Status_Returns200WithState(t *testing.T) {
 	f.mgr.states["ocs-01"] = diameter.StateConnected
 
 	req := httptest.NewRequest(http.MethodGet,
-		fmt.Sprintf("/peers/%s/status", f.peerID), nil)
+		fmt.Sprintf("/v1/peers/%s/status", f.peerID), nil)
 	rr := httptest.NewRecorder()
 	f.r.ServeHTTP(rr, req)
 
@@ -170,7 +170,7 @@ func TestPeerControl_Status_UnregisteredInManager_ReturnsStoppedState(t *testing
 	r := api.Router(s, mgr)
 
 	req := httptest.NewRequest(http.MethodGet,
-		fmt.Sprintf("/peers/%s/status", api.UUIDStr(peer.ID)), nil)
+		fmt.Sprintf("/v1/peers/%s/status", api.UUIDStr(peer.ID)), nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
@@ -191,9 +191,9 @@ func TestPeerControl_NilManager_Returns503(t *testing.T) {
 	r := api.Router(s, nil) // no manager
 
 	for _, path := range []string{
-		fmt.Sprintf("/peers/%s/connect", api.UUIDStr(peer.ID)),
-		fmt.Sprintf("/peers/%s/disconnect", api.UUIDStr(peer.ID)),
-		fmt.Sprintf("/peers/%s/status", api.UUIDStr(peer.ID)),
+		fmt.Sprintf("/v1/peers/%s/connect", api.UUIDStr(peer.ID)),
+		fmt.Sprintf("/v1/peers/%s/disconnect", api.UUIDStr(peer.ID)),
+		fmt.Sprintf("/v1/peers/%s/status", api.UUIDStr(peer.ID)),
 	} {
 		t.Run(path, func(t *testing.T) {
 			method := http.MethodPost

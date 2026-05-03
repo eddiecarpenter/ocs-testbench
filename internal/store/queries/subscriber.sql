@@ -11,14 +11,13 @@ INSERT INTO subscriber (
     msisdn,
     iccid,
     imei,
-    device_make,
-    device_model
+    tac
 )
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, name, msisdn, iccid, imei, device_make, device_model, created_at, updated_at;
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, name, msisdn, iccid, imei, created_at, updated_at, tac;
 
 -- name: GetSubscriberByID :one
-SELECT id, name, msisdn, iccid, imei, device_make, device_model, created_at, updated_at
+SELECT id, name, msisdn, iccid, imei, created_at, updated_at, tac
 FROM subscriber
 WHERE id = $1;
 
@@ -28,28 +27,27 @@ WHERE id = $1;
 -- layer chooses the deterministic first match (alphabetical id) for
 -- catalogue UX. Tests that need richer semantics should use
 -- ListSubscribers and filter on the result.
-SELECT id, name, msisdn, iccid, imei, device_make, device_model, created_at, updated_at
+SELECT id, name, msisdn, iccid, imei, created_at, updated_at, tac
 FROM subscriber
 WHERE name = $1
 ORDER BY id
 LIMIT 1;
 
 -- name: ListSubscribers :many
-SELECT id, name, msisdn, iccid, imei, device_make, device_model, created_at, updated_at
+SELECT id, name, msisdn, iccid, imei, created_at, updated_at, tac
 FROM subscriber
 ORDER BY name;
 
 -- name: UpdateSubscriber :one
 UPDATE subscriber
-SET name         = $2,
-    msisdn       = $3,
-    iccid        = $4,
-    imei         = $5,
-    device_make  = $6,
-    device_model = $7,
-    updated_at   = now()
+SET name       = $2,
+    msisdn     = $3,
+    iccid      = $4,
+    imei       = $5,
+    tac        = $6,
+    updated_at = now()
 WHERE id = $1
-RETURNING id, name, msisdn, iccid, imei, device_make, device_model, created_at, updated_at;
+RETURNING id, name, msisdn, iccid, imei, created_at, updated_at, tac;
 
 -- name: DeleteSubscriber :exec
 DELETE FROM subscriber

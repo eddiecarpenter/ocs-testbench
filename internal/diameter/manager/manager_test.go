@@ -58,6 +58,8 @@ func (f *fakePeerConnection) Subscribe() <-chan diameter.StateEvent {
 	return f.subscriberCh
 }
 
+func (f *fakePeerConnection) Unsubscribe(_ <-chan diameter.StateEvent) {}
+
 func (f *fakePeerConnection) Connect(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("fakePeerConnection.Connect: nil ctx")

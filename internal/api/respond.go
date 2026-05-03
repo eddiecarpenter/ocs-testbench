@@ -56,10 +56,12 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 }
 
 // uuidToString converts a pgtype.UUID to its canonical string
-// representation. Returns the zero-value UUID string when not valid.
+// representation. Returns "" when not valid (null in the database) so
+// optional FK fields round-trip correctly: the frontend sends "" back
+// and optionalUUID treats it as unset, avoiding a spurious FK lookup.
 func uuidToString(id pgtype.UUID) string {
 	if !id.Valid {
-		return "00000000-0000-0000-0000-000000000000"
+		return ""
 	}
 	return uuid.UUID(id.Bytes).String()
 }

@@ -85,11 +85,19 @@ export function normalizeError(err: unknown): never {
     const payload = (axErr.response?.data ?? {}) as Record<string, unknown> &
       ProblemShape;
 
-    // Prefer RFC 7807 (title + detail). Fall back to common legacy shapes.
+    // Prefer RFC 7807 (title + detail). Fall back to the backend's
+    // {"error": {"code": "...", "message": "..."}} envelope, then
+    // common legacy shapes.
+    const errorBody = payload['error'];
+    const errorMessage =
+      typeof errorBody === 'object' && errorBody !== null
+        ? ((errorBody as Record<string, unknown>)['message'] as string | undefined)
+        : (errorBody as string | undefined);
+
     const title =
       payload.title ??
       (payload['message'] as string | undefined) ??
-      (payload['error'] as string | undefined) ??
+      errorMessage ??
       axErr.message ??
       'Request failed';
 

@@ -218,8 +218,8 @@ func (s *pgStore) DeleteAVPTemplate(ctx context.Context, id pgtype.UUID) error {
 
 // ----- scenario -------------------------------------------------
 
-func (s *pgStore) InsertScenario(ctx context.Context, name string, templateID, peerID pgtype.UUID, body []byte) (Scenario, error) {
-	row, err := s.queries.InsertScenario(ctx, name, templateID, peerID, body)
+func (s *pgStore) InsertScenario(ctx context.Context, name string, peerID, subscriberID pgtype.UUID, body []byte) (Scenario, error) {
+	row, err := s.queries.InsertScenario(ctx, name, peerID, subscriberID, body)
 	return row, translate(err, "scenario", name)
 }
 

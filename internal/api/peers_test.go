@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -29,7 +30,7 @@ func seedPeer(t *testing.T, r http.Handler, name string, body json.RawMessage) m
 	t.Helper()
 	reqBody, err := json.Marshal(map[string]any{"name": name, "body": body})
 	require.NoError(t, err)
-	req := httptest.NewRequest(http.MethodPost, "/peers", bytes.NewReader(reqBody))
+	req := httptest.NewRequest(http.MethodPost, "/v1/peers", bytes.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
@@ -61,7 +62,7 @@ func TestPeer_CreatePeer_ValidBody_Returns201(t *testing.T) {
 	reqBody, err := json.Marshal(map[string]any{"name": "peer-a", "body": body})
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodPost, "/peers", bytes.NewReader(reqBody))
+	req := httptest.NewRequest(http.MethodPost, "/v1/peers", bytes.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
@@ -80,7 +81,7 @@ func TestPeer_CreatePeer_MissingName_Returns400(t *testing.T) {
 	reqBody, err := json.Marshal(map[string]any{"body": json.RawMessage(`{}`)})
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodPost, "/peers", bytes.NewReader(reqBody))
+	req := httptest.NewRequest(http.MethodPost, "/v1/peers", bytes.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
@@ -97,7 +98,7 @@ func TestPeer_CreatePeer_DuplicateName_Returns409(t *testing.T) {
 	seedPeer(t, r, "peer-dup", json.RawMessage(`{}`))
 
 	reqBody, _ := json.Marshal(map[string]any{"name": "peer-dup", "body": json.RawMessage(`{}`)})
-	req := httptest.NewRequest(http.MethodPost, "/peers", bytes.NewReader(reqBody))
+	req := httptest.NewRequest(http.MethodPost, "/v1/peers", bytes.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
@@ -115,7 +116,7 @@ func TestPeer_ListPeers_Returns200WithArray(t *testing.T) {
 	seedPeer(t, r, "peer-x", json.RawMessage(`{}`))
 	seedPeer(t, r, "peer-y", json.RawMessage(`{}`))
 
-	req := httptest.NewRequest(http.MethodGet, "/peers", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/peers", nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
@@ -134,7 +135,7 @@ func TestPeer_GetPeer_Existing_Returns200(t *testing.T) {
 	created := seedPeer(t, r, "peer-get", json.RawMessage(`{"host":"x"}`))
 	id := created["id"].(string)
 
-	req := httptest.NewRequest(http.MethodGet, "/peers/"+id, nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/peers/"+id, nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
@@ -149,7 +150,7 @@ func TestPeer_GetPeer_Existing_Returns200(t *testing.T) {
 // ID returns 404).
 func TestPeer_GetPeer_NonExistent_Returns404(t *testing.T) {
 	r := newTestRouter(t)
-	req := httptest.NewRequest(http.MethodGet, "/peers/00000000-0000-0000-0000-000000000099", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/peers/00000000-0000-0000-0000-000000000099", nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
@@ -161,7 +162,7 @@ func TestPeer_GetPeer_NonExistent_Returns404(t *testing.T) {
 // path parameter returns 400.
 func TestPeer_GetPeer_MalformedUUID_Returns400(t *testing.T) {
 	r := newTestRouter(t)
-	req := httptest.NewRequest(http.MethodGet, "/peers/not-a-uuid", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/peers/not-a-uuid", nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
@@ -179,7 +180,7 @@ func TestPeer_UpdatePeer_ValidBody_Returns200(t *testing.T) {
 	id := created["id"].(string)
 
 	reqBody, _ := json.Marshal(map[string]any{"name": "peer-upd-new", "body": json.RawMessage(`{"host":"new"}`)})
-	req := httptest.NewRequest(http.MethodPut, "/peers/"+id, bytes.NewReader(reqBody))
+	req := httptest.NewRequest(http.MethodPut, "/v1/peers/"+id, bytes.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
@@ -199,7 +200,7 @@ func TestPeer_DeletePeer_Existing_Returns204(t *testing.T) {
 	created := seedPeer(t, r, "peer-del", json.RawMessage(`{}`))
 	id := created["id"].(string)
 
-	req := httptest.NewRequest(http.MethodDelete, "/peers/"+id, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/v1/peers/"+id, nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
@@ -214,14 +215,12 @@ func TestPeer_DeletePeer_FKReferenced_Returns409(t *testing.T) {
 
 	peer, err := s.InsertPeer(ctx, "peer-fk", []byte(`{}`))
 	require.NoError(t, err)
-	tpl, err := s.InsertAVPTemplate(ctx, "tpl-fk", []byte(`{}`))
-	require.NoError(t, err)
-	_, err = s.InsertScenario(ctx, "scen-fk", tpl.ID, peer.ID, []byte(`{}`))
+	_, err = s.InsertScenario(ctx, "scen-fk", peer.ID, pgtype.UUID{}, []byte(`{}`))
 	require.NoError(t, err)
 
 	r := newTestRouterWithStore(t, s)
 	req := httptest.NewRequest(http.MethodDelete,
-		fmt.Sprintf("/peers/%s", api.UUIDStr(peer.ID)), nil)
+		fmt.Sprintf("/v1/peers/%s", api.UUIDStr(peer.ID)), nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 

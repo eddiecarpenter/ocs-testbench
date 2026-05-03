@@ -29,6 +29,8 @@ import {
 } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
 
+import { usePeers } from '../../api/resources/peers';
+import { useSubscribers } from '../../api/resources/subscribers';
 import { useScenarioDraftStore } from './scenarioDraftStore';
 import type {
   ServiceModel,
@@ -66,10 +68,18 @@ export function BuilderHeader({ isNew, isDirty }: BuilderHeaderProps) {
   const setUnitType = useScenarioDraftStore((s) => s.setUnitType);
   const setSessionMode = useScenarioDraftStore((s) => s.setSessionMode);
   const setServiceModel = useScenarioDraftStore((s) => s.setServiceModel);
+  const setPeerId = useScenarioDraftStore((s) => s.setPeerId);
+  const setSubscriberId = useScenarioDraftStore((s) => s.setSubscriberId);
   const undo = useScenarioDraftStore((s) => s.undo);
   const redo = useScenarioDraftStore((s) => s.redo);
   const canUndo = useScenarioDraftStore((s) => s.canUndo());
   const canRedo = useScenarioDraftStore((s) => s.canRedo());
+
+  const peers = usePeers();
+  const subscribers = useSubscribers();
+
+  const peerOptions = (peers.data ?? []).map((p) => ({ value: p.id, label: p.name }));
+  const subscriberOptions = (subscribers.data ?? []).map((s) => ({ value: s.id, label: s.msisdn }));
 
   const [editingName, setEditingName] = useState(false);
 
@@ -178,6 +188,32 @@ export function BuilderHeader({ isNew, isDirty }: BuilderHeaderProps) {
             onChange={(v) => v && setServiceModel(v as ServiceModel)}
             allowDeselect={false}
             data-testid="builder-service-model"
+          />
+        </Grid.Col>
+        <Grid.Col span={{ base: 3, sm: 1 }}>
+          <Select
+            label="Peer"
+            placeholder="Select a peer"
+            data={peerOptions}
+            value={draft.peerId || null}
+            onChange={(v) => setPeerId(v ?? '')}
+            clearable
+            searchable
+            disabled={peers.isLoading}
+            data-testid="builder-peer"
+          />
+        </Grid.Col>
+        <Grid.Col span={{ base: 3, sm: 1 }}>
+          <Select
+            label="Subscriber (optional)"
+            placeholder="None"
+            data={subscriberOptions}
+            value={draft.subscriberId || null}
+            onChange={(v) => setSubscriberId(v ?? '')}
+            clearable
+            searchable
+            disabled={subscribers.isLoading}
+            data-testid="builder-subscriber"
           />
         </Grid.Col>
       </Grid>

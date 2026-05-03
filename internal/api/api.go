@@ -64,17 +64,21 @@ func Router(s store.Store, mgr PeerManager) chi.Router {
 		respondError(w, http.StatusNotFound, CodeNotFound, "endpoint not found")
 	})
 
-	// CRUD routes for all five entities.
-	mountPeers(r, s, mgr)
-	mountSubscribers(r, s)
-	mountTemplates(r, s)
-	mountScenarios(r, s)
-	mountDictionaries(r, s)
+	// All versioned routes live under /v1.
+	r.Route("/v1", func(v1 chi.Router) {
+		// CRUD routes for all five entities.
+		mountPeers(v1, s, mgr)
+		mountSubscribers(v1, s)
+		mountTemplates(v1, s)
+		mountScenarios(v1, s)
+		mountDictionaries(v1, s)
+		mountDashboard(v1, s, mgr)
 
-	// Execution control (Task 8) — blocked on Feature #19 landing.
-	// SSE streaming (Task 9) — wired with peer SSE; execution SSE
-	// blocked on Feature #19.
-	mountSSE(r, s, mgr)
+		// Execution control (Task 8) — blocked on Feature #19 landing.
+		// SSE streaming (Task 9) — wired with peer SSE; execution SSE
+		// blocked on Feature #19.
+		mountSSE(v1, s, mgr)
+	})
 
 	return r
 }

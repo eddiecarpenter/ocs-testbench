@@ -285,33 +285,27 @@ func TestIntegration_AC4_AVPTemplateJSONBRoundTrip(t *testing.T) {
 	assertJSONEqual(t, templateBody, string(fetched.Body))
 }
 
-// AC-5 — scenario insert with non-existent template_id or peer_id
+// AC-5 — scenario insert with a non-existent peer_id or subscriber_id
 // fails with a Postgres FK error, surfaced as ErrForeignKey.
 func TestIntegration_AC5_ScenarioInsertWithMissingFK_FailsWithForeignKey(t *testing.T) {
 	s, _ := setupPostgres(t)
 
-	// First insert a real peer and template — needed so we can isolate
-	// the FK violation to one side at a time.
 	peer, err := s.InsertPeer(context.Background(), "p", []byte(`{}`))
 	if err != nil {
 		t.Fatalf("InsertPeer: %v", err)
-	}
-	tpl, err := s.InsertAVPTemplate(context.Background(), "t", []byte(`{}`))
-	if err != nil {
-		t.Fatalf("InsertAVPTemplate: %v", err)
 	}
 
 	var ghost pgtype.UUID
 	ghost.Bytes = [16]byte{0xde, 0xad, 0xbe, 0xef, 0x00, 0x00, 0x40, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}
 	ghost.Valid = true
 
-	// Ghost template_id.
-	if _, err := s.InsertScenario(context.Background(), "fk-1", ghost, peer.ID, []byte(`{}`)); !errors.Is(err, ErrForeignKey) {
-		t.Fatalf("ghost template_id: got %v want ErrForeignKey", err)
-	}
 	// Ghost peer_id.
-	if _, err := s.InsertScenario(context.Background(), "fk-2", tpl.ID, ghost, []byte(`{}`)); !errors.Is(err, ErrForeignKey) {
+	if _, err := s.InsertScenario(context.Background(), "fk-1", ghost, pgtype.UUID{}, []byte(`{}`)); !errors.Is(err, ErrForeignKey) {
 		t.Fatalf("ghost peer_id: got %v want ErrForeignKey", err)
+	}
+	// Ghost subscriber_id.
+	if _, err := s.InsertScenario(context.Background(), "fk-2", peer.ID, ghost, []byte(`{}`)); !errors.Is(err, ErrForeignKey) {
+		t.Fatalf("ghost subscriber_id: got %v want ErrForeignKey", err)
 	}
 }
 
@@ -320,8 +314,7 @@ func TestIntegration_AC5_ScenarioInsertWithMissingFK_FailsWithForeignKey(t *test
 func TestIntegration_AC6_ScenarioJSONBRoundTrip(t *testing.T) {
 	s, _ := setupPostgres(t)
 	peer, _ := s.InsertPeer(context.Background(), "p", []byte(`{}`))
-	tpl, _ := s.InsertAVPTemplate(context.Background(), "t", []byte(`{}`))
-	got, err := s.InsertScenario(context.Background(), "sc", tpl.ID, peer.ID, []byte(scenarioBody))
+	got, err := s.InsertScenario(context.Background(), "sc", peer.ID, pgtype.UUID{}, []byte(scenarioBody))
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
 	}

@@ -20,7 +20,7 @@ func seedDictionary(t *testing.T, r http.Handler, name, xmlContent string) map[s
 		"name":       name,
 		"xmlContent": xmlContent,
 	})
-	req := httptest.NewRequest(http.MethodPost, "/dictionaries", bytes.NewReader(reqBody))
+	req := httptest.NewRequest(http.MethodPost, "/v1/dictionaries", bytes.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
@@ -50,7 +50,7 @@ func TestDictionary_CreateDictionary_ValidBody_Returns201(t *testing.T) {
 func TestDictionary_CreateDictionary_MissingName_Returns400(t *testing.T) {
 	r := newTestRouter(t)
 	reqBody, _ := json.Marshal(map[string]any{"xmlContent": "<x/>"})
-	req := httptest.NewRequest(http.MethodPost, "/dictionaries", bytes.NewReader(reqBody))
+	req := httptest.NewRequest(http.MethodPost, "/v1/dictionaries", bytes.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
@@ -63,7 +63,7 @@ func TestDictionary_CreateDictionary_MissingName_Returns400(t *testing.T) {
 func TestDictionary_CreateDictionary_MissingXmlContent_Returns400(t *testing.T) {
 	r := newTestRouter(t)
 	reqBody, _ := json.Marshal(map[string]any{"name": "dict-no-xml"})
-	req := httptest.NewRequest(http.MethodPost, "/dictionaries", bytes.NewReader(reqBody))
+	req := httptest.NewRequest(http.MethodPost, "/v1/dictionaries", bytes.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
@@ -77,7 +77,7 @@ func TestDictionary_CreateDictionary_DuplicateName_Returns409(t *testing.T) {
 	r := newTestRouterWithStore(t, s)
 	seedDictionary(t, r, "dict-dup", "<x/>")
 	reqBody, _ := json.Marshal(map[string]any{"name": "dict-dup", "xmlContent": "<x/>"})
-	req := httptest.NewRequest(http.MethodPost, "/dictionaries", bytes.NewReader(reqBody))
+	req := httptest.NewRequest(http.MethodPost, "/v1/dictionaries", bytes.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
@@ -91,7 +91,7 @@ func TestDictionary_ListDictionaries_Returns200(t *testing.T) {
 	seedDictionary(t, r, "dict-1", "<a/>")
 	seedDictionary(t, r, "dict-2", "<b/>")
 
-	req := httptest.NewRequest(http.MethodGet, "/dictionaries", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/dictionaries", nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusOK, rr.Code)
@@ -109,7 +109,7 @@ func TestDictionary_GetDictionary_Existing_Returns200WithXmlContent(t *testing.T
 	created := seedDictionary(t, r, "dict-get", xml)
 	id := created["id"].(string)
 
-	req := httptest.NewRequest(http.MethodGet, "/dictionaries/"+id, nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/dictionaries/"+id, nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusOK, rr.Code)
@@ -121,7 +121,7 @@ func TestDictionary_GetDictionary_Existing_Returns200WithXmlContent(t *testing.T
 // TestDictionary_GetDictionary_NonExistent_Returns404 tests AC-7.
 func TestDictionary_GetDictionary_NonExistent_Returns404(t *testing.T) {
 	r := newTestRouter(t)
-	req := httptest.NewRequest(http.MethodGet, "/dictionaries/00000000-0000-0000-0000-000000000099", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/dictionaries/00000000-0000-0000-0000-000000000099", nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusNotFound, rr.Code)
@@ -139,7 +139,7 @@ func TestDictionary_UpdateDictionary_ValidBody_Returns200(t *testing.T) {
 		"xmlContent": "<new/>",
 		"isActive":   true,
 	})
-	req := httptest.NewRequest(http.MethodPut, "/dictionaries/"+id, bytes.NewReader(reqBody))
+	req := httptest.NewRequest(http.MethodPut, "/v1/dictionaries/"+id, bytes.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
@@ -158,7 +158,7 @@ func TestDictionary_DeleteDictionary_Returns204(t *testing.T) {
 	created := seedDictionary(t, r, "dict-del", "<d/>")
 	id := created["id"].(string)
 
-	req := httptest.NewRequest(http.MethodDelete, "/dictionaries/"+id, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/v1/dictionaries/"+id, nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusNoContent, rr.Code)

@@ -76,6 +76,13 @@ type PeerConfig struct {
 	OriginHost string
 	// OriginRealm is the local realm advertised in CER.
 	OriginRealm string
+	// OriginIP is the local IP address advertised as Host-IP-Address
+	// in CER. When empty the go-diameter stack auto-detects the local
+	// address from the dialled connection.
+	OriginIP string
+	// OriginPort is the local TCP port the testbench binds to when
+	// dialling this peer. Zero means the OS picks an ephemeral port.
+	OriginPort int
 
 	// Transport selects the wire transport. Empty is treated as
 	// TransportTCP. SCTP is rejected by the connection layer.
@@ -122,6 +129,20 @@ func (p PeerConfig) Address() string {
 	return fmt.Sprintf("%s:%d", p.Host, p.Port)
 }
 
+// LocalAddress returns the local bind address for the dial (ip:port).
+// Returns an empty string when no explicit local address is configured,
+// which tells the dial layer to let the OS pick an ephemeral port.
+func (p PeerConfig) LocalAddress() string {
+	if p.OriginPort == 0 && p.OriginIP == "" {
+		return ""
+	}
+	ip := p.OriginIP
+	if ip == "" {
+		ip = "0.0.0.0"
+	}
+	return fmt.Sprintf("%s:%d", ip, p.OriginPort)
+}
+
 // ConnectionState is the per-peer state.
 //
 //	disconnected → connecting → connected
@@ -136,9 +157,13 @@ type ConnectionState int
 
 // Connection state values.
 const (
-	// StateDisconnected — no live connection; the reconnect loop
-	// may be sleeping between attempts.
-	StateDisconnected ConnectionState = iota
+	// StateStopped — administratively down; no reconnect attempts.
+	// This is the initial state before Connect() is called, and the
+	// state after an explicit Disconnect().
+	StateStopped ConnectionState = iota
+	// StateDisconnected — supervision is active but the transport is
+	// down; the reconnect loop is sleeping between attempts.
+	StateDisconnected
 	// StateConnecting — the dial-or-handshake is in flight.
 	StateConnecting
 	// StateConnected — CER/CEA has succeeded and DWR/DWA is
@@ -151,6 +176,8 @@ const (
 // String renders a ConnectionState for log lines.
 func (s ConnectionState) String() string {
 	switch s {
+	case StateStopped:
+		return "stopped"
 	case StateDisconnected:
 		return "disconnected"
 	case StateConnecting:

@@ -16,41 +16,89 @@ func mountSubscribers(r chi.Router, s store.Store) {
 	r.Get("/subscribers/{id}", getSubscriber(s))
 	r.Put("/subscribers/{id}", updateSubscriber(s))
 	r.Delete("/subscribers/{id}", deleteSubscriber(s))
+	r.Get("/tac-catalog", listTacCatalog())
+}
+
+// tacEntry is one row in the TAC catalogue returned by GET /tac-catalog.
+type tacEntry struct {
+	TAC          string `json:"tac"`
+	Manufacturer string `json:"manufacturer"`
+	Model        string `json:"model"`
+	Year         int    `json:"year,omitempty"`
+}
+
+// tacCatalog is a curated built-in list of common devices used to
+// populate the Manufacturer → Model cascading selects in the UI.
+var tacCatalog = []tacEntry{
+	{TAC: "35617510", Manufacturer: "Apple", Model: "iPhone 15 Pro Max", Year: 2023},
+	{TAC: "35617309", Manufacturer: "Apple", Model: "iPhone 15 Pro", Year: 2023},
+	{TAC: "35617209", Manufacturer: "Apple", Model: "iPhone 15 Plus", Year: 2023},
+	{TAC: "35617109", Manufacturer: "Apple", Model: "iPhone 15", Year: 2023},
+	{TAC: "35390911", Manufacturer: "Apple", Model: "iPhone 14 Pro Max", Year: 2022},
+	{TAC: "35390811", Manufacturer: "Apple", Model: "iPhone 14 Pro", Year: 2022},
+	{TAC: "35390711", Manufacturer: "Apple", Model: "iPhone 14 Plus", Year: 2022},
+	{TAC: "35390611", Manufacturer: "Apple", Model: "iPhone 14", Year: 2022},
+	{TAC: "35254610", Manufacturer: "Apple", Model: "iPhone 13 Pro Max", Year: 2021},
+	{TAC: "35254510", Manufacturer: "Apple", Model: "iPhone 13 Pro", Year: 2021},
+	{TAC: "35254410", Manufacturer: "Apple", Model: "iPhone 13 Mini", Year: 2021},
+	{TAC: "35254310", Manufacturer: "Apple", Model: "iPhone 13", Year: 2021},
+	{TAC: "86751507", Manufacturer: "Samsung", Model: "Galaxy S24 Ultra", Year: 2024},
+	{TAC: "86751407", Manufacturer: "Samsung", Model: "Galaxy S24+", Year: 2024},
+	{TAC: "86751307", Manufacturer: "Samsung", Model: "Galaxy S24", Year: 2024},
+	{TAC: "35694311", Manufacturer: "Samsung", Model: "Galaxy S23 Ultra", Year: 2023},
+	{TAC: "35694211", Manufacturer: "Samsung", Model: "Galaxy S23+", Year: 2023},
+	{TAC: "35694111", Manufacturer: "Samsung", Model: "Galaxy S23", Year: 2023},
+	{TAC: "86348202", Manufacturer: "Samsung", Model: "Galaxy A54", Year: 2023},
+	{TAC: "86348102", Manufacturer: "Samsung", Model: "Galaxy A34", Year: 2023},
+	{TAC: "35978711", Manufacturer: "Google", Model: "Pixel 8 Pro", Year: 2023},
+	{TAC: "35978611", Manufacturer: "Google", Model: "Pixel 8", Year: 2023},
+	{TAC: "35290011", Manufacturer: "Google", Model: "Pixel 7 Pro", Year: 2022},
+	{TAC: "35289911", Manufacturer: "Google", Model: "Pixel 7", Year: 2022},
+	{TAC: "86853601", Manufacturer: "Huawei", Model: "P60 Pro", Year: 2023},
+	{TAC: "86726601", Manufacturer: "Huawei", Model: "Mate 60 Pro", Year: 2023},
+	{TAC: "35805711", Manufacturer: "OnePlus", Model: "12", Year: 2024},
+	{TAC: "35805611", Manufacturer: "OnePlus", Model: "11", Year: 2023},
+	{TAC: "86669904", Manufacturer: "Xiaomi", Model: "14 Pro", Year: 2024},
+	{TAC: "86669804", Manufacturer: "Xiaomi", Model: "14", Year: 2024},
+}
+
+// listTacCatalog handles GET /tac-catalog.
+func listTacCatalog() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		respondJSON(w, http.StatusOK, tacCatalog)
+	}
 }
 
 // subscriberRequest is the JSON request body for Subscriber create and
 // update operations.
 type subscriberRequest struct {
-	Name        string `json:"name"`
-	Msisdn      string `json:"msisdn"`
-	Iccid       string `json:"iccid"`
-	Imei        string `json:"imei"`
-	DeviceMake  string `json:"deviceMake"`
-	DeviceModel string `json:"deviceModel"`
+	Name   string `json:"name"`
+	Msisdn string `json:"msisdn"`
+	Iccid  string `json:"iccid"`
+	Imei   string `json:"imei"`
+	Tac    string `json:"tac"`
 }
 
 // subscriberResponse is the JSON response shape for a Subscriber.
 type subscriberResponse struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Msisdn      string `json:"msisdn"`
-	Iccid       string `json:"iccid"`
-	Imei        string `json:"imei,omitempty"`
-	DeviceMake  string `json:"deviceMake,omitempty"`
-	DeviceModel string `json:"deviceModel,omitempty"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Msisdn string `json:"msisdn"`
+	Iccid  string `json:"iccid"`
+	Imei   string `json:"imei,omitempty"`
+	Tac    string `json:"tac,omitempty"`
 }
 
 // toSubscriberResponse converts a store.Subscriber to a
 // subscriberResponse.
 func toSubscriberResponse(s store.Subscriber) subscriberResponse {
 	return subscriberResponse{
-		ID:          uuidToString(s.ID),
-		Name:        s.Name,
-		Msisdn:      s.Msisdn,
-		Iccid:       s.Iccid,
-		Imei:        s.Imei.String,
-		DeviceMake:  s.DeviceMake.String,
-		DeviceModel: s.DeviceModel.String,
+		ID:     uuidToString(s.ID),
+		Name:   s.Name,
+		Msisdn: s.Msisdn,
+		Iccid:  s.Iccid,
+		Imei:   s.Imei.String,
+		Tac:    s.Tac.String,
 	}
 }
 
@@ -92,12 +140,11 @@ func createSubscriber(s store.Store) http.HandlerFunc {
 			return
 		}
 		sub, err := s.InsertSubscriber(r.Context(), store.InsertSubscriberParams{
-			Name:        req.Name,
-			Msisdn:      req.Msisdn,
-			Iccid:       req.Iccid,
-			Imei:        optionalText(req.Imei),
-			DeviceMake:  optionalText(req.DeviceMake),
-			DeviceModel: optionalText(req.DeviceModel),
+			Name:   req.Name,
+			Msisdn: req.Msisdn,
+			Iccid:  req.Iccid,
+			Imei:   optionalText(req.Imei),
+			Tac:    optionalText(req.Tac),
 		})
 		if mapStoreError(w, err) != nil {
 			return
@@ -141,13 +188,12 @@ func updateSubscriber(s store.Store) http.HandlerFunc {
 			return
 		}
 		sub, err := s.UpdateSubscriber(r.Context(), store.UpdateSubscriberParams{
-			ID:          id,
-			Name:        req.Name,
-			Msisdn:      req.Msisdn,
-			Iccid:       req.Iccid,
-			Imei:        optionalText(req.Imei),
-			DeviceMake:  optionalText(req.DeviceMake),
-			DeviceModel: optionalText(req.DeviceModel),
+			ID:     id,
+			Name:   req.Name,
+			Msisdn: req.Msisdn,
+			Iccid:  req.Iccid,
+			Imei:   optionalText(req.Imei),
+			Tac:    optionalText(req.Tac),
 		})
 		if mapStoreError(w, err) != nil {
 			return

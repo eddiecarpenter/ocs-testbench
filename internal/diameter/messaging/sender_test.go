@@ -59,6 +59,8 @@ func (f *fakePeer) Subscribe() <-chan diameter.StateEvent {
 	return f.subs
 }
 
+func (f *fakePeer) Unsubscribe(_ <-chan diameter.StateEvent) {}
+
 // Test 1 — Sender returns ErrPeerNotConnected synchronously when
 // the peer is disconnected. The wire is not touched.
 func TestSender_DisconnectedPeerFailsFast(t *testing.T) {
