@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -49,20 +50,29 @@ func executionSSE(exec ExecutionEngine) http.HandlerFunc {
 			return
 		}
 
-		// Set SSE headers before any write.
+		// Subscribe BEFORE committing SSE headers so we can still
+		// return a JSON error (404) when the session is not found.
+		ch, err := exec.Subscribe(r.Context(), sessionID)
+		if err != nil {
+			if errors.Is(err, ErrSessionNotFound) {
+				respondNotFoundMsg(w, "execution not found")
+				return
+			}
+			respondInternalError(w)
+			return
+		}
+
+		// Set SSE headers — from this point on we are streaming.
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 
 		flusher, ok := w.(http.Flusher)
 		if !ok {
+			// ResponseWriter does not support flushing; we cannot
+			// stream. Nothing has been written yet so we can still
+			// return a 500.
 			respondInternalError(w)
-			return
-		}
-
-		ch, err := exec.Subscribe(r.Context(), sessionID)
-		if err != nil {
-			// Headers are already committed — we can only close.
 			return
 		}
 
