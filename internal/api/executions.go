@@ -167,11 +167,11 @@ type stepRequest struct {
 
 // stepResultResponse is the JSON body returned by POST /executions/{id}/step.
 type stepResultResponse struct {
-	StepIndex        int              `json:"stepIndex"`
-	Skipped          bool             `json:"skipped"`
-	ResultCode       uint32           `json:"resultCode"`
-	AssertionsPassed bool             `json:"assertionsPassed"`
-	Assertions       []assertionJSON  `json:"assertions"`
+	StepIndex        int             `json:"stepIndex"`
+	Skipped          bool            `json:"skipped"`
+	ResultCode       uint32          `json:"resultCode"`
+	AssertionsPassed bool            `json:"assertionsPassed"`
+	Assertions       []assertionJSON `json:"assertions"`
 }
 
 // assertionJSON is the JSON shape for a single assertion outcome.

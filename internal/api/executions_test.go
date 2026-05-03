@@ -111,7 +111,6 @@ func newExecFixture(t *testing.T) *execFixture {
 	}
 }
 
-
 // — AC-16: POST /executions with valid scenario ID + interactive mode → 202 —
 
 // TestStartExecution_ValidRequest_Returns202 verifies AC-16: a valid
