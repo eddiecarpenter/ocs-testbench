@@ -149,6 +149,18 @@ type executionStatusResponse struct {
 	Metrics     executionMetricsJ `json:"metrics"`
 }
 
+// executionPageResponse is the JSON body returned by GET /executions.
+type executionPageResponse struct {
+	Items []any        `json:"items"`
+	Page  pageMeta     `json:"page"`
+}
+
+type pageMeta struct {
+	Total  int `json:"total"`
+	Limit  int `json:"limit"`
+	Offset int `json:"offset"`
+}
+
 // executionMetricsJ is the JSON shape for ExecutionMetrics.
 type executionMetricsJ struct {
 	TotalRequests int     `json:"totalRequests"`
@@ -186,6 +198,7 @@ type assertionJSON struct {
 // mountExecutions registers the scenario execution control endpoints.
 // exec may be nil; when nil all endpoints return 503.
 func mountExecutions(r chi.Router, exec ExecutionEngine) {
+	r.Get("/executions", listExecutions())
 	r.Post("/executions", startExecution(exec))
 	r.Get("/executions/{id}", getExecution(exec))
 	r.Post("/executions/{id}/stop", stopExecution(exec))
@@ -200,6 +213,17 @@ func executionUnavailable(w http.ResponseWriter) {
 }
 
 // — Handlers —
+
+// listExecutions handles GET /executions.
+// The backend does not persist execution history; returns an empty page.
+func listExecutions() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		respondJSON(w, http.StatusOK, executionPageResponse{
+			Items: []any{},
+			Page:  pageMeta{Total: 0, Limit: 50, Offset: 0},
+		})
+	}
+}
 
 // startExecution handles POST /executions.
 // AC-16: valid request → 202 Accepted with {"sessionId": "..."}
