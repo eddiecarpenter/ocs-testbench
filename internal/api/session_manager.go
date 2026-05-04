@@ -44,8 +44,8 @@ type serviceJSON struct {
 }
 
 type variableJSON struct {
-	Name   string            `json:"name"`
-	Source variableSrcJSON   `json:"source"`
+	Name   string          `json:"name"`
+	Source variableSrcJSON `json:"source"`
 }
 
 type variableSrcJSON struct {

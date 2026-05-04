@@ -151,8 +151,8 @@ type executionStatusResponse struct {
 
 // executionPageResponse is the JSON body returned by GET /executions.
 type executionPageResponse struct {
-	Items []any        `json:"items"`
-	Page  pageMeta     `json:"page"`
+	Items []any    `json:"items"`
+	Page  pageMeta `json:"page"`
 }
 
 type pageMeta struct {
