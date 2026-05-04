@@ -67,6 +67,7 @@ import (
 	"github.com/eddiecarpenter/ocs-testbench/internal/diameter/protocol"
 	"github.com/eddiecarpenter/ocs-testbench/internal/logging"
 	"github.com/eddiecarpenter/ocs-testbench/internal/store"
+	tmpl "github.com/eddiecarpenter/ocs-testbench/internal/template"
 	"github.com/eddiecarpenter/ocs-testbench/web"
 )
 
@@ -220,16 +221,9 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 	// are no-ops until the builders are supplied.
 	sender := messaging.NewSender(dmgr)
 	behaviour := protocol.New(sender, protocol.Options{})
-	_ = behaviour // engine consumer lands in a later feature
 
-	// Build the REST API router. The api.Router includes its own
-	// middleware stack (Recovery, RequestID, logging.RequestLogger) and
-	// all CRUD + connection-control + SSE endpoints.
-	// The execution engine (ExecutionEngine) is not yet wired —
-	// it requires a concrete implementation that bridges the engine
-	// package with the store, manager, and template engine. The
-	// endpoint routes are registered and return 503 until it lands.
-	apiRouter := api.Router(s, dmgr, nil)
+	execEngine := api.NewSessionManager(s, behaviour, tmpl.NewDictAdapter(dict.Default))
+	apiRouter := api.Router(s, dmgr, execEngine)
 
 	// Mount the API router at /api. All routes within api.Router are
 	// relative to the router's root; the Mount prefix adds /api.
