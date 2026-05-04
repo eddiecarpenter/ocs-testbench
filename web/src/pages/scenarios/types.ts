@@ -16,6 +16,8 @@ export type ScenarioDuplicateInput =
 export type ScenarioOrigin = components['schemas']['ScenarioOrigin'];
 
 export type UnitType = components['schemas']['UnitType'];
+export type ServiceType = components['schemas']['ServiceType'];
+export type ServiceProfile = components['schemas']['ServiceProfile'];
 export type SessionMode = components['schemas']['SessionMode'];
 export type ServiceModel = components['schemas']['ServiceModel'];
 export type RequestType = components['schemas']['RequestType'];

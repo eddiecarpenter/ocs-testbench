@@ -279,6 +279,35 @@ func (e *Engine) buildServiceUnitPair(
 	if err != nil {
 		return nil, err
 	}
+	// Cap USU to what the OCS actually granted in the previous exchange.
+	//   - granted == 0 → suppress USU (nothing was granted; nothing can be used).
+	//   - used > granted → cap USU to granted (cannot report more than was given).
+	// For MSCC blocks (RatingGroup > 0) look up RG<n>_GRANTED.
+	// For root service model (RatingGroup == 0) look up the root-level
+	// RESULT_CODE: a non-2xxx code means no quota was granted at all.
+	if emitUSU {
+		if block.RatingGroup > 0 {
+			key := fmt.Sprintf("RG%d_GRANTED", block.RatingGroup)
+			if grantedRaw, ok := values[key]; ok {
+				grantedN, gOk := toUint64(grantedRaw)
+				if gOk {
+					if grantedN == 0 {
+						emitUSU = false
+					} else if usedN, uOk := toUint64(resolvedUsed); uOk && usedN > grantedN {
+						resolvedUsed = grantedN
+					}
+				}
+			}
+		} else {
+			// Root service model: suppress USU if the previous CCA was a failure.
+			if rcRaw, ok := values["RESULT_CODE"]; ok {
+				rc, rOk := toUint64(rcRaw)
+				if rOk && rc != 0 && (rc < 2000 || rc > 2999) {
+					emitUSU = false
+				}
+			}
+		}
+	}
 	if emitUSU {
 		usu, err := buildServiceUnitAVP(avp.UsedServiceUnit, unitType, resolvedUsed)
 		if err != nil {
@@ -333,12 +362,16 @@ func (e *Engine) shouldEmitUSU(
 		// INITIAL never includes USU
 		return false, nil, nil
 	case ccReqTypeUpdate, ccReqTypeTerminate:
-		// UPDATE and TERMINATE always include USU
+		// UPDATE and TERMINATE include USU only when resolved > 0.
+		// Sending USU when no units were previously granted is a protocol
+		// error — the engine suppresses the AVP rather than reporting
+		// phantom usage.
 		resolved, err := e.resolveValue(placeholder, values)
 		if err != nil {
 			return false, nil, err
 		}
-		return true, resolved, nil
+		n, ok := toUint64(resolved)
+		return ok && n > 0, resolved, nil
 	case ccReqTypeEvent:
 		// EVENT includes USU if resolved > 0
 		resolved, err := e.resolveValue(placeholder, values)
@@ -679,6 +712,8 @@ func toInt32(v any) (int32, bool) {
 	case int64:
 		return int32(n), true
 	case uint32:
+		return int32(n), true
+	case float64:
 		return int32(n), true
 	case string:
 		i, err := strconv.ParseInt(strings.TrimSpace(n), 10, 32)

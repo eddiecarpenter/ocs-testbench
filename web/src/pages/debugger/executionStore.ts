@@ -396,14 +396,16 @@ export function createExecutionStore(executionId: string): ExecutionStore {
     // real — the same code path runs in both worlds.
     async sendCcr() {
       const cur = get();
-      // Optimistically flip to running; the next `step.responded`
-      // SSE event will append the step record and freeze us here
-      // again at `paused` (single-step semantics — see OpenAPI
-      // `stepExecution`).
       set(() => ({ state: reduceTransition(cur.state, 'running') }));
       await ApiService.post<void>(
         `/executions/${encodeURIComponent(cur.executionId)}/step`,
       );
+      // Sync state from the server — without real SSE the optimistic
+      // "running" stays forever otherwise.
+      const snapshot = await ApiService.get<Execution>(
+        `/executions/${encodeURIComponent(cur.executionId)}`,
+      );
+      get().ingestSnapshot(snapshot);
     },
     async skip() {
       const cur = get();
@@ -432,22 +434,33 @@ export function createExecutionStore(executionId: string): ExecutionStore {
       );
     },
     async runToEnd() {
-      // Run-to-end is the same wire call as resume — the engine just
-      // doesn't pause again until terminal. Naming differs in the UI
-      // because the user sees "I'm letting it run".
       const cur = get();
       set(() => ({ state: reduceTransition(cur.state, 'running') }));
-      await ApiService.post<void>(
-        `/executions/${encodeURIComponent(cur.executionId)}/resume`,
-      );
+      // Loop through remaining steps: the server has no /resume endpoint;
+      // interactive mode is step-by-step via POST /step.
+      const terminalStates = new Set(['success', 'failure', 'aborted', 'error']);
+      let snapshot: Execution | undefined;
+      while (true) {
+        await ApiService.post<void>(
+          `/executions/${encodeURIComponent(get().executionId)}/step`,
+        );
+        snapshot = await ApiService.get<Execution>(
+          `/executions/${encodeURIComponent(get().executionId)}`,
+        );
+        // Update the progress pane cursor while running.
+        set(() => ({
+          cursor: snapshot!.currentStep,
+          steps: snapshot!.steps,
+        }));
+        if (terminalStates.has(snapshot.state) || snapshot.state !== 'paused') break;
+      }
+      if (snapshot) get().ingestSnapshot(snapshot);
     },
     async stop() {
       const cur = get();
-      // Optimistically transition. Aborted is a terminal state so the
-      // store stops emitting elapsed ticks.
       set(() => ({ state: reduceTransition(cur.state, 'aborted') }));
       await ApiService.post<void>(
-        `/executions/${encodeURIComponent(cur.executionId)}/abort`,
+        `/executions/${encodeURIComponent(cur.executionId)}/stop`,
       );
     },
     async restart() {

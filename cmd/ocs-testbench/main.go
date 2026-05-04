@@ -222,8 +222,9 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 	sender := messaging.NewSender(dmgr)
 	behaviour := protocol.New(sender, protocol.Options{})
 
-	execEngine := api.NewSessionManager(s, behaviour, tmpl.NewDictAdapter(dict.Default))
-	apiRouter := api.Router(s, dmgr, execEngine)
+	dictAdapter := tmpl.NewDictAdapter(dict.Default)
+	execEngine := api.NewSessionManager(s, behaviour, dictAdapter)
+	apiRouter := api.Router(s, dmgr, execEngine, dictAdapter)
 
 	// Mount the API router at /api. All routes within api.Router are
 	// relative to the router's root; the Mount prefix adds /api.

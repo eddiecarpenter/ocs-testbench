@@ -49,6 +49,7 @@ func NewStepExecutor(engine *template.Engine, baseInput template.EngineInput) *S
 //  7. Auto-update sc.Vars from the CCA (RESULT_CODE, MSCC values).
 //  8. Assert — evaluate step.Assertions against updated sc.Vars.
 //  9. Result code handlers — return first matching action.
+//  9b/c/d. Built-in checks — goto_terminate on non-2xxx, all-MSCC-exhausted, FUI=TERMINATE.
 //  10. Increment CCRequestNumber and update CC_REQUEST_NUMBER in sc.Vars.
 func (e *StepExecutor) Execute(
 	ctx context.Context,
@@ -78,8 +79,14 @@ func (e *StepExecutor) Execute(
 	}
 
 	// — Step 4: Build CCR via template engine —
+	// Derive the request type first so it can be injected into the value map
+	// before rendering — the engine uses CC_REQUEST_TYPE to apply §7 RSU/USU
+	// presence rules (INITIAL→no USU, TERMINATE→no RSU, etc.).
+	ccReqType := mapRequestType(step.RequestType)
+
 	// Merge sc.Vars with step-level overrides for this send only.
 	mergedVars := mergeVars(sc.Vars, step.Overrides)
+	mergedVars["CC_REQUEST_TYPE"] = ccReqType
 
 	input := e.baseInput
 	input.Values = mergedVars
@@ -88,13 +95,12 @@ func (e *StepExecutor) Execute(
 	if err != nil {
 		return StepResult{}, fmt.Errorf("step executor: render CCR: %w", err)
 	}
-
-	ccReqType := mapRequestType(step.RequestType)
 	req := &messaging.CCR{
-		SessionID:       sc.SessionID,
-		CCRequestType:   ccReqType,
-		CCRequestNumber: sc.CCRequestNumber,
-		ExtraAVPs:       avps,
+		SessionID:        sc.SessionID,
+		CCRequestType:    ccReqType,
+		CCRequestNumber:  sc.CCRequestNumber,
+		ServiceContextID: sc.ServiceContextID,
+		ExtraAVPs:        avps,
 	}
 
 	// — Step 5: Send —
@@ -118,6 +124,34 @@ func (e *StepExecutor) Execute(
 
 	// — Step 9: Result code handlers —
 	action := e.evaluateResultHandlers(sc.Vars, step.ResultHandlers)
+
+	// — Steps 9b/9c: Built-in termination checks —
+	// These fire only when no scenario result handler has overridden the action.
+	// All cases use ActionGotoTerminate so the session ends with a proper
+	// CCR-T (the last step) rather than dropping the Diameter session cold.
+	if action == ActionContinue && result.CCA != nil {
+		// 9b: Root-level non-success result code.
+		// A 4xxx or 5xxx code means the OCS rejected the request; reporting
+		// usage after this is a protocol violation (e.g. 5012 USED_MORE_THAN_GRANTED).
+		rc := result.CCA.ResultCode
+		if rc != 0 && (rc < 2000 || rc > 2999) {
+			action = ActionGotoTerminate
+		}
+
+		// 9c: All MSCC blocks denied or quota-exhausted (FUI=TERMINATE).
+		// When every rating group the OCS responded to has either a non-2xxx
+		// result code or FUI=TERMINATE, there is no grant left to continue with.
+		if action == ActionContinue && isAllMSCCExhausted(result.CCA) {
+			action = ActionGotoTerminate
+		}
+
+		// 9d: Root-level FUI=TERMINATE.
+		// The OCS signals the last quota grant; the session must terminate
+		// per RFC 4006 §5.6 once that quota is exhausted.
+		if action == ActionContinue && isFUITerminate(result.CCA) {
+			action = ActionGotoTerminate
+		}
+	}
 
 	// — Step 10: Increment CCRequestNumber —
 	sc.CCRequestNumber++
@@ -288,6 +322,8 @@ func parseAction(s string) ResultCodeAction {
 	switch strings.ToLower(s) {
 	case "terminate":
 		return ActionTerminate
+	case "goto_terminate":
+		return ActionGotoTerminate
 	case "retry":
 		return ActionRetry
 	case "pause":
@@ -393,7 +429,24 @@ func autoUpdateVarsFromCCA(vars map[string]any, cca *messaging.CCA) {
 	}
 	vars["RESULT_CODE"] = int64(cca.ResultCode)
 	vars["SESSION_ID"] = cca.SessionID
-	// Per-MSCC auto-provisioned variables: RG<n>_GRANTED, RG<n>_VALIDITY.
+	// Root-level FUI_ACTION: -1 means no FUI present in the CCA.
+	vars["FUI_ACTION"] = int64(cca.FUIAction)
+
+	// Zero out all previously-set RG variables before re-populating.
+	// This ensures that when a CCA omits a rating group, its variables
+	// reset to 0 rather than carrying stale values into the next CCR.
+	for k := range vars {
+		if strings.HasPrefix(k, "RG") &&
+			(strings.HasSuffix(k, "_GRANTED") ||
+				strings.HasSuffix(k, "_GRANTED_OCTETS") ||
+				strings.HasSuffix(k, "_VALIDITY") ||
+				strings.HasSuffix(k, "_RESULT_CODE") ||
+				strings.HasSuffix(k, "_FUI_ACTION")) {
+			vars[k] = int64(0)
+		}
+	}
+
+	// Per-MSCC auto-provisioned variables.
 	for _, block := range cca.MSCC {
 		rg := block.RatingGroup
 		prefix := fmt.Sprintf("RG%d", rg)
@@ -404,5 +457,34 @@ func autoUpdateVarsFromCCA(vars map[string]any, cca *messaging.CCA) {
 		if block.ValidityTime > 0 {
 			vars[prefix+"_VALIDITY"] = int64(block.ValidityTime)
 		}
+		// Per-MSCC result code: 0 means absent (OCS omitted it).
+		vars[prefix+"_RESULT_CODE"] = int64(block.ResultCode)
+		// Per-MSCC FUI action: -1 means no FUI present in this block.
+		vars[prefix+"_FUI_ACTION"] = int64(block.FUIAction)
 	}
+}
+
+// isFUITerminate reports whether the CCA carries a root-level
+// Final-Unit-Action=TERMINATE (0). Per RFC 4006 §5.6 the session must
+// terminate once the granted quota is exhausted.
+func isFUITerminate(cca *messaging.CCA) bool {
+	return cca.FUIAction == messaging.FUIActionTerminate
+}
+
+// isAllMSCCExhausted reports whether every MSCC block the OCS returned has
+// either a non-2xxx result code (quota denied) or FUI=TERMINATE (last grant).
+// Returns false when the CCA contains no MSCC blocks (root service model).
+func isAllMSCCExhausted(cca *messaging.CCA) bool {
+	if len(cca.MSCC) == 0 {
+		return false
+	}
+	for _, block := range cca.MSCC {
+		rc := block.ResultCode
+		rcFailed := rc != 0 && (rc < 2000 || rc > 2999)
+		fuiTerminate := block.FUIAction == messaging.FUIActionTerminate
+		if !rcFailed && !fuiTerminate {
+			return false // at least one block is still active
+		}
+	}
+	return true
 }

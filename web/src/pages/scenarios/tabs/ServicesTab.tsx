@@ -41,7 +41,7 @@ import {
   type VariableOptionGroup,
 } from '../selectors';
 import type { Service, ServiceModel } from '../types';
-import { matrix } from '../validators';
+import { deriveUnitType, matrix } from '../validators';
 
 const SERVICE_MODELS: ServiceModel[] = ['root', 'single-mscc', 'multi-mscc'];
 
@@ -160,7 +160,8 @@ export function ServicesTab() {
 
   if (!draft) return null;
 
-  const { unitType, serviceModel, services } = draft;
+  const { serviceType, serviceModel, services } = draft;
+  const unitType = deriveUnitType(serviceType);
   const { options: variableOptions, hasAny: hasAnyVariable } =
     buildVariableOptions(draft.variables);
 
@@ -301,7 +302,7 @@ export function ServicesTab() {
         <Card withBorder padding="md">
           <Stack gap="md">
             <Group justify="space-between">
-              <Title order={5}>Services</Title>
+              <Title order={5}>Charging services</Title>
               <Button
                 variant="default"
                 leftSection={<IconPlus size={14} />}

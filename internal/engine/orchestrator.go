@@ -59,6 +59,7 @@ func NewOrchestrator(e *StepExecutor) *Orchestrator {
 //   - opts.MaxIterations full passes have completed.
 //   - opts.StopCh is closed (stop is clean — the current step finishes first).
 //   - A step returns ActionTerminate or ActionStop.
+//   - A step returns ActionGotoTerminate (jumps to the last step, then stops).
 //   - A step returns ActionPause (sc.State is set to StatePaused; error returned).
 //   - An unrecoverable error occurs during step execution.
 //
@@ -69,6 +70,8 @@ func NewOrchestrator(e *StepExecutor) *Orchestrator {
 // On success (all steps complete, iteration limit reached, or stop-channel
 // closed) sc.State is set to StateCompleted and nil is returned.
 // On ActionTerminate sc.State is set to StateTerminated and nil is returned.
+// On ActionGotoTerminate the last step is executed (sending a CCR-T), then
+// sc.State is set to StateTerminated and nil is returned.
 // On ActionPause sc.State is set to StatePaused and a non-nil error is returned
 // with ErrExecutionPaused describing the pause reason.
 func (o *Orchestrator) RunContinuous(
@@ -115,6 +118,20 @@ func (o *Orchestrator) RunContinuous(
 
 			switch action {
 			case ActionTerminate:
+				sc.State = StateTerminated
+				return nil
+			case ActionGotoTerminate:
+				// Jump to the last step (the TERMINATE CCR) to perform a clean
+				// Diameter session teardown before stopping. If we're already on
+				// the last step, stop immediately to avoid an infinite loop.
+				lastIdx := len(steps) - 1
+				if i < lastIdx {
+					_, _, err := o.runStepWithRetry(ctx, sc, prevResult, steps[lastIdx], lastIdx, opts)
+					if err != nil {
+						sc.State = StateError
+						return err
+					}
+				}
 				sc.State = StateTerminated
 				return nil
 			case ActionStop:

@@ -1,7 +1,7 @@
 /**
  * Scenarios listing — replaces the legacy `/scenarios` placeholder.
  *
- * Renders rows grouped under `OCTET` / `TIME` / `UNITS` headers, with
+ * Renders rows grouped under service type headers (VOICE, DATA, SMS, …), with
  * search across name + peer, a peer filter, the New CTA, and per-row
  * Run / Edit / Duplicate / Delete actions in the kebab menu. Row
  * click does NOT navigate — editing always goes through the kebab.
@@ -55,9 +55,10 @@ import {
   useScenarios,
 } from '../../api/resources/scenarios';
 import {
-  UNIT_GROUP_ORDER,
+  SERVICE_TYPE_GROUP_ORDER,
+  SERVICE_TYPE_LABELS,
   filterScenarios,
-  groupByUnit,
+  groupByServiceType,
 } from './listSelectors';
 import { ScenarioBuilderPage } from './ScenarioBuilderPage';
 import type { ScenarioSummary } from './types';
@@ -97,7 +98,7 @@ export function ScenariosListPage() {
     [scenariosQuery.data, search, peerFilter, peerMap],
   );
 
-  const grouped = useMemo(() => groupByUnit(filtered), [filtered]);
+  const grouped = useMemo(() => groupByServiceType(filtered), [filtered]);
 
   const peerOptions = useMemo(() => {
     const ids = new Set<string>();
@@ -226,15 +227,15 @@ export function ScenariosListPage() {
         </Card>
       ) : (
         <Stack gap="lg">
-          {UNIT_GROUP_ORDER.map((unit) => {
-            const rows = grouped[unit];
-            if (rows.length === 0) return null;
+          {SERVICE_TYPE_GROUP_ORDER.map((serviceType) => {
+            const rows = grouped[serviceType];
+            if (!rows || rows.length === 0) return null;
             return (
-              <Card withBorder padding="md" key={unit}>
+              <Card withBorder padding="md" key={serviceType}>
                 <Stack gap="xs">
                   <Group justify="space-between">
                     <Group gap="xs">
-                      <Title order={4}>{unit}</Title>
+                      <Title order={4}>{SERVICE_TYPE_LABELS[serviceType]}</Title>
                       <Badge variant="light">{rows.length}</Badge>
                     </Group>
                   </Group>

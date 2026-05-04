@@ -32,7 +32,7 @@ func newScenarioFixture(t *testing.T) *scenarioFixture {
 	require.NoError(t, err)
 	return &scenarioFixture{
 		s:      s,
-		r:      api.Router(s, nil, nil),
+		r:      api.Router(s, nil, nil, nil),
 		peerID: api.UUIDStr(peer.ID),
 	}
 }
@@ -42,8 +42,7 @@ func minimalScenarioBody(name, peerID string) map[string]any {
 	return map[string]any{
 		"name":         name,
 		"peerId":       peerID,
-		"unitType":     "OCTET",
-		"sessionMode":  "continuous",
+		"sessionMode":  "session",
 		"serviceModel": "single-mscc",
 		"avpTree":      []any{},
 		"services":     []any{},
@@ -74,7 +73,6 @@ func TestScenario_CreateScenario_ValidBody_Returns201(t *testing.T) {
 	assert.NotEmpty(t, created["id"])
 	assert.Equal(t, "scen-a", created["name"])
 	assert.Equal(t, f.peerID, created["peerId"])
-	assert.Equal(t, "OCTET", created["unitType"])
 	assert.Equal(t, "user", created["origin"])
 	assert.EqualValues(t, 0, created["stepCount"])
 }
@@ -84,8 +82,7 @@ func TestScenario_CreateScenario_MissingName_Returns400(t *testing.T) {
 	f := newScenarioFixture(t)
 	reqBody, _ := json.Marshal(map[string]any{
 		"peerId":       f.peerID,
-		"unitType":     "OCTET",
-		"sessionMode":  "continuous",
+		"sessionMode":  "session",
 		"serviceModel": "single-mscc",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/v1/scenarios", bytes.NewReader(reqBody))

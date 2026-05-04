@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -20,18 +22,22 @@ import (
 // — Scenario body JSON shapes (wire format stored in DB) —
 
 type scenarioBodyExec struct {
-	UnitType     string          `json:"unitType"`
-	ServiceModel string          `json:"serviceModel"`
-	AvpTree      json.RawMessage `json:"avpTree"`
-	Services     json.RawMessage `json:"services"`
-	Variables    json.RawMessage `json:"variables"`
-	Steps        json.RawMessage `json:"steps"`
+	ServiceModel     string          `json:"serviceModel"`
+	ServiceContextID string          `json:"serviceContextId"`
+	ServiceType      string          `json:"serviceType"`
+	ServiceProfile   string          `json:"serviceProfile"`
+	AvpTree          json.RawMessage `json:"avpTree"`
+	Services         json.RawMessage `json:"services"`
+	Variables        json.RawMessage `json:"variables"`
+	Steps            json.RawMessage `json:"steps"`
 }
 
 type avpNodeJSON struct {
 	Name     string        `json:"name"`
+	Code     uint32        `json:"code,omitempty"`
 	VendorID int64         `json:"vendorId,omitempty"`
 	ValueRef string        `json:"valueRef,omitempty"`
+	Locked   bool          `json:"locked,omitempty"`
 	Children []avpNodeJSON `json:"children,omitempty"`
 }
 
@@ -57,26 +63,39 @@ type variableSrcJSON struct {
 }
 
 // peerIdentityBody is the minimal subset of the peer body needed for
-// extracting origin_host / origin_realm.
+// extracting identity fields. The stored JSON uses camelCase flat structure.
 type peerIdentityBody struct {
-	Identity struct {
-		OriginHost  string `json:"origin_host"`
-		OriginRealm string `json:"origin_realm"`
-	} `json:"identity"`
+	OriginHost  string `json:"originHost"`
+	OriginRealm string `json:"originRealm"`
 }
 
 // — Session record —
 
-type sessionRecord struct {
-	id    string
-	sc    *engine.SessionContext
-	orc   *engine.Orchestrator
-	steps []engine.ScenarioStep
+type stepHistoryRecord struct {
+	n          int
+	kind       string
+	label      string
+	state      string
+	startedAt  string
+	finishedAt string
+	durationMs int64
+}
 
-	mu         sync.RWMutex
-	state      engine.SessionState
-	stepIdx    int
-	prevResult *engine.SendResult
+type sessionRecord struct {
+	id           string
+	scenarioID   string
+	scenarioName string
+	mode         string
+	startedAt    string
+	sc           *engine.SessionContext
+	orc          *engine.Orchestrator
+	steps        []engine.ScenarioStep
+
+	mu          sync.RWMutex
+	state       engine.SessionState
+	stepIdx     int
+	prevResult  *engine.SendResult
+	stepHistory []stepHistoryRecord
 
 	cancel context.CancelFunc
 	stopCh chan struct{}
@@ -141,48 +160,48 @@ func NewSessionManager(s store.Store, sender messaging.Sender, dict template.Dic
 }
 
 // Start implements ExecutionEngine.
-func (m *SessionManager) Start(ctx context.Context, scenarioID string, mode string) (string, error) {
+func (m *SessionManager) Start(ctx context.Context, scenarioID string, mode string) (StartInfo, error) {
 	scUID, err := parseScenarioUUID(scenarioID)
 	if err != nil {
-		return "", ErrScenarioNotFound
+		return StartInfo{}, ErrScenarioNotFound
 	}
 
 	scRow, err := m.store.GetScenario(ctx, scUID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return "", ErrScenarioNotFound
+			return StartInfo{}, ErrScenarioNotFound
 		}
-		return "", fmt.Errorf("session manager: load scenario: %w", err)
+		return StartInfo{}, fmt.Errorf("session manager: load scenario: %w", err)
 	}
 
 	var body scenarioBodyExec
 	if err := json.Unmarshal(scRow.Body, &body); err != nil {
-		return "", fmt.Errorf("session manager: parse scenario body: %w", err)
+		return StartInfo{}, fmt.Errorf("session manager: parse scenario body: %w", err)
 	}
 
 	var avpNodes []avpNodeJSON
 	if err := json.Unmarshal(body.AvpTree, &avpNodes); err != nil {
-		return "", fmt.Errorf("session manager: parse avpTree: %w", err)
+		return StartInfo{}, fmt.Errorf("session manager: parse avpTree: %w", err)
 	}
 
 	var services []serviceJSON
 	if err := json.Unmarshal(body.Services, &services); err != nil {
-		return "", fmt.Errorf("session manager: parse services: %w", err)
+		return StartInfo{}, fmt.Errorf("session manager: parse services: %w", err)
 	}
 
 	var variables []variableJSON
 	if err := json.Unmarshal(body.Variables, &variables); err != nil {
-		return "", fmt.Errorf("session manager: parse variables: %w", err)
+		return StartInfo{}, fmt.Errorf("session manager: parse variables: %w", err)
 	}
 
 	var steps []engine.ScenarioStep
 	if err := json.Unmarshal(body.Steps, &steps); err != nil {
-		return "", fmt.Errorf("session manager: parse steps: %w", err)
+		return StartInfo{}, fmt.Errorf("session manager: parse steps: %w", err)
 	}
 
 	peerName, originHost, originRealm, err := m.loadPeerInfo(ctx, scRow.PeerID)
 	if err != nil {
-		return "", fmt.Errorf("session manager: load peer: %w", err)
+		return StartInfo{}, fmt.Errorf("session manager: load peer: %w", err)
 	}
 
 	var sub *store.Subscriber
@@ -199,7 +218,7 @@ func (m *SessionManager) Start(ctx context.Context, scenarioID string, mode stri
 		Tree:         smConvertAvpTree(avpNodes),
 		MSCC:         smConvertServices(services, values),
 		Dictionary:   m.dict,
-		UnitType:     template.UnitType(body.UnitType),
+		UnitType:     template.UnitType(smDeriveUnitType(body.ServiceType)),
 		ServiceModel: template.ServiceModel(body.ServiceModel),
 	}
 
@@ -209,10 +228,16 @@ func (m *SessionManager) Start(ctx context.Context, scenarioID string, mode stri
 	}
 
 	sc := engine.NewSessionContext(peerName, originHost, m.sender, execMode)
+	svcCtxID := body.ServiceContextID
+	if svcCtxID == "" {
+		svcCtxID = "32251@3gpp.org"
+	}
+	sc.ServiceContextID = svcCtxID
 	for k, v := range values {
 		sc.Vars[k] = v
 	}
 	sc.Vars["SESSION_ID"] = sc.SessionID
+	sc.Vars["SERVICE_CONTEXT_ID"] = svcCtxID
 
 	stepExec := engine.NewStepExecutor(m.tmpl, baseInput)
 	orc := engine.NewOrchestrator(stepExec)
@@ -221,15 +246,26 @@ func (m *SessionManager) Start(ctx context.Context, scenarioID string, mode stri
 	stopCh := make(chan struct{})
 	runCtx, cancel := context.WithCancel(context.Background())
 
+	// Interactive sessions start paused so the UI shows step controls
+	// immediately. Continuous sessions start active (running).
+	initialState := engine.StateActive
+	if execMode == engine.ModeInteractive {
+		initialState = engine.StatePaused
+	}
+
 	rec := &sessionRecord{
-		id:     sessionID,
-		sc:     sc,
-		orc:    orc,
-		steps:  steps,
-		state:  engine.StateActive,
-		cancel: cancel,
-		stopCh: stopCh,
-		done:   make(chan struct{}),
+		id:           sessionID,
+		scenarioID:   scenarioID,
+		scenarioName: scRow.Name,
+		mode:         mode,
+		startedAt:    time.Now().UTC().Format(time.RFC3339),
+		sc:           sc,
+		orc:          orc,
+		steps:        steps,
+		state:        initialState,
+		cancel:       cancel,
+		stopCh:       stopCh,
+		done:         make(chan struct{}),
 	}
 
 	m.mu.Lock()
@@ -243,7 +279,7 @@ func (m *SessionManager) Start(ctx context.Context, scenarioID string, mode stri
 		cancel()
 	}
 
-	return sessionID, nil
+	return StartInfo{SessionID: sessionID, ScenarioName: scRow.Name}, nil
 }
 
 func (m *SessionManager) runContinuous(ctx context.Context, rec *sessionRecord) {
@@ -266,6 +302,26 @@ func (m *SessionManager) runContinuous(ctx context.Context, rec *sessionRecord) 
 		State:     rec.sc.State.String(),
 		Metrics:   smMetricsFromSummary(rec.sc.Summary()),
 	})
+}
+
+// List implements ExecutionEngine.
+func (m *SessionManager) List(_ context.Context) []ExecutionSummary {
+	m.mu.Lock()
+	out := make([]ExecutionSummary, 0, len(m.sessions))
+	for _, rec := range m.sessions {
+		rec.mu.RLock()
+		out = append(out, ExecutionSummary{
+			SessionID:    rec.id,
+			ScenarioID:   rec.scenarioID,
+			ScenarioName: rec.scenarioName,
+			Mode:         rec.mode,
+			State:        smMapState(rec.state),
+			StartedAt:    rec.startedAt,
+		})
+		rec.mu.RUnlock()
+	}
+	m.mu.Unlock()
+	return out
 }
 
 // Stop implements ExecutionEngine.
@@ -303,7 +359,7 @@ func (m *SessionManager) Step(ctx context.Context, sessionID string, overrides m
 	}
 
 	rec.mu.Lock()
-	if rec.state != engine.StateActive {
+	if rec.state != engine.StateActive && rec.state != engine.StatePaused {
 		rec.mu.Unlock()
 		return ExecutionStepResult{}, ErrInvalidState
 	}
@@ -327,16 +383,41 @@ func (m *SessionManager) Step(ctx context.Context, sessionID string, overrides m
 
 	yield, stepErr := rec.orc.RunStepWithPrev(ctx, rec.sc, stepIdx, rec.steps, prev)
 
+	finishedAt := time.Now().UTC()
 	rec.mu.Lock()
 	rec.stepIdx++
-	if stepErr == nil {
+	stepState := "success"
+	if stepErr != nil {
+		stepState = "error"
+		rec.state = engine.StateError
+	} else {
 		rec.prevResult = &yield.Result.SendResult
+		if !yield.Result.Skipped && !smAllPassed(yield.Result.Assertions) {
+			stepState = "failure"
+		}
+		if yield.Result.Skipped {
+			stepState = "skipped"
+		}
 		if rec.stepIdx >= len(rec.steps) {
 			rec.state = engine.StateCompleted
+		} else {
+			// Stay paused between steps in interactive mode.
+			rec.state = engine.StatePaused
 		}
-	} else {
-		rec.state = engine.StateError
 	}
+	durationMs := int64(0)
+	startTs := finishedAt.Add(-time.Duration(yield.Result.SendResult.Metrics.RTT))
+	if !yield.Result.Skipped && stepErr == nil {
+		durationMs = finishedAt.Sub(startTs).Milliseconds()
+	}
+	rec.stepHistory = append(rec.stepHistory, stepHistoryRecord{
+		n:          stepIdx + 1,
+		kind:       "request",
+		state:      stepState,
+		startedAt:  startTs.Format(time.RFC3339),
+		finishedAt: finishedAt.Format(time.RFC3339),
+		durationMs: durationMs,
+	})
 	rec.mu.Unlock()
 
 	if stepErr != nil {
@@ -369,25 +450,46 @@ func (m *SessionManager) Step(ctx context.Context, sessionID string, overrides m
 	}, nil
 }
 
-// Status implements ExecutionEngine.
-func (m *SessionManager) Status(_ context.Context, sessionID string) (ExecutionStatus, error) {
+// Detail implements ExecutionEngine.
+func (m *SessionManager) Detail(_ context.Context, sessionID string) (ExecutionDetailResponse, error) {
 	rec, err := m.getSession(sessionID)
 	if err != nil {
-		return ExecutionStatus{}, err
+		return ExecutionDetailResponse{}, err
 	}
 
 	rec.mu.RLock()
 	state := rec.state
 	stepIdx := rec.stepIdx
+	history := make([]stepHistoryRecord, len(rec.stepHistory))
+	copy(history, rec.stepHistory)
 	rec.mu.RUnlock()
 
-	summary := rec.sc.Summary()
+	steps := make([]StepRecordJSON, len(history))
+	for i, h := range history {
+		steps[i] = StepRecordJSON{
+			N:          h.n,
+			Kind:       h.kind,
+			Label:      h.label,
+			State:      h.state,
+			StartedAt:  h.startedAt,
+			FinishedAt: h.finishedAt,
+			DurationMs: h.durationMs,
+		}
+	}
 
-	return ExecutionStatus{
-		SessionID:   sessionID,
-		State:       state.String(),
-		CurrentStep: stepIdx,
-		Metrics:     smMetricsFromSummary(summary),
+	ctx := smBuildContext(rec.sc.Vars)
+
+	return ExecutionDetailResponse{
+		ID:           sessionID,
+		ScenarioID:   rec.scenarioID,
+		ScenarioName: rec.scenarioName,
+		Mode:         rec.mode,
+		State:        smMapState(state),
+		StartedAt:    rec.startedAt,
+		CurrentStep:  stepIdx,
+		TotalSteps:   len(rec.steps),
+		Steps:        steps,
+		Context:      ctx,
 	}, nil
 }
 
@@ -435,7 +537,7 @@ func (m *SessionManager) loadPeerInfo(ctx context.Context, peerID pgtype.UUID) (
 	}
 	var body peerIdentityBody
 	_ = json.Unmarshal(peer.Body, &body)
-	return peer.Name, body.Identity.OriginHost, body.Identity.OriginRealm, nil
+	return peer.Name, body.OriginHost, body.OriginRealm, nil
 }
 
 func parseScenarioUUID(s string) (pgtype.UUID, error) {
@@ -454,15 +556,24 @@ func smResolveVariables(
 	sub *store.Subscriber,
 	originHost, originRealm string,
 ) map[string]any {
-	vals := make(map[string]any, len(vars)+8)
+	vals := make(map[string]any, len(vars)+12)
 	vals["ORIGIN_HOST"] = originHost
 	vals["ORIGIN_REALM"] = originRealm
+	// Destination-Realm defaults to the peer's own realm (same domain).
+	vals["DEST_REALM"] = originRealm
+	// Auth-Application-Id is always 4 (Diameter Credit-Control / Gy).
+	vals["AUTH_APP_ID"] = uint32(4)
+	// END_USER_E164 (0) — constant for MSISDN-based Subscription-Id-Type AVP.
+	vals["SUB_ID_TYPE"] = int32(0)
 	if sub != nil {
 		vals["MSISDN"] = sub.Msisdn
 		vals["ICCID"] = sub.Iccid
 		if sub.Imei.Valid {
 			vals["IMEI"] = sub.Imei.String
 		}
+		// Auto-seed IMS calling-party from subscriber MSISDN so VOICE scenarios
+		// get a valid SIP URI without requiring an explicit variable definition.
+		vals["CALLING_PARTY_ADDRESS"] = sub.Msisdn
 	}
 	for _, v := range vars {
 		switch v.Source.Kind {
@@ -512,10 +623,90 @@ func smResolveBound(vals map[string]any, name string, src variableSrcJSON, sub *
 	}
 }
 
+// smDeriveUnitType returns the Diameter unit type implied by the service type.
+func smDeriveUnitType(serviceType string) string {
+	switch strings.ToUpper(serviceType) {
+	case "VOICE", "USSD2_SESSION":
+		return "TIME"
+	case "DATA":
+		return "VOLUME"
+	default: // SMS, USSD1_EVENT, USSD1_SESSION
+		return "EVENT"
+	}
+}
+
+// smServiceInfoForProfile returns the Service-Information child AVP list for
+// the given (profile, serviceType) combination. Profile defaults to 3GPP when
+// empty.
+func smServiceInfoForProfile(profile, serviceType string) []avpNodeJSON {
+	switch strings.ToUpper(profile) {
+	case "HUAWEI":
+		return smHuaweiServiceInfoAvps(serviceType)
+	default:
+		return sm3GPPServiceInfoAvps(serviceType)
+	}
+}
+
+func sm3GPPServiceInfoAvps(serviceType string) []avpNodeJSON {
+	switch strings.ToUpper(serviceType) {
+	case "VOICE":
+		return []avpNodeJSON{{
+			Name:     "IMS-Information",
+			VendorID: 10415,
+			Children: []avpNodeJSON{
+				// Node-Functionality (862): required by spec; "0" = S-CSCF.
+				{Name: "Node-Functionality", VendorID: 10415, ValueRef: "0"},
+				{Name: "Role-Of-Node", VendorID: 10415, ValueRef: "ROLE_OF_NODE"},
+				{Name: "Calling-Party-Address", VendorID: 10415, ValueRef: "CALLING_PARTY_ADDRESS"},
+				{Name: "Called-Party-Address", VendorID: 10415, ValueRef: "CALLED_PARTY_ADDRESS"},
+			},
+		}}
+	case "DATA":
+		return []avpNodeJSON{{Name: "PS-Information", VendorID: 10415}}
+	case "SMS":
+		return []avpNodeJSON{{Name: "SMS-Information", VendorID: 10415}}
+	case "USSD1_EVENT", "USSD1_SESSION", "USSD2_SESSION":
+		return []avpNodeJSON{{Name: "USSD-Information", VendorID: 10415}}
+	default:
+		return nil
+	}
+}
+
+func smHuaweiServiceInfoAvps(serviceType string) []avpNodeJSON {
+	switch strings.ToUpper(serviceType) {
+	case "VOICE":
+		return []avpNodeJSON{{Name: "IN_INFORMATION", VendorID: 2011}}
+	case "DATA":
+		return []avpNodeJSON{{Name: "PS-Information", VendorID: 10415}}
+	case "SMS":
+		return []avpNodeJSON{{Name: "SMS_INFORMATION", VendorID: 2011}}
+	case "USSD1_EVENT", "USSD1_SESSION", "USSD2_SESSION":
+		return []avpNodeJSON{{Name: "DCD_INFORMATION", VendorID: 2011}}
+	default:
+		return nil
+	}
+}
+
+// ccrBuilderCodes are AVP codes that must not be included in ExtraAVPs
+// because the CCR builder already injects them as mandatory fields.
+// Including them again would produce duplicate AVPs on the wire.
+var ccrBuilderCodes = map[uint32]bool{
+	263: true, // Session-Id
+	264: true, // Origin-Host
+	296: true, // Origin-Realm
+	283: true, // Destination-Realm
+	258: true, // Auth-Application-Id
+	461: true, // Service-Context-Id
+}
+
 func smConvertAvpTree(nodes []avpNodeJSON) []template.AVPNode {
-	out := make([]template.AVPNode, len(nodes))
-	for i, n := range nodes {
-		out[i] = smConvertAvpNode(n)
+	out := make([]template.AVPNode, 0, len(nodes))
+	for _, n := range nodes {
+		// Skip AVPs whose wire values are already injected by the CCR builder.
+		if ccrBuilderCodes[n.Code] {
+			continue
+		}
+		out = append(out, smConvertAvpNode(n))
 	}
 	return out
 }
@@ -528,7 +719,15 @@ func smConvertAvpNode(n avpNodeJSON) template.AVPNode {
 	if len(n.Children) > 0 {
 		node.AVPs = smConvertAvpTree(n.Children)
 	} else if n.ValueRef != "" {
-		node.Value = "{{" + n.ValueRef + "}}"
+		// Pure numeric literals are passed through directly so that
+		// Enumerated AVPs like Subscription-Id-Type can be given a
+		// literal value (e.g. "0" for END_USER_E164) without needing a
+		// named variable.  Non-numeric refs are wrapped as {{TOKEN}}.
+		if _, err := strconv.ParseFloat(n.ValueRef, 64); err == nil {
+			node.Value = n.ValueRef
+		} else {
+			node.Value = "{{" + n.ValueRef + "}}"
+		}
 	}
 	return node
 }
@@ -585,6 +784,45 @@ func smResolveUint32(ref string, values map[string]any) uint32 {
 		}
 	}
 	return 0
+}
+
+// smMapState maps internal engine state strings to the OpenAPI ExecutionState enum.
+func smMapState(s engine.SessionState) string {
+	switch s {
+	case engine.StateActive:
+		return "running"
+	case engine.StatePaused:
+		return "paused"
+	case engine.StateCompleted:
+		return "success"
+	case engine.StateTerminated:
+		return "aborted"
+	case engine.StateError:
+		return "error"
+	default:
+		return "error"
+	}
+}
+
+// smBuildContext partitions the session vars into the three OpenAPI context buckets.
+func smBuildContext(vars map[string]any) ExecutionContextJSON {
+	systemKeys := map[string]bool{
+		"SESSION_ID": true, "CC_REQUEST_NUMBER": true,
+		"ORIGIN_HOST": true, "ORIGIN_REALM": true,
+	}
+	ctx := ExecutionContextJSON{
+		System:    make(map[string]any),
+		User:      make(map[string]any),
+		Extracted: make(map[string]any),
+	}
+	for k, v := range vars {
+		if systemKeys[k] {
+			ctx.System[k] = v
+		} else {
+			ctx.User[k] = v
+		}
+	}
+	return ctx
 }
 
 func smMetricsFromSummary(s engine.MetricsSummary) ExecutionMetrics {

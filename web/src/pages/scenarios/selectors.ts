@@ -227,10 +227,30 @@ export function listSystemVariables(): SystemVariable[] {
       description: 'Destination-realm from the bound peer.',
     },
     {
-      name: 'SERVICE_CONTEXT',
+      name: 'SERVICE_CONTEXT_ID',
       kind: 'bound',
       description:
-        'Service-Context-Id (RFC 4006 §5.1.1.4) — bound from the application config (e.g. `gy.ocs.test@3gpp.org` on Gy).',
+        'Service-Context-Id (RFC 4006 §5.1.1.4) — defaults to 32251@3gpp.org.',
+    },
+    {
+      name: 'AUTH_APP_ID',
+      kind: 'bound',
+      description: 'Auth-Application-Id — always 4 for Diameter Credit-Control (Gy).',
+    },
+    {
+      name: 'SUB_ID_TYPE',
+      kind: 'generator',
+      description: 'Subscription-Id-Type — 0 = END_USER_E164 (MSISDN).',
+    },
+    {
+      name: 'MSISDN',
+      kind: 'bound',
+      description: 'Subscriber MSISDN from the bound subscriber.',
+    },
+    {
+      name: 'CALLING_PARTY_ADDRESS',
+      kind: 'bound',
+      description: 'Calling-party address — auto-set from subscriber MSISDN.',
     },
   ];
 }

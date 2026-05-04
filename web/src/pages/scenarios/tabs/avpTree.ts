@@ -7,16 +7,38 @@
  */
 import type { AvpNode } from '../types';
 
-/** Engine-managed AVP names — read-only in the Frame tab (ARCH §8). */
-export const ENGINE_MANAGED_AVPS: readonly string[] = [
+/**
+ * Returns true for AVPs the engine injects at send time and that the
+ * user must NOT touch even for value-reference editing. These are NOT
+ * stored in avpTree — they are shown only as informational system rows
+ * in the Frame tab UI.
+ *
+ * Everything else (including Origin-Host, Service-Information, etc.) is
+ * stored in avpTree, marked `locked: true` by the defaults layer, and
+ * handled by `isLockedAvp` / `isLockedGroup` below.
+ */
+export const PURE_ENGINE_AVPS: readonly string[] = [
   'Multiple-Services-Indicator',
   'CC-Request-Type',
   'CC-Request-Number',
-  'Session-Id',
 ];
 
+/** @deprecated Use isLockedAvp / isLockedGroup instead. */
 export function isManagedAvp(node: AvpNode): boolean {
-  return ENGINE_MANAGED_AVPS.includes(node.name);
+  return PURE_ENGINE_AVPS.includes(node.name);
+}
+
+/**
+ * Locked-leaf: cannot delete, CAN edit valueRef.
+ * Locked-group: cannot delete, cannot edit, expand/collapse only —
+ * but children's leaf values can still be edited.
+ */
+export function isLockedAvp(node: AvpNode): boolean {
+  return node.locked === true;
+}
+
+export function isLockedGroup(node: AvpNode): boolean {
+  return node.locked === true && Array.isArray(node.children);
 }
 
 /** Address into the tree — array of indices, top-down. */

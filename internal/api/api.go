@@ -8,6 +8,7 @@ import (
 	"github.com/eddiecarpenter/ocs-testbench/internal/diameter"
 	"github.com/eddiecarpenter/ocs-testbench/internal/logging"
 	"github.com/eddiecarpenter/ocs-testbench/internal/store"
+	"github.com/eddiecarpenter/ocs-testbench/internal/template"
 )
 
 // PeerManager is the interface the API layer uses to control peer
@@ -53,7 +54,7 @@ type PeerManager interface {
 // The caller is responsible for mounting the returned router onto an
 // outer chi.Router (typically in cmd/ocs-testbench/main.go) under the
 // /api prefix.
-func Router(s store.Store, mgr PeerManager, exec ExecutionEngine) chi.Router {
+func Router(s store.Store, mgr PeerManager, exec ExecutionEngine, dict template.Dictionary) chi.Router {
 	r := chi.NewRouter()
 
 	// Middleware stack — innermost to outermost:
@@ -75,7 +76,7 @@ func Router(s store.Store, mgr PeerManager, exec ExecutionEngine) chi.Router {
 		mountPeers(v1, s, mgr)
 		mountSubscribers(v1, s)
 		mountTemplates(v1, s)
-		mountScenarios(v1, s)
+		mountScenarios(v1, s, dict)
 		mountDictionaries(v1, s)
 		mountDashboard(v1, s, mgr)
 		mountExecutions(v1, exec)

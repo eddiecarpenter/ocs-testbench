@@ -256,8 +256,7 @@ export interface paths {
         /**
          * List scenarios (system starters + user scenarios)
          * @description Returns both system starters (`origin: "system"`, immutable) and
-         *     user scenarios (`origin: "user"`). UI groups by `unitType` in the
-         *     list view (OCTET / TIME / UNITS). Client-side filtering expected;
+         *     user scenarios (`origin: "user"`). Client-side filtering expected;
          *     no server-side pagination.
          */
         get: operations["listScenarios"];
@@ -382,10 +381,11 @@ export interface paths {
         };
         /**
          * Get a single execution with its full step-by-step detail
-         * @description Returns the full execution detail including every completed step
-         *     and a live snapshot of the variables map. For running executions
-         *     this is a point-in-time snapshot; subsequent state is delivered
-         *     via the SSE `execution.progress` event which carries the same shape.
+         * @description Returns the current status of an execution session, including
+         *     lifecycle state, current step index, and aggregated timing
+         *     metrics. For running executions this is a point-in-time snapshot;
+         *     real-time updates are delivered via the SSE
+         *     `GET /events/executions/{id}` endpoint.
          */
         get: operations["getExecution"];
         put?: never;
@@ -462,8 +462,36 @@ export interface paths {
          * Advance exactly one step, then pause again
          * @description Only valid from `paused` state. Executes exactly one scenario step
          *     and returns to `paused`. Consume steps advance one round per call.
+         *     Returns the step result including result code and assertion outcomes.
          */
         post: operations["stepExecution"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop a running execution after the current step
+         * @description Requests the engine to stop the execution cleanly. The execution
+         *     finishes its current step and then transitions to `completed` or
+         *     `terminated`. Returns immediately — the actual stop happens
+         *     asynchronously. This is the clean-stop variant; use `/abort`
+         *     for immediate forceful termination.
+         */
+        post: operations["stopExecution"];
         delete?: never;
         options?: never;
         head?: never;
@@ -777,11 +805,11 @@ export interface components {
             year?: number;
         };
         /**
-         * @description Service unit type. Drives which CC-* inner AVP the engine places
-         *     into RSU/USU/GSU.
+         * @description Service unit type. Derived from `serviceType` by the engine —
+         *     not set directly by the user.
          * @enum {string}
          */
-        UnitType: "OCTET" | "TIME" | "UNITS";
+        UnitType: "VOLUME" | "TIME" | "EVENT";
         /**
          * @description Session-based vs event-based charging model.
          *     - `session` — INITIAL → UPDATE(s) → TERMINATE lifecycle.
@@ -804,6 +832,41 @@ export interface components {
          * @enum {string}
          */
         ScenarioOrigin: "system" | "user";
+        /**
+         * @description Semantic service classification. Drives unit type, default session
+         *     mode, and the Service-Information child AVP injected by the engine.
+         *     Combined with `serviceProfile` for the AVP code mapping.
+         *
+         *     | Value         | Unit type | Session mode | Service-Info child              |
+         *     |---------------|-----------|--------------|----------------------------------|
+         *     | VOICE         | TIME      | session      | IMS-Information / IN_INFORMATION |
+         *     | DATA          | VOLUME    | session      | PS-Information (both profiles)   |
+         *     | SMS           | EVENT     | session      | SMS-Information / SMS_INFORMATION|
+         *     | USSD1_EVENT   | EVENT     | event        | USSD-Information / DCD_INFORMATION|
+         *     | USSD1_SESSION | EVENT     | session      | USSD-Information / DCD_INFORMATION|
+         *     | USSD2_SESSION | TIME      | session      | USSD-Information / DCD_INFORMATION|
+         * @enum {string}
+         */
+        ServiceType: "VOICE" | "DATA" | "SMS" | "USSD1_EVENT" | "USSD1_SESSION" | "USSD2_SESSION";
+        /**
+         * @description OCS vendor profile. Selects the AVP code mapping for the
+         *     `serviceType` → `Service-Information` child AVP.
+         *
+         *     **3GPP** (vendor-id 10415):
+         *     - VOICE         → IMS-Information (876)
+         *     - DATA          → PS-Information (874)
+         *     - SMS           → SMS-Information (2000)
+         *     - USSD1_EVENT, USSD1_SESSION, USSD2_SESSION → USSD-Information (885)
+         *
+         *     **HUAWEI** (Huawei-specific AVPs use vendor-id 2011):
+         *     - VOICE         → IN_INFORMATION (20300)
+         *     - DATA          → PS-Information (874, vendor 10415)
+         *     - SMS           → SMS_INFORMATION (20400)
+         *     - USSD1_EVENT, USSD1_SESSION, USSD2_SESSION → DCD_INFORMATION (2115)
+         * @default 3GPP
+         * @enum {string}
+         */
+        ServiceProfile: "3GPP" | "HUAWEI";
         /** @enum {string} */
         RequestType: "INITIAL" | "UPDATE" | "TERMINATE" | "EVENT";
         /**
@@ -918,6 +981,14 @@ export interface components {
             /** @description Grouped AVP body. Present iff this is a grouped AVP. */
             children?: components["schemas"]["AvpNode"][];
             valueRef?: components["schemas"]["VarRef"];
+            /**
+             * @description When true the Builder prevents deletion of this node and marks
+             *     it with an [engine] badge. Leaf nodes with `locked: true` still
+             *     allow their `valueRef` to be edited; locked grouped nodes are
+             *     read-only (expand/collapse only). Used for system-mandatory AVPs
+             *     (Origin-Host, Session-Id, Service-Information sub-tree, etc.).
+             */
+            locked?: boolean;
         };
         /**
          * @description One service entry on a scenario. Controls how the engine
@@ -1081,7 +1152,8 @@ export interface components {
             id: string;
             name: string;
             description?: string;
-            unitType: components["schemas"]["UnitType"];
+            serviceType?: components["schemas"]["ServiceType"];
+            serviceProfile?: components["schemas"]["ServiceProfile"];
             sessionMode: components["schemas"]["SessionMode"];
             serviceModel: components["schemas"]["ServiceModel"];
             origin: components["schemas"]["ScenarioOrigin"];
@@ -1121,7 +1193,8 @@ export interface components {
         ScenarioInput: {
             name: string;
             description?: string;
-            unitType: components["schemas"]["UnitType"];
+            serviceType?: components["schemas"]["ServiceType"];
+            serviceProfile?: components["schemas"]["ServiceProfile"];
             sessionMode: components["schemas"]["SessionMode"];
             serviceModel: components["schemas"]["ServiceModel"];
             /** @default false */
@@ -1192,6 +1265,72 @@ export interface components {
              * @default 1
              */
             repeats: number;
+        };
+        /**
+         * @description Simplified response for `POST /executions`. Returns the session
+         *     ID that can be used with `/executions/{id}` and
+         *     `/events/executions/{id}`.
+         */
+        StartExecutionSimpleResult: {
+            /** @description Opaque identifier for the started execution session. */
+            sessionId: string;
+        };
+        /**
+         * @description Current status of an execution session returned by
+         *     `GET /executions/{id}`.
+         */
+        ExecutionStatusResult: {
+            sessionId: string;
+            /**
+             * @description Lifecycle state: `active`, `paused`, `completed`,
+             *     `terminated`, or `error`.
+             */
+            state: string;
+            /** @description 0-based index of the current or last-completed step. */
+            currentStep: number;
+            metrics: components["schemas"]["ExecutionMetricsResult"];
+        };
+        ExecutionMetricsResult: {
+            totalRequests: number;
+            successCount: number;
+            failureCount: number;
+            minRttMs: number;
+            maxRttMs: number;
+            avgRttMs: number;
+        };
+        /**
+         * @description Optional body for `POST /executions/{id}/step`. Supplies
+         *     per-step variable overrides that shadow the session context for
+         *     this one step only.
+         */
+        StepExecutionInput: {
+            /** @description Variable name → value map for this step only. */
+            overrides?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * @description Result of a single step execution returned by
+         *     `POST /executions/{id}/step`.
+         */
+        StepExecutionResult: {
+            /** @description 0-based index of the step that executed. */
+            stepIndex: number;
+            /** @description True when a guard prevented the CCR from being sent. */
+            skipped: boolean;
+            /**
+             * @description Top-level Result-Code from the CCA. Zero when skipped or
+             *     when a transport error occurred.
+             */
+            resultCode: number;
+            /** @description True when all assertions on the step evaluated to true. */
+            assertionsPassed: boolean;
+            assertions: {
+                expression: string;
+                passed: boolean;
+                /** @description Non-empty when passed is false. */
+                message?: string;
+            }[];
         };
         StartExecutionResult: {
             /**
@@ -1874,8 +2013,8 @@ export interface operations {
             query?: {
                 /** @description Filter by origin */
                 origin?: components["schemas"]["ScenarioOrigin"];
-                /** @description Filter by unit type */
-                unitType?: components["schemas"]["UnitType"];
+                /** @description Filter by service type */
+                serviceType?: components["schemas"]["ServiceType"];
                 /** @description Filter by bound peer */
                 peerId?: string;
             };
@@ -2093,15 +2232,16 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Execution(s) started */
-            201: {
+            /** @description Execution started; returns the session identifier */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StartExecutionResult"];
+                    "application/json": components["schemas"]["StartExecutionSimpleResult"];
                 };
             };
+            404: components["responses"]["NotFound"];
             422: components["responses"]["ValidationProblem"];
             default: components["responses"]["Problem"];
         };
@@ -2118,13 +2258,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Execution detail */
+            /** @description Execution status */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Execution"];
+                    "application/json": components["schemas"]["ExecutionStatusResult"];
                 };
             };
             404: components["responses"]["NotFound"];
@@ -2193,19 +2333,46 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["StepExecutionInput"];
+            };
+        };
         responses: {
-            /** @description Step executed; back in paused state */
+            /** @description Step executed */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Execution"];
+                    "application/json": components["schemas"]["StepExecutionResult"];
                 };
             };
             404: components["responses"]["NotFound"];
             409: components["responses"]["IllegalStateProblem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    stopExecution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Stop accepted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
             default: components["responses"]["Problem"];
         };
     };

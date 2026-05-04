@@ -71,8 +71,7 @@ type ResultCodeAction int
 const (
 	// ActionContinue proceeds to the next step normally.
 	ActionContinue ResultCodeAction = iota
-	// ActionTerminate ends the session immediately (CCR-T may be sent by
-	// the caller).
+	// ActionTerminate ends the session immediately without sending a CCR-T.
 	ActionTerminate
 	// ActionRetry re-executes the same step after a delay.
 	ActionRetry
@@ -80,6 +79,10 @@ const (
 	ActionPause
 	// ActionStop ends execution cleanly (no error).
 	ActionStop
+	// ActionGotoTerminate jumps to the last step of the scenario (the TERMINATE
+	// CCR) and executes it before ending the session. Use this when an error or
+	// quota-exhaustion requires a clean Diameter session teardown.
+	ActionGotoTerminate
 )
 
 // SendMetrics holds the timing and size metrics captured by MeasuredSender

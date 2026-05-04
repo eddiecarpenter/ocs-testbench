@@ -393,8 +393,7 @@ paths:
       summary: List scenarios (system starters + user scenarios)
       description: |
         Returns both system starters (`origin: "system"`, immutable) and
-        user scenarios (`origin: "user"`). UI groups by `unitType` in the
-        list view (OCTET / TIME / UNITS). Client-side filtering expected;
+        user scenarios (`origin: "user"`). Client-side filtering expected;
         no server-side pagination.
       parameters:
         - name: origin
@@ -403,12 +402,12 @@ paths:
           required: false
           schema:
             $ref: '#/components/schemas/ScenarioOrigin'
-        - name: unitType
+        - name: serviceType
           in: query
-          description: Filter by unit type
+          description: Filter by service type
           required: false
           schema:
-            $ref: '#/components/schemas/UnitType'
+            $ref: '#/components/schemas/ServiceType'
         - name: peerId
           in: query
           description: Filter by bound peer
@@ -1314,9 +1313,9 @@ components:
     UnitType:
       type: string
       description: |
-        Service unit type. Drives which CC-* inner AVP the engine places
-        into RSU/USU/GSU.
-      enum: [OCTET, TIME, UNITS]
+        Service unit type. Derived from `serviceType` by the engine —
+        not set directly by the user.
+      enum: [VOLUME, TIME, EVENT]
 
     SessionMode:
       type: string
@@ -1342,6 +1341,43 @@ components:
         - `system` — ships with the product; immutable; can only be duplicated.
         - `user`   — created/owned by the user.
       enum: [system, user]
+
+    ServiceType:
+      type: string
+      description: |
+        Semantic service classification. Drives unit type, default session
+        mode, and the Service-Information child AVP injected by the engine.
+        Combined with `serviceProfile` for the AVP code mapping.
+
+        | Value         | Unit type | Session mode | Service-Info child              |
+        |---------------|-----------|--------------|----------------------------------|
+        | VOICE         | TIME      | session      | IMS-Information / IN_INFORMATION |
+        | DATA          | VOLUME    | session      | PS-Information (both profiles)   |
+        | SMS           | EVENT     | session      | SMS-Information / SMS_INFORMATION|
+        | USSD1_EVENT   | EVENT     | event        | USSD-Information / DCD_INFORMATION|
+        | USSD1_SESSION | EVENT     | session      | USSD-Information / DCD_INFORMATION|
+        | USSD2_SESSION | TIME      | session      | USSD-Information / DCD_INFORMATION|
+      enum: [VOICE, DATA, SMS, USSD1_EVENT, USSD1_SESSION, USSD2_SESSION]
+
+    ServiceProfile:
+      type: string
+      description: |
+        OCS vendor profile. Selects the AVP code mapping for the
+        `serviceType` → `Service-Information` child AVP.
+
+        **3GPP** (vendor-id 10415):
+        - VOICE         → IMS-Information (876)
+        - DATA          → PS-Information (874)
+        - SMS           → SMS-Information (2000)
+        - USSD1_EVENT, USSD1_SESSION, USSD2_SESSION → USSD-Information (885)
+
+        **HUAWEI** (Huawei-specific AVPs use vendor-id 2011):
+        - VOICE         → IN_INFORMATION (20300)
+        - DATA          → PS-Information (874, vendor 10415)
+        - SMS           → SMS_INFORMATION (20400)
+        - USSD1_EVENT, USSD1_SESSION, USSD2_SESSION → DCD_INFORMATION (2115)
+      enum: [3GPP, HUAWEI]
+      default: 3GPP
 
     RequestType:
       type: string
@@ -1513,6 +1549,14 @@ components:
             $ref: '#/components/schemas/AvpNode'
         valueRef:
           $ref: '#/components/schemas/VarRef'
+        locked:
+          type: boolean
+          description: |
+            When true the Builder prevents deletion of this node and marks
+            it with an [engine] badge. Leaf nodes with `locked: true` still
+            allow their `valueRef` to be edited; locked grouped nodes are
+            read-only (expand/collapse only). Used for system-mandatory AVPs
+            (Origin-Host, Session-Id, Service-Information sub-tree, etc.).
 
     # --- Services --------------------------------------------------------
 
@@ -1773,7 +1817,7 @@ components:
     ScenarioSummary:
       type: object
       description: Row-level shape for the scenarios list view.
-      required: [id, name, unitType, sessionMode, serviceModel, origin, stepCount, updatedAt]
+      required: [id, name, sessionMode, serviceModel, origin, stepCount, updatedAt]
       properties:
         id:
           type: string
@@ -1781,8 +1825,10 @@ components:
           type: string
         description:
           type: string
-        unitType:
-          $ref: '#/components/schemas/UnitType'
+        serviceType:
+          $ref: '#/components/schemas/ServiceType'
+        serviceProfile:
+          $ref: '#/components/schemas/ServiceProfile'
         sessionMode:
           $ref: '#/components/schemas/SessionMode'
         serviceModel:
@@ -1845,7 +1891,7 @@ components:
         `origin` is always `user` on create/replace; system starters
         cannot be updated.
       required:
-        [name, unitType, sessionMode, serviceModel, subscriberId, peerId, avpTree, services, variables, steps]
+        [name, sessionMode, serviceModel, subscriberId, peerId, avpTree, services, variables, steps]
       properties:
         name:
           type: string
@@ -1853,8 +1899,10 @@ components:
           maxLength: 128
         description:
           type: string
-        unitType:
-          $ref: '#/components/schemas/UnitType'
+        serviceType:
+          $ref: '#/components/schemas/ServiceType'
+        serviceProfile:
+          $ref: '#/components/schemas/ServiceProfile'
         sessionMode:
           $ref: '#/components/schemas/SessionMode'
         serviceModel:
