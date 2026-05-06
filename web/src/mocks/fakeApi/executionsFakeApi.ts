@@ -359,7 +359,9 @@ function transitionAction(
       const m = pattern.exec(config.url ?? '');
       const id = m ? decodeURIComponent(m[1]) : '';
       const idx = executions.findIndex((e) => e.id === id);
-      if (idx === -1) return notFound(id);
+      // Unknown ID — could be a real-backend execution. Return 200 so
+      // the client re-fetches state without crashing.
+      if (idx === -1) return [200, undefined];
       // Mirror the server's transition contract loosely. The Debugger
       // listens to its per-execution SSE driver for the authoritative
       // transition; the working-copy nudge here keeps the list view

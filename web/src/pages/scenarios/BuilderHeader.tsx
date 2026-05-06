@@ -219,19 +219,21 @@ export function BuilderHeader({ isNew, isDirty }: BuilderHeaderProps) {
             onChange={(v) => setPeerId(v ?? '')}
             clearable
             searchable
+            withAsterisk
             disabled={peers.isLoading}
             data-testid="builder-peer"
           />
         </Grid.Col>
         <Grid.Col span={{ base: 3, sm: 1 }}>
           <Select
-            label="Subscriber (optional)"
-            placeholder="None"
+            label="Subscriber"
+            placeholder="Select a subscriber"
             data={subscriberOptions}
             value={draft.subscriberId || null}
             onChange={(v) => setSubscriberId(v ?? '')}
             clearable
             searchable
+            withAsterisk
             disabled={subscribers.isLoading}
             data-testid="builder-subscriber"
           />

@@ -80,6 +80,8 @@ func Router(s store.Store, mgr PeerManager, exec ExecutionEngine, dict template.
 		mountDictionaries(v1, s)
 		mountDashboard(v1, s, mgr)
 		mountExecutions(v1, exec)
+		mountMetrics(v1, exec)
+		mountExpressions(v1)
 		mountSSE(v1, s, mgr, exec)
 	})
 

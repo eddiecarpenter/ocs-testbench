@@ -38,12 +38,8 @@ function scenarioFor(scenarioId: string): Scenario {
 
 /** Display label for a step row. CCR-INITIAL / CCR-UPDATE / etc. for requests; kind for others. */
 function labelFor(step: Scenario['steps'][number]): string {
-  if (step.kind === 'request' && step.requestType) {
-    return `CCR-${step.requestType}`;
-  }
-  if (step.kind === 'pause') return step.label ?? 'pause';
-  if (step.kind === 'wait') return 'wait';
-  if (step.kind === 'consume') return 'consume';
+  if (step.label) return step.label;
+  if (step.requestType) return `CCR-${step.requestType}`;
   return step.kind;
 }
 

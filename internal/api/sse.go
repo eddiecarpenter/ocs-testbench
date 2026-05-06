@@ -88,12 +88,14 @@ func executionSSE(exec ExecutionEngine) http.HandlerFunc {
 					SessionID string            `json:"sessionId"`
 					State     string            `json:"state"`
 					Step      int               `json:"step"`
+					DelaySec  int               `json:"delaySec,omitempty"`
 					Metrics   executionMetricsJ `json:"metrics"`
 				}{
 					Type:      evt.Type,
 					SessionID: evt.SessionID,
 					State:     evt.State,
 					Step:      evt.Step,
+					DelaySec:  evt.DelaySec,
 					Metrics: executionMetricsJ{
 						TotalRequests: evt.Metrics.TotalRequests,
 						SuccessCount:  evt.Metrics.SuccessCount,

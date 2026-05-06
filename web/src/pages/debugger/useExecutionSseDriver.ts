@@ -48,9 +48,19 @@ export function useExecutionSseDriver({
   const onEventRef = useRef(onEvent);
   onEventRef.current = onEvent;
 
+  // Keep execution in a ref so the SSE effect doesn't restart on every
+  // poll refetch — the connection must be stable across re-renders so
+  // short-lived events (sleeping, step.sending) are never missed.
+  const executionRef = useRef(execution);
+  executionRef.current = execution;
+
   useEffect(() => {
-    if (!enabled || !execution) return;
-    if (TERMINAL_STATES.has(execution.state)) return;
+    if (!enabled) return;
+    // Check the ref value at mount time only — don't re-run the effect
+    // when the execution object is refreshed by the 2-second poll.
+    const exec = executionRef.current;
+    if (!exec) return;
+    if (TERMINAL_STATES.has(exec.state)) return;
 
     const url = `${appConfig.apiBaseUrl}/events/executions/${encodeURIComponent(executionId)}`;
     const es = new EventSource(url);
@@ -62,34 +72,42 @@ export function useExecutionSseDriver({
           sessionId: string;
           state: string;
           step: number;
+          delaySec?: number;
           metrics: unknown;
         };
         const handler = onEventRef.current;
         if (!handler) return;
 
         const state = raw.state;
-        if (state === 'paused') {
+        if (state === 'sleeping') {
+          handler({
+            type: 'step.sleeping',
+            data: { executionId: raw.sessionId, stepIndex: raw.step, delaySec: raw.delaySec ?? 0 },
+          });
+        } else if (state === 'running') {
+          handler({
+            type: 'step.sending',
+            data: { executionId: raw.sessionId, stepIndex: raw.step },
+          });
+        } else if (state === 'paused') {
           handler({
             type: 'execution.paused',
             data: { executionId: raw.sessionId, atStepIndex: raw.step + 1 },
           });
         } else if (state === 'completed' || state === 'success') {
-          // Use the full snapshot shape the store expects — we don't have
-          // step records here so pass what we have; the snapshot bridge
-          // will fill in the rest on the next REST poll.
           handler({
             type: 'execution.completed',
-            data: execution as Execution,
+            data: executionRef.current as Execution,
           });
         } else if (state === 'error' || state === 'failure') {
           handler({
             type: 'execution.failed',
-            data: { ...(execution as Execution), failureReason: 'Step failed' },
+            data: { ...(executionRef.current as Execution), failureReason: 'Step failed' },
           });
         } else if (state === 'aborted') {
           handler({
             type: 'execution.aborted',
-            data: execution as Execution,
+            data: executionRef.current as Execution,
           });
         }
       } catch {
@@ -99,13 +117,15 @@ export function useExecutionSseDriver({
 
     es.addEventListener('error', () => {
       // EventSource auto-reconnects on transient errors; nothing to do here.
-      // If the connection is terminal (readyState === 2) the execution is done.
     });
 
     return () => {
       es.close();
     };
-  }, [executionId, execution, enabled]);
+  // Intentionally excludes `execution` — use executionRef so the
+  // connection survives poll-driven re-renders without reconnecting.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [executionId, enabled]);
 
   return useMemo<ExecutionSseController>(
     () => ({

@@ -410,10 +410,7 @@ function deriveLabel(
         return requestType;
     }
   }
-  if (step.kind === 'pause') return step.label ?? 'pause';
-  if (step.kind === 'wait') return 'wait';
-  if (step.kind === 'consume') return 'consume';
-  return step.kind;
+  return step.label ?? step.kind;
 }
 
 function completedSteps(input: BuildPlanInput): StepRecord[] {

@@ -369,6 +369,9 @@ export function ScenarioBuilderPage() {
             isNew={isNew}
             isDirty={dirty}
             isSaving={isSaving}
+            hasName={!!draft.name.trim()}
+            hasPeer={!!draft.peerId}
+            hasSubscriber={!!draft.subscriberId}
             onSave={handleSave}
             onDiscard={handleDiscardRequest}
             onDelete={handleDeleteRequest}

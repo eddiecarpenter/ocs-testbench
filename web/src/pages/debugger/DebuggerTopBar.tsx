@@ -29,7 +29,7 @@ import {
   IconArrowBack,
   IconDownload,
   IconExternalLink,
-  IconPlayerPause,
+  IconHandStop,
   IconPlayerPlay,
   IconPlayerStop,
   IconRefresh,
@@ -134,10 +134,10 @@ interface ControlButtonsProps {
 function ControlButtons({ execution }: ControlButtonsProps) {
   const navigate = useNavigate();
   const state = useExecutionStore((s) => s.state);
-  const pause = useExecutionStore((s) => s.pause);
-  const resume = useExecutionStore((s) => s.resume);
   const runToEnd = useExecutionStore((s) => s.runToEnd);
+  const interruptAction = useExecutionStore((s) => s.interrupt);
   const stopAction = useExecutionStore((s) => s.stop);
+  const executionMode = useExecutionStore((s) => s.mode);
 
   const create = useCreateExecution();
 
@@ -239,15 +239,17 @@ function ControlButtons({ execution }: ControlButtonsProps) {
 
       {state === 'running' && (
         <>
-          <Button
-            variant="default"
-            leftSection={<IconPlayerPause size={14} />}
-            onClick={() => void wrap('Pause', () => pause())}
-            loading={actionPending}
-            data-testid="debugger-pause"
-          >
-            Pause
-          </Button>
+          {executionMode === 'continuous' && (
+            <Button
+              variant="default"
+              leftSection={<IconHandStop size={14} />}
+              onClick={() => void wrap('Interrupt', () => interruptAction())}
+              loading={actionPending}
+              data-testid="debugger-interrupt"
+            >
+              Interrupt
+            </Button>
+          )}
           <Button
             color="red"
             leftSection={<IconPlayerStop size={14} />}
@@ -258,20 +260,6 @@ function ControlButtons({ execution }: ControlButtonsProps) {
             Stop
           </Button>
         </>
-      )}
-
-      {state === 'pending' && (
-        // Hand-roll a small "Resume" so a freshly-created run can be
-        // started from the debugger without the user re-navigating.
-        <Button
-          variant="default"
-          leftSection={<IconPlayerPlay size={14} />}
-          onClick={() => void wrap('Resume', () => resume())}
-          loading={actionPending}
-          data-testid="debugger-resume"
-        >
-          Resume
-        </Button>
       )}
 
       {isTerminal(state) && <TerminalControls execution={execution} />}

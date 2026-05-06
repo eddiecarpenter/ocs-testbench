@@ -6,12 +6,21 @@
  */
 import { useCallback } from 'react';
 
+import { useQueryClient } from '@tanstack/react-query';
+
+import { executionKeys } from '../../api/resources/executions';
 import type { Execution } from '../../api/resources/executions';
 import { useScenario } from '../../api/resources/scenarios';
 
 import type { SseEventPayload } from './executionStore';
 import { useDebuggerStoreHandle } from './useDebuggerStore';
 import { useExecutionSseDriver } from './useExecutionSseDriver';
+
+const TERMINAL_EVENT_TYPES = new Set([
+  'execution.completed',
+  'execution.failed',
+  'execution.aborted',
+]);
 
 interface ExecutionSseBridgeProps {
   executionId: string;
@@ -24,12 +33,22 @@ export function ExecutionSseBridge({
 }: ExecutionSseBridgeProps) {
   const scenarioQuery = useScenario(execution.scenarioId);
   const store = useDebuggerStoreHandle();
+  const queryClient = useQueryClient();
 
   const onEvent = useCallback(
     (event: SseEventPayload) => {
       store.getState().ingestSse(event);
+      // On terminal events, fetch the authoritative final snapshot so
+      // ExecutionSnapshotBridge can populate the complete step list.
+      // The SSE payload carries stale execution data from mount time;
+      // the REST refetch gives us the real finished steps.
+      if (TERMINAL_EVENT_TYPES.has(event.type)) {
+        void queryClient.invalidateQueries({
+          queryKey: executionKeys.detail(executionId),
+        });
+      }
     },
-    [store],
+    [store, queryClient, executionId],
   );
 
   useExecutionSseDriver({

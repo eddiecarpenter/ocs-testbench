@@ -2,11 +2,13 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/eddiecarpenter/ocs-testbench/internal/engine"
 	"github.com/eddiecarpenter/ocs-testbench/internal/store"
 	"github.com/eddiecarpenter/ocs-testbench/internal/template"
 )
@@ -232,6 +234,69 @@ func listScenarios(s store.Store) http.HandlerFunc {
 	}
 }
 
+// validateScenarioExpressions parses the steps and variables from the raw JSON
+// request and checks that every expression field (repeatUntil, assertions,
+// guards, resultHandler.when, derivedValues.expression) only references
+// declared variables or well-known system variables.
+// Returns a human-readable error string, or "" if everything is valid.
+func validateScenarioExpressions(req scenarioRequest) string {
+	// Minimal struct to extract variable names from the JSON array.
+	type varDecl struct {
+		Name string `json:"name"`
+	}
+	var varDecls []varDecl
+	if len(req.Variables) > 0 {
+		_ = json.Unmarshal(req.Variables, &varDecls)
+	}
+	declared := make([]string, 0, len(varDecls))
+	for _, v := range varDecls {
+		if v.Name != "" {
+			declared = append(declared, v.Name)
+		}
+	}
+
+	var steps []engine.ScenarioStep
+	if len(req.Steps) > 0 {
+		_ = json.Unmarshal(req.Steps, &steps)
+	}
+
+	var problems []string
+	check := func(ctx, expr string) {
+		if err := engine.ValidateExpr(declared, expr); err != nil {
+			problems = append(problems, fmt.Sprintf("%s: %v", ctx, err))
+		}
+	}
+
+	for i, step := range steps {
+		label := step.Label
+		if label == "" {
+			label = fmt.Sprintf("step %d", i+1)
+		}
+		check(label+" repeatUntil", step.RepeatUntil)
+		for j, a := range step.Assertions {
+			check(fmt.Sprintf("%s assertion[%d]", label, j), a)
+		}
+		for j, g := range step.Guards {
+			check(fmt.Sprintf("%s guard[%d]", label, j), g)
+		}
+		for j, h := range step.ResultHandlers {
+			check(fmt.Sprintf("%s resultHandler[%d].when", label, j), h.When)
+		}
+		for j, dv := range step.DerivedValues {
+			check(fmt.Sprintf("%s derivedValues[%d]", label, j), dv.Expression)
+		}
+	}
+
+	if len(problems) == 0 {
+		return ""
+	}
+	msg := "expression validation failed:\n"
+	for _, p := range problems {
+		msg += "  • " + p + "\n"
+	}
+	return msg
+}
+
 // createScenario handles POST /scenarios.
 func createScenario(s store.Store, dict template.Dictionary) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -241,6 +306,18 @@ func createScenario(s store.Store, dict template.Dictionary) http.HandlerFunc {
 		}
 		if req.Name == "" {
 			respondInvalidRequest(w, "name is required")
+			return
+		}
+		if msg := validateScenarioExpressions(req); msg != "" {
+			respondInvalidRequest(w, msg)
+			return
+		}
+		if req.PeerID == "" {
+			respondInvalidRequest(w, "peerId is required")
+			return
+		}
+		if req.SubscriberID == "" {
+			respondInvalidRequest(w, "subscriberId is required")
 			return
 		}
 		peerID, ok := optionalUUID(req.PeerID)
@@ -294,6 +371,18 @@ func updateScenario(s store.Store, dict template.Dictionary) http.HandlerFunc {
 		}
 		if req.Name == "" {
 			respondInvalidRequest(w, "name is required")
+			return
+		}
+		if msg := validateScenarioExpressions(req); msg != "" {
+			respondInvalidRequest(w, msg)
+			return
+		}
+		if req.PeerID == "" {
+			respondInvalidRequest(w, "peerId is required")
+			return
+		}
+		if req.SubscriberID == "" {
+			respondInvalidRequest(w, "subscriberId is required")
 			return
 		}
 		peerID, ok := optionalUUID(req.PeerID)

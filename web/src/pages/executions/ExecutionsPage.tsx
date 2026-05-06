@@ -206,7 +206,7 @@ export function ExecutionsPage() {
     setStartRunInitial({
       mode: 'continuous',
       concurrency: 1,
-      repeats: 10,
+      repeats: 1,
       overrideExpanded: false,
       title: 'Run scenario',
       instance: 'fresh',
@@ -270,7 +270,7 @@ export function ExecutionsPage() {
    *   Other error: toast and keep the dialog open.
    */
   const handleStartRunSubmit = useCallback(
-    async (input: StartExecutionInput) => {
+    async (input: StartExecutionInput, openViewer: boolean) => {
       setStartRunErrors({});
       try {
         const result = await create.mutateAsync(input);
@@ -286,7 +286,9 @@ export function ExecutionsPage() {
           });
           setStartRunFor(null);
           setStartRunInitial(undefined);
-          navigate(`/executions/${encodeURIComponent(first.id)}`);
+          if (openViewer) {
+            navigate(`/executions/${encodeURIComponent(first.id)}`);
+          }
           return;
         }
 
@@ -315,6 +317,9 @@ export function ExecutionsPage() {
         });
         setStartRunFor(null);
         setStartRunInitial(undefined);
+        if (openViewer && created[0]) {
+          navigate(`/executions/${encodeURIComponent(created[0].id)}`);
+        }
       } catch (err) {
         const apiErr = err as ApiError;
         if (apiErr instanceof ApiError && apiErr.errors) {
@@ -419,15 +424,17 @@ export function ExecutionsPage() {
                 </Button>
               </>
             )}
-            <Button
-              leftSection={<IconPlayerPlay size={14} />}
-              onClick={handleStartRun}
-              disabled={!selectedScenario || create.isPending}
-              loading={create.isPending}
-              data-testid="executions-start-run"
-            >
-              Run scenario
-            </Button>
+            {selectedScenario && (
+              <Button
+                leftSection={<IconPlayerPlay size={14} />}
+                onClick={handleStartRun}
+                disabled={create.isPending}
+                loading={create.isPending}
+                data-testid="executions-start-run"
+              >
+                Run scenario
+              </Button>
+            )}
           </Group>
         </Group>
 

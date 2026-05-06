@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/eddiecarpenter/ruleevaluator"
@@ -11,6 +12,113 @@ import (
 	"github.com/eddiecarpenter/ocs-testbench/internal/diameter/messaging"
 	"github.com/eddiecarpenter/ocs-testbench/internal/template"
 )
+
+// templateBracesRe matches {{VARNAME}} tokens used in AVP value fields.
+// Expressions in repeatUntil / assertions / guards may use either notation;
+// stripping braces before evaluation makes both forms equivalent.
+var templateBracesRe = regexp.MustCompile(`\{\{(\w+)\}\}`)
+
+// stringLiteralRe matches single- or double-quoted string literals so that
+// identifiers inside them are not mistaken for variable references.
+var stringLiteralRe = regexp.MustCompile(`'[^']*'|"[^"]*"`)
+
+// identRe extracts word tokens that could be variable names.
+var identRe = regexp.MustCompile(`\b([A-Za-z_]\w*)\b`)
+
+// exprKeywords are tokens that ruleevaluator treats as operators or literals,
+// not as variable lookups. They are excluded from unknown-variable checks.
+var exprKeywords = map[string]bool{
+	"true": true, "false": true, "null": true, "nil": true,
+	"is": true, "not": true, "and": true, "or": true,
+}
+
+// systemVars is the fixed set of variables the engine auto-provisions into
+// every session context. Names here are never flagged as unknown.
+var systemVars = map[string]bool{
+	"SESSION_ID":        true,
+	"MSISDN":            true,
+	"CC_REQUEST_NUMBER": true,
+	"RESULT_CODE":       true,
+	"FUI_ACTION":        true,
+	"TOTAL_USU":         true,
+}
+
+// toInt64 coerces common numeric types to int64 for arithmetic.
+func toInt64(v any) int64 {
+	switch n := v.(type) {
+	case int64:
+		return n
+	case int32:
+		return int64(n)
+	case int:
+		return int64(n)
+	case float64:
+		return int64(n)
+	case float32:
+		return int64(n)
+	}
+	return 0
+}
+
+// rgVarRe matches per-rating-group variables (RG1_GRANTED, RG2_VALIDITY, …).
+var rgVarRe = regexp.MustCompile(`^RG\d+_(GRANTED|GRANTED_OCTETS|VALIDITY|RESULT_CODE|FUI_ACTION)$`)
+
+// isKnownVar reports whether name is a declared or system-provided variable.
+func isKnownVar(name string, declared map[string]bool) bool {
+	return declared[name] || systemVars[name] || rgVarRe.MatchString(name)
+}
+
+// unknownVars returns the set of identifier tokens in expr that are not
+// present in vars and are not operator/literal keywords.
+// expr must already have {{}} notation stripped.
+func unknownVars(vars map[string]any, expr string) []string {
+	// Blank out string literals so we don't match identifiers inside them.
+	noStrings := stringLiteralRe.ReplaceAllString(expr, "''")
+	var missing []string
+	seen := map[string]bool{}
+	for _, m := range identRe.FindAllString(noStrings, -1) {
+		if seen[m] || exprKeywords[strings.ToLower(m)] {
+			continue
+		}
+		seen[m] = true
+		if _, ok := vars[m]; !ok {
+			missing = append(missing, m)
+		}
+	}
+	return missing
+}
+
+// ValidateExpr checks that every variable referenced in expr is listed in
+// declaredVars or is a well-known system variable. Both {{VAR}} and bare VAR
+// notation are accepted. Returns an error naming the unknown identifiers.
+func ValidateExpr(declaredVars []string, expr string) error {
+	if expr == "" {
+		return nil
+	}
+	stripped := templateBracesRe.ReplaceAllString(expr, "$1")
+	noStrings := stringLiteralRe.ReplaceAllString(stripped, "''")
+
+	known := make(map[string]bool, len(declaredVars))
+	for _, v := range declaredVars {
+		known[v] = true
+	}
+
+	var bad []string
+	seen := map[string]bool{}
+	for _, m := range identRe.FindAllString(noStrings, -1) {
+		if seen[m] || exprKeywords[strings.ToLower(m)] {
+			continue
+		}
+		seen[m] = true
+		if !isKnownVar(m, known) {
+			bad = append(bad, m)
+		}
+	}
+	if len(bad) != 0 {
+		return fmt.Errorf("unknown variable(s): %s", strings.Join(bad, ", "))
+	}
+	return nil
+}
 
 // StepExecutor is a stateless processor that takes a single step definition
 // plus a session context and produces a StepResult.
@@ -117,6 +225,14 @@ func (e *StepExecutor) Execute(
 	// — Step 7: Auto-update sc.Vars from the CCA —
 	if result.CCA != nil {
 		autoUpdateVarsFromCCA(sc.Vars, result.CCA)
+	}
+
+	// Accumulate used service units into TOTAL_USU after each UPDATE or
+	// TERMINATE so repeatUntil / assertions can reference the running total.
+	if step.RequestType == "UPDATE" || step.RequestType == "TERMINATE" {
+		usu := toInt64(mergedVars["USU_TOTAL"])
+		prev, _ := sc.Vars["TOTAL_USU"].(int64)
+		sc.Vars["TOTAL_USU"] = prev + usu
 	}
 
 	// — Step 8: Assertions —
@@ -261,9 +377,34 @@ func (e *StepExecutor) evaluateResultHandlers(vars map[string]any, handlers []Re
 // — Package-level utilities —
 
 // evalExpr evaluates a ruleevaluator expression against a variable map.
+// {{VARNAME}} tokens are stripped to bare VARNAME before evaluation so
+// both the template-style {{VAR}} notation and bare VAR notation work.
 func evalExpr(vars map[string]any, expr string) (any, error) {
+	expr = templateBracesRe.ReplaceAllString(expr, "$1")
 	ev := ruleevaluator.NewRuleEvaluator(vars)
 	return ev.Evaluate(expr)
+}
+
+// EvalExprPublic is the exported entry point for the API expression-evaluate
+// endpoint. It applies the same {{}} normalisation as the execution engine and
+// additionally rejects expressions that reference variables not present in vars,
+// catching typos before they silently evaluate to nil.
+func EvalExprPublic(vars map[string]any, expr string) (any, error) {
+	stripped := templateBracesRe.ReplaceAllString(expr, "$1")
+	if missing := unknownVars(vars, stripped); len(missing) != 0 {
+		// Also allow system vars and RGn_* that the caller may not have seeded.
+		var reallyMissing []string
+		for _, m := range missing {
+			if !isKnownVar(m, nil) {
+				reallyMissing = append(reallyMissing, m)
+			}
+		}
+		if len(reallyMissing) != 0 {
+			return nil, fmt.Errorf("unknown variable(s): %s", strings.Join(reallyMissing, ", "))
+		}
+	}
+	ev := ruleevaluator.NewRuleEvaluator(vars)
+	return ev.Evaluate(stripped)
 }
 
 // isTruthy converts a ruleevaluator result to a Go boolean. Any non-nil,

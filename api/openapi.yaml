@@ -668,9 +668,10 @@ paths:
       summary: Request a pause at the next safe point
       description: |
         Requests the engine to pause the execution at the next safe point
-        (between steps, or between consume-loop rounds). Returns the
-        current execution; the transition to `paused` is delivered via
-        the SSE `execution.paused` event when it actually happens.
+        (between steps). Returns the current execution; the transition to
+        `paused` is delivered via the SSE `execution.paused` event when
+        it actually happens. For continuous-mode executions prefer
+        `/interrupt`, which pauses after the current iteration completes.
       responses:
         '200':
           description: Pause requested
@@ -718,8 +719,8 @@ paths:
       summary: Advance exactly one step, then pause again
       description: |
         Only valid from `paused` state. Executes exactly one scenario step
-        and returns to `paused`. Consume steps advance one round per call.
-        Returns the step result including result code and assertion outcomes.
+        and returns to `paused`. Returns the step result including result
+        code and assertion outcomes.
       requestBody:
         required: false
         content:
@@ -779,6 +780,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Execution'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IllegalStateProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /executions/{id}/interrupt:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [Executions]
+      operationId: interruptExecution
+      summary: Interrupt a continuous execution after the current send
+      description: |
+        Signals the engine to pause after the current iteration completes.
+        Only valid for continuous-mode executions in `active` state.
+        The execution transitions to `paused`; use `/run-to-end` to resume.
+      responses:
+        '200':
+          description: Interrupt accepted
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IllegalStateProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /executions/{id}/run-to-end:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [Executions]
+      operationId: runToEnd
+      summary: Resume an interrupted execution to completion
+      description: |
+        Resumes a continuous execution that was interrupted via `/interrupt`,
+        running the remaining steps to completion. Also triggers the next
+        step for interactive-mode executions in `paused` state.
+      responses:
+        '200':
+          description: Resumed
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -949,6 +992,52 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SseEventPayload'
+
+  # ─────────────── Expressions ───────────────
+
+  /expressions/evaluate:
+    post:
+      tags: [Expressions]
+      operationId: evaluateExpression
+      summary: Evaluate a ruleevaluator expression
+      description: |
+        Evaluates a ruleevaluator expression against a supplied variable map
+        and returns the result. Both `{{VAR}}` and bare `VAR` notation are
+        accepted — the engine normalises them before evaluation. Useful for
+        validating `repeatUntil`, `assertions`, and `guards` expressions
+        before saving a scenario.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expression]
+              properties:
+                expression:
+                  type: string
+                  description: Expression to evaluate (supports `{{VAR}}` and bare `VAR`).
+                vars:
+                  type: object
+                  description: Variable map to evaluate the expression against.
+                  additionalProperties: true
+      responses:
+        '200':
+          description: Evaluation result (always 200; parse errors are in the `error` field)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    description: The evaluated result (boolean, number, or string).
+                  error:
+                    type: string
+                    description: Present when evaluation failed; absent on success.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        default:
+          $ref: '#/components/responses/Problem'
 
   # ─────────────── Metrics ───────────────
 
@@ -1706,6 +1795,9 @@ components:
         kind:
           type: string
           const: request
+        label:
+          type: string
+          description: Optional display label shown in the execution history pane.
         requestType:
           $ref: '#/components/schemas/RequestType'
         services:
@@ -1738,79 +1830,51 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ResultHandler'
-
-    ConsumeStep:
-      type: object
-      description: |
-        Only legal in `sessionMode: session`. Expands at run time into an
-        auto-generated sequence of CCR-UPDATEs, re-rolling random service
-        selections each round, until `terminateWhen` fires or every
-        selected service becomes `exhausted` / `error`.
-      required: [kind, windowMs]
-      properties:
-        kind:
-          type: string
-          const: consume
-        services:
-          $ref: '#/components/schemas/ServiceSelection'
-        windowMs:
+        repeat:
           type: integer
           minimum: 1
-        maxRounds:
+          description: |
+            Fixed iteration count. Mutually exclusive with `repeatUntil`.
+            Only meaningful for UPDATE steps.
+        repeatUntil:
+          type: string
+          description: |
+            Expression evaluated after each iteration. Loop exits when the
+            expression returns true. Mutually exclusive with `repeat`.
+            Both `{{VAR}}` and bare `VAR` notation are accepted.
+        maxRepeat:
           type: integer
           minimum: 1
-        terminateWhen:
-          type: string
-          description: Expression; when true, exits the consume loop.
-        overrides:
-          type: object
-          additionalProperties:
-            $ref: '#/components/schemas/VarValue'
-        assertions:
-          type: array
-          items:
-            type: string
-
-    WaitStep:
-      type: object
-      required: [kind, durationMs]
-      properties:
-        kind:
-          type: string
-          const: wait
-        durationMs:
+          description: |
+            Safety cap when `repeatUntil` is set. Loop exits after this many
+            iterations even if the condition hasn't fired. Defaults to 100.
+        delaySec:
           type: integer
           minimum: 0
-
-    PauseStep:
-      type: object
-      description: |
-        Authored breakpoint. Suspends execution until resumed. Honoured
-        only in `interactive` execution mode; ignored in `continuous`.
-      required: [kind]
-      properties:
-        kind:
-          type: string
-          const: pause
-        label:
-          type: string
-        prompt:
-          type: string
+          description: |
+            Fixed inter-iteration delay in seconds. Applied between
+            consecutive iterations of a repeat loop.
+        delayJitterSec:
+          type: integer
+          minimum: 0
+          description: |
+            Random jitter added to `delaySec`. Actual delay is
+            `delaySec + rand(0, delayJitterSec)` seconds.
+        useValidityTime:
+          type: boolean
+          description: |
+            When true, the inter-iteration delay is derived from the
+            Validity-Time AVP in the last CCA response, scaled by
+            `validityScale`. Overrides `delaySec`/`delayJitterSec`.
+        validityScale:
+          type: number
+          description: |
+            Multiplier applied to the Validity-Time value when
+            `useValidityTime` is true. Defaults to 1.0.
 
     ScenarioStep:
-      description: Discriminated union by `kind`.
-      oneOf:
-        - $ref: '#/components/schemas/RequestStep'
-        - $ref: '#/components/schemas/ConsumeStep'
-        - $ref: '#/components/schemas/WaitStep'
-        - $ref: '#/components/schemas/PauseStep'
-      discriminator:
-        propertyName: kind
-        mapping:
-          request: '#/components/schemas/RequestStep'
-          consume: '#/components/schemas/ConsumeStep'
-          wait: '#/components/schemas/WaitStep'
-          pause: '#/components/schemas/PauseStep'
+      description: A scenario step. All steps are request steps.
+      $ref: '#/components/schemas/RequestStep'
 
     # --- Scenario top-level ----------------------------------------------
 
@@ -2238,10 +2302,22 @@ components:
             Wire-level CCR snapshot after variable resolution. Present
             for `request` steps and for each round of `consume` steps.
           additionalProperties: true
+        requestText:
+          type: string
+          description: |
+            Pre-formatted Diameter wire text of the CCR (human-readable,
+            one AVP per line). Use this for display; use `request` for
+            structured access.
         response:
           type: object
-          description: Wire-level CCA snapshot.
+          description: Wire-level CCA snapshot (structured).
           additionalProperties: true
+        responseText:
+          type: string
+          description: |
+            Pre-formatted Diameter wire text of the CCA (human-readable,
+            one AVP per line). Use this for display; use `response` for
+            structured access (result codes, extractions).
         assertionResults:
           type: array
           items:

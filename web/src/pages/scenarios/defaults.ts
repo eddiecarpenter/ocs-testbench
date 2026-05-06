@@ -19,6 +19,18 @@ export function defaultSessionMode(serviceType: ServiceType | undefined): Sessio
   return serviceType === 'USSD1_EVENT' ? 'event' : 'session';
 }
 
+/** Default steps for a given session mode. */
+export function defaultStepsForMode(mode: SessionMode): Scenario['steps'] {
+  if (mode === 'event') {
+    return [{ kind: 'request', requestType: 'EVENT' }];
+  }
+  return [
+    { kind: 'request', requestType: 'INITIAL' },
+    { kind: 'request', requestType: 'UPDATE' },
+    { kind: 'request', requestType: 'TERMINATE' },
+  ];
+}
+
 /**
  * Build the Service-Information AvpNode (code 873, vendorId 10415) for the
  * given serviceType + serviceProfile. Returns null when no mapping exists.
@@ -199,7 +211,7 @@ export function makeNewScenarioDraft(): Scenario {
   const serviceInfoNode = buildServiceInfoNode(serviceType, serviceProfile)!;
   return {
     id: '',
-    name: 'Untitled scenario',
+    name: '',
     description: '',
     serviceType,
     serviceProfile,
@@ -214,7 +226,7 @@ export function makeNewScenarioDraft(): Scenario {
     avpTree: [...BASE_AVP_TREE, serviceInfoNode],
     services: [DEFAULT_SERVICE],
     variables: mergeVariables(BASE_VARIABLES, defaultVariablesForServiceType(serviceType)),
-    steps: [{ kind: 'request', requestType: 'INITIAL' }],
+    steps: defaultStepsForMode('session'),
   };
 }
 

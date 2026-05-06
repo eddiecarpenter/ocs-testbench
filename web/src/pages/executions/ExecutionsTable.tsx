@@ -152,7 +152,6 @@ export function ExecutionsTable({
           {sortableHeader('id', '#', 56)}
           {showScenarioColumn && sortableHeader('scenarioName', 'Scenario')}
           {sortableHeader('state', 'Status')}
-          {sortableHeader('subscriber', 'Subscriber')}
           {sortableHeader('peer', 'Peer')}
           {sortableHeader('progress', 'Progress')}
           {sortableHeader('duration', 'Duration')}
@@ -181,11 +180,6 @@ export function ExecutionsTable({
               >
                 {STATE_LABEL[row.state]}
               </Badge>
-            </Table.Td>
-            <Table.Td>
-              <Text size="sm" c="dimmed">
-                {row.subscriberMsisdn ?? row.subscriberId ?? '–'}
-              </Text>
             </Table.Td>
             <Table.Td>
               <Text

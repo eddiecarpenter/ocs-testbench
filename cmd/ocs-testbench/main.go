@@ -223,7 +223,7 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 	behaviour := protocol.New(sender, protocol.Options{})
 
 	dictAdapter := tmpl.NewDictAdapter(dict.Default)
-	execEngine := api.NewSessionManager(s, behaviour, dictAdapter)
+	execEngine := api.NewSessionManager(s, dmgr, behaviour, dictAdapter)
 	apiRouter := api.Router(s, dmgr, execEngine, dictAdapter)
 
 	// Mount the API router at /api. All routes within api.Router are

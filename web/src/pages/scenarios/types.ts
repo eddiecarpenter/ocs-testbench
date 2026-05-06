@@ -36,9 +36,6 @@ export type GeneratorRefresh = components['schemas']['GeneratorRefresh'];
 
 export type ScenarioStep = components['schemas']['ScenarioStep'];
 export type RequestStep = components['schemas']['RequestStep'];
-export type ConsumeStep = components['schemas']['ConsumeStep'];
-export type WaitStep = components['schemas']['WaitStep'];
-export type PauseStep = components['schemas']['PauseStep'];
 export type ServiceSelection = components['schemas']['ServiceSelection'];
 export type VarValue = components['schemas']['VarValue'];
 

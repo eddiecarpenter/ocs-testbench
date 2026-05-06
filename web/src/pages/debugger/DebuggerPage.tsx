@@ -1,11 +1,13 @@
 /**
  * Debugger page shell — `/executions/:id`.
  *
- * Replaces F#94's `ExecutionDebuggerStubPage`. Owns the route's
- * page-scoped `executionStore` and renders the three-pane shell
- * (Progress · Step Editor · Last-response). Pane content is filled
- * in by the per-pane tasks (#108 / #109 / #110); this task lands
- * the layout and the store wiring.
+ * Two modes driven by store state:
+ *
+ *   Debugger mode (paused + no historical selection):
+ *     History(320px) | StepEditorPane (two-column, full width)
+ *
+ *   Viewer mode (terminal, running, or historical step selected):
+ *     History(320px) | RequestPane | LastResponsePane
  *
  * Loading / error / not-found states are owned here so the panes
  * can assume an execution is loaded.
@@ -13,29 +15,31 @@
 import {
   Alert,
   Anchor,
+  Box,
   Card,
   Center,
-  Grid,
+  Flex,
   Skeleton,
   Stack,
   Text,
   Title,
 } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
-import { useNavigate, useParams, Link } from 'react-router';
+import { Link, useNavigate, useParams } from 'react-router';
 
 import { ApiError } from '../../api/errors';
 import { useExecution } from '../../api/resources/executions';
 
-import { ContinuousModePlaceholder } from './ContinuousModePlaceholder';
 import { DebuggerStoreProvider } from './DebuggerStoreProvider';
 import { DebuggerTopBar } from './DebuggerTopBar';
+import { ExecutionHistoryPane } from './ExecutionHistoryPane';
 import { ExecutionSnapshotBridge } from './ExecutionSnapshotBridge';
 import { ExecutionSseBridge } from './ExecutionSseBridge';
 import { FailureBanner } from './FailureBanner';
 import { LastResponsePane } from './LastResponsePane';
-import { ProgressPane } from './ProgressPane';
+import { RequestPane } from './RequestPane';
 import { StepEditorPane } from './StepEditorPane';
+import { useExecutionStore } from './useDebuggerStore';
 
 export function DebuggerPage() {
   const { id } = useParams<{ id?: string }>();
@@ -55,17 +59,11 @@ export function DebuggerPage() {
     return (
       <Stack gap="md" data-testid="executions-debugger-loading">
         <Skeleton height={64} />
-        <Grid>
-          <Grid.Col span={{ base: 12, lg: 3 }}>
-            <Skeleton height={400} />
-          </Grid.Col>
-          <Grid.Col span={{ base: 12, lg: 5 }}>
-            <Skeleton height={400} />
-          </Grid.Col>
-          <Grid.Col span={{ base: 12, lg: 4 }}>
-            <Skeleton height={400} />
-          </Grid.Col>
-        </Grid>
+        <Flex gap="md">
+          <Skeleton height={400} w={320} style={{ flexShrink: 0 }} />
+          <Skeleton height={400} style={{ flex: 1 }} />
+          <Skeleton height={400} style={{ flex: 1 }} />
+        </Flex>
       </Stack>
     );
   }
@@ -107,57 +105,85 @@ export function DebuggerPage() {
     );
   }
 
-  // Continuous-mode runs route to a placeholder page — the three-pane
-  // shell is Interactive-only in MVP per the rationale (no step
-  // cursor on a continuous batch).
-  if (execution.mode === 'continuous') {
-    return <ContinuousModePlaceholder executionId={id} />;
-  }
-
   return (
     <DebuggerStoreProvider executionId={id}>
       <ExecutionSnapshotBridge execution={execution} />
       <ExecutionSseBridge executionId={id} execution={execution} />
-      <Stack gap="md" data-testid="executions-debugger">
+      {/*
+        position: fixed so the debugger always fills the exact viewport
+        area below the header and inside the AppShell padding, regardless
+        of the parent Main element's flex/scroll context.
+      */}
+      <Stack
+        gap="md"
+        data-testid="executions-debugger"
+        style={{
+          position: 'fixed',
+          top: 'calc(var(--app-shell-header-offset, 3.75rem) + var(--app-shell-padding, 1rem))',
+          bottom: 'var(--app-shell-padding, 1rem)',
+          left: 'calc(var(--app-shell-navbar-width, 15rem) + var(--app-shell-padding, 1rem))',
+          right: 'var(--app-shell-padding, 1rem)',
+          overflow: 'hidden',
+        }}
+      >
         <DebuggerTopBar
           execution={execution}
           onBack={() => navigate('/executions')}
         />
         <FailureBanner />
-        <Grid align="stretch">
-          <Grid.Col span={{ base: 12, lg: 3 }}>
-            <Card
-              withBorder
-              padding="md"
-              h="100%"
-              data-testid="debugger-pane-progress"
-            >
-              <ProgressPane />
-            </Card>
-          </Grid.Col>
-          <Grid.Col span={{ base: 12, lg: 5 }}>
-            <Card
-              withBorder
-              padding="md"
-              h="100%"
-              data-testid="debugger-pane-step-editor"
-            >
-              <StepEditorPane />
-            </Card>
-          </Grid.Col>
-          <Grid.Col span={{ base: 12, lg: 4 }}>
-            <Card
-              withBorder
-              padding="md"
-              h="100%"
-              data-testid="debugger-pane-last-response"
-            >
-              <LastResponsePane />
-            </Card>
-          </Grid.Col>
-        </Grid>
+        <DebuggerContent />
       </Stack>
     </DebuggerStoreProvider>
+  );
+}
+
+/** Inner component — reads the store to drive mode switching. */
+function DebuggerContent() {
+  const runState = useExecutionStore((s) => s.state);
+  const historicalIndex = useExecutionStore((s) => s.historicalIndex);
+  const debuggerMode = runState === 'paused' && historicalIndex === null;
+
+  return (
+    <Flex gap="md" align="stretch" style={{ flex: 1, minHeight: 0 }} data-testid="debugger-content">
+      {/* History — fixed 320 px */}
+      <Box w={320} style={{ flexShrink: 0 }}>
+        <Card withBorder padding="md" h="100%" data-testid="debugger-pane-progress">
+          <ExecutionHistoryPane />
+        </Card>
+      </Box>
+
+      {debuggerMode ? (
+        /* Debugger mode: wide two-column step editor */
+        <Card
+          withBorder
+          padding="md"
+          style={{ flex: 1 }}
+          data-testid="debugger-pane-step-editor"
+        >
+          <StepEditorPane />
+        </Card>
+      ) : (
+        /* Viewer mode: REQUEST + RESPONSE side by side */
+        <>
+          <Card
+            withBorder
+            padding="md"
+            style={{ flex: 1 }}
+            data-testid="debugger-pane-request"
+          >
+            <RequestPane />
+          </Card>
+          <Card
+            withBorder
+            padding="md"
+            style={{ flex: 1 }}
+            data-testid="debugger-pane-last-response"
+          >
+            <LastResponsePane />
+          </Card>
+        </>
+      )}
+    </Flex>
   );
 }
 

@@ -122,12 +122,10 @@ export function ScenariosListPage() {
   const handleRun = async (row: ScenarioSummary) => {
     try {
       const res = await run.mutateAsync(row.id);
-      const id = res.items[0]?.id ?? '(no id)';
-      notifications.show({
-        color: 'green',
-        title: 'Run intent fired',
-        message: `Execution ${id} started for ${row.name}`,
-      });
+      const first = res.items[0];
+      if (first) {
+        navigate(`/executions/${encodeURIComponent(first.id)}`);
+      }
     } catch (err) {
       notifyError({
         title: 'Run failed',

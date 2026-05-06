@@ -21,12 +21,15 @@
  * cross-installation use case is rare and better solved at the
  * backend layer when one exists).
  */
-import { Button, Group } from '@mantine/core';
+import { Button, Group, Tooltip } from '@mantine/core';
 
 interface BuilderFooterProps {
   isNew: boolean;
   isDirty: boolean;
   isSaving: boolean;
+  hasName: boolean;
+  hasPeer: boolean;
+  hasSubscriber: boolean;
   onSave: () => void;
   onDiscard: () => void;
   onDelete: () => void;
@@ -36,10 +39,20 @@ export function BuilderFooter({
   isNew,
   isDirty,
   isSaving,
+  hasName,
+  hasPeer,
+  hasSubscriber,
   onSave,
   onDiscard,
   onDelete,
 }: BuilderFooterProps) {
+  const missing = [
+    !hasName && 'scenario name',
+    !hasPeer && 'peer',
+    !hasSubscriber && 'subscriber',
+  ].filter(Boolean);
+  const canSave = isDirty && missing.length === 0;
+
   return (
     <Group
       justify="space-between"
@@ -48,10 +61,6 @@ export function BuilderFooter({
       style={{
         background: 'var(--mantine-color-body)',
         borderTop: '1px solid var(--mantine-color-default-border)',
-        // Bleed across the body's horizontal padding so the
-        // border-top spans the full modal width edge-to-edge, and
-        // negate the body's bottom padding so the footer sits flush
-        // with the modal frame.
         marginInline: 'calc(var(--mantine-spacing-md) * -1)',
         marginBlockEnd: 'calc(var(--mantine-spacing-md) * -1)',
         paddingInline: 'var(--mantine-spacing-md)',
@@ -76,14 +85,20 @@ export function BuilderFooter({
         >
           Discard
         </Button>
-        <Button
-          onClick={onSave}
-          loading={isSaving}
-          disabled={!isDirty}
-          data-testid="builder-save"
+        <Tooltip
+          label={missing.length > 0 ? `Required: ${missing.join(', ')}` : ''}
+          disabled={missing.length === 0}
+          position="top"
         >
-          Save
-        </Button>
+          <Button
+            onClick={onSave}
+            loading={isSaving}
+            disabled={!canSave}
+            data-testid="builder-save"
+          >
+            Save
+          </Button>
+        </Tooltip>
       </Group>
     </Group>
   );

@@ -16,6 +16,7 @@ import { create } from 'zustand';
 import { createHistory } from './history';
 import {
   defaultSessionMode,
+  defaultStepsForMode,
   defaultVariablesForServiceType,
   mergeVariables,
   replaceServiceInfoNode,
@@ -161,7 +162,11 @@ export const useScenarioDraftStore = create<ScenarioDraftState>((set, get) => ({
       avpTree: replaceServiceInfoNode(d.avpTree, d.serviceType, serviceProfile as ServiceProfile),
     })),
   setSessionMode: (sessionMode) =>
-    commit(set, get, (d) => ({ ...d, sessionMode })),
+    commit(set, get, (d) => ({
+      ...d,
+      sessionMode,
+      steps: defaultStepsForMode(sessionMode as import('./types').SessionMode),
+    })),
   setServiceModel: (serviceModel) =>
     commit(set, get, (d) => ({ ...d, serviceModel })),
   setSubscriberId: (subscriberId) =>

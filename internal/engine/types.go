@@ -155,6 +155,10 @@ type AssertionResult struct {
 type StepResult struct {
 	// Skipped is true when a guard evaluated to false; no CCR was sent.
 	Skipped bool
+	// Error is non-empty when the step failed fatally (e.g. peer disconnected,
+	// template render error). When set, the step state should be "error" and
+	// the message is shown in the UI as errorDetail.
+	Error string
 	// SendResult holds the CCA and metrics for the exchange. Zero value
 	// when Skipped is true.
 	SendResult SendResult
@@ -167,21 +171,23 @@ type StepResult struct {
 }
 
 // ScenarioStep is the Go representation of a single entry in a scenario's
-// step list. It mirrors ARCHITECTURE.md §4 step kinds and is
-// JSON-deserialisable from the JSONB stored in the scenario row.
+// step list. It is JSON-deserialisable from the JSONB stored in the scenario row.
 //
-// The Kind field selects the variant: "request", "consume", "wait", "pause".
-// Fields not relevant to the active kind are ignored at execution time.
+// All steps are "request" steps (INITIAL / UPDATE / TERMINATE / EVENT).
+// Repeat and delay fields let a single step send multiple CCRs in a loop,
+// which is the idiomatic way to model repeated CCR-U consumption.
 type ScenarioStep struct {
-	// Kind selects the step variant.
+	// Kind is always "request". Kept for forward-compatibility with stored data.
 	Kind string `json:"kind"`
 
-	// RequestType is the CC-Request-Type for "request" steps.
+	// RequestType is the CC-Request-Type.
 	// One of "INITIAL", "UPDATE", "TERMINATE", "EVENT".
 	RequestType string `json:"requestType,omitempty"`
 
+	// Label is an optional human-readable name shown in the execution history.
+	Label string `json:"label,omitempty"`
+
 	// Services selects which MSCC blocks are included in the CCR.
-	// Required for multi-mscc scenarios; omitted otherwise.
 	Services *ServiceSelection `json:"services,omitempty"`
 
 	// Overrides is a per-step transient map of variable-name → value
@@ -208,21 +214,32 @@ type ScenarioStep struct {
 	// result-code conditions.
 	ResultHandlers []ResultHandler `json:"resultHandlers,omitempty"`
 
-	// WindowMs is the consume-loop duration for "consume" steps (ms).
-	WindowMs int `json:"windowMs,omitempty"`
-	// MaxRounds caps the number of iterations in a consume loop.
-	MaxRounds int `json:"maxRounds,omitempty"`
-	// TerminateWhen is a ruleevaluator expression that exits the consume
-	// loop when truthy.
-	TerminateWhen string `json:"terminateWhen,omitempty"`
+	// — Repeat controls (for UPDATE steps) —
 
-	// DurationMs is the sleep duration for "wait" steps (ms).
-	DurationMs int `json:"durationMs,omitempty"`
+	// Repeat is the fixed number of times to send this step. 0 or 1 = send once.
+	Repeat int `json:"repeat,omitempty"`
+	// RepeatUntil is a ruleevaluator expression evaluated after each send.
+	// The loop exits when it evaluates to truthy. Takes priority over Repeat
+	// when set; MaxRepeat acts as a safety cap.
+	RepeatUntil string `json:"repeatUntil,omitempty"`
+	// MaxRepeat caps the iteration count when RepeatUntil is used.
+	// Prevents infinite loops when the exit condition is never met.
+	MaxRepeat int `json:"maxRepeat,omitempty"`
 
-	// Label is an optional name for a "pause" step shown in the UI.
-	Label string `json:"label,omitempty"`
-	// Prompt is an optional instruction shown to the user on pause.
-	Prompt string `json:"prompt,omitempty"`
+	// — Delay between repeat iterations —
+
+	// DelaySec is the fixed base delay in seconds between iterations.
+	DelaySec int `json:"delaySec,omitempty"`
+	// DelayJitterSec is a random value in [0, DelayJitterSec) seconds added
+	// to DelaySec each iteration to avoid lockstep request patterns.
+	DelayJitterSec int `json:"delayJitterSec,omitempty"`
+	// UseValidityTime overrides DelaySec with the Validity-Time returned in
+	// the most recent CCA.
+	UseValidityTime bool `json:"useValidityTime,omitempty"`
+	// ValidityScale is a multiplier applied to the validity-time delay
+	// (default 1.0). Use 0.8 to send the next request at 80% of the OCS
+	// polling interval, simulating steady consumption before expiry.
+	ValidityScale float64 `json:"validityScale,omitempty"`
 }
 
 // ServiceSelection describes which MSCC service blocks are included in a

@@ -20,16 +20,17 @@ import (
 // for unit tests. All methods are configurable via function fields so
 // each test can inject the behaviour it needs.
 type fakeExecutionEngine struct {
-	startFn     func(ctx context.Context, scenarioID, mode string) (api.StartInfo, error)
+	startFn     func(ctx context.Context, scenarioID, mode string, repeats int) (api.StartInfo, error)
 	stopFn      func(ctx context.Context, sessionID string) error
 	stepFn      func(ctx context.Context, sessionID string, overrides map[string]any) (api.ExecutionStepResult, error)
+	skipFn      func(ctx context.Context, sessionID string) error
 	detailFn    func(ctx context.Context, sessionID string) (api.ExecutionDetailResponse, error)
 	subscribeFn func(ctx context.Context, sessionID string) (<-chan api.ExecutionEvent, error)
 }
 
-func (f *fakeExecutionEngine) Start(ctx context.Context, scenarioID, mode string) (api.StartInfo, error) {
+func (f *fakeExecutionEngine) Start(ctx context.Context, scenarioID, mode string, repeats int) (api.StartInfo, error) {
 	if f.startFn != nil {
-		return f.startFn(ctx, scenarioID, mode)
+		return f.startFn(ctx, scenarioID, mode, repeats)
 	}
 	return api.StartInfo{SessionID: "session-001", ScenarioName: "test-scenario"}, nil
 }
@@ -49,6 +50,13 @@ func (f *fakeExecutionEngine) Step(ctx context.Context, sessionID string, overri
 		StepIndex:        0,
 		AssertionsPassed: true,
 	}, nil
+}
+
+func (f *fakeExecutionEngine) Skip(ctx context.Context, sessionID string) error {
+	if f.skipFn != nil {
+		return f.skipFn(ctx, sessionID)
+	}
+	return nil
 }
 
 func (f *fakeExecutionEngine) Detail(ctx context.Context, sessionID string) (api.ExecutionDetailResponse, error) {
@@ -77,6 +85,13 @@ func (f *fakeExecutionEngine) Subscribe(ctx context.Context, sessionID string) (
 
 func (f *fakeExecutionEngine) List(_ context.Context) []api.ExecutionSummary {
 	return nil
+}
+
+func (f *fakeExecutionEngine) Interrupt(_ context.Context, _ string) error { return nil }
+func (f *fakeExecutionEngine) RunToEnd(_ context.Context, _ string) error  { return nil }
+
+func (f *fakeExecutionEngine) ResponseTimeSeries(_ context.Context, window string) (api.ResponseTimeSeries, error) {
+	return api.ResponseTimeSeries{Window: window, Points: []api.ResponseTimePoint{}}, nil
 }
 
 // execFixture wires a store, fake engine, and chi router for
@@ -191,7 +206,7 @@ func TestStartExecution_InvalidMode_Returns400(t *testing.T) {
 func TestStartExecution_ScenarioNotFound_Returns404(t *testing.T) {
 	f := newExecFixture(t)
 
-	f.exec.startFn = func(_ context.Context, _, _ string) (api.StartInfo, error) {
+	f.exec.startFn = func(_ context.Context, _, _ string, _ int) (api.StartInfo, error) {
 		return api.StartInfo{}, api.ErrScenarioNotFound
 	}
 

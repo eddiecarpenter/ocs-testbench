@@ -128,11 +128,11 @@ describe('defaultServicesForStep', () => {
     expect(defaultServicesForStep(scn, 0)).toEqual(new Set(['100', '200']));
   });
 
-  it('multi-mscc + non-request kind → all services (fallback)', () => {
+  it('multi-mscc + step with no services → all services (fallback)', () => {
     const scn = buildScenario({
       serviceModel: 'multi-mscc',
       services: [SVC_100, SVC_200],
-      steps: [{ kind: 'pause' }],
+      steps: [{ kind: 'request', requestType: 'UPDATE' }],
     });
     expect(defaultServicesForStep(scn, 0)).toEqual(new Set(['100', '200']));
   });
@@ -252,17 +252,15 @@ describe('buildStepHeader', () => {
     expect(buildStepHeader(scn, 3)?.title).toMatch(/CCR-EVENT/);
   });
 
-  it('non-request kinds get distinctive titles', () => {
+  it('label overrides default title', () => {
     const scn = buildScenario({
       serviceModel: 'root',
       services: [{ id: 'root', requestedUnits: 'RSU' }],
       steps: [
-        { kind: 'wait', durationMs: 500 },
-        { kind: 'pause', label: 'top-up' },
+        { kind: 'request', requestType: 'UPDATE', label: 'top-up' },
       ],
     });
-    expect(buildStepHeader(scn, 0)?.title).toBe('Wait 500 ms');
-    expect(buildStepHeader(scn, 1)?.title).toBe('top-up');
+    expect(buildStepHeader(scn, 0)?.title).toBe('top-up');
   });
 
   it('out-of-range step → null', () => {

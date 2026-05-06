@@ -1,37 +1,41 @@
 /**
- * Middle pane — Step Editor + Services panel + CCR preview tree.
+ * Center pane (debugger mode) — two-column step editor.
  *
- * Active in `paused` state only. In `running` (or any other state)
- * the pane goes read-only — controls disabled, fields uneditable.
+ * Active only when the execution is `paused` and no historical step is
+ * selected. In any other state the pane is not rendered.
  *
- * Layout (top to bottom):
- *   - Next-step header (step name · type chip · "Revert all")
- *   - Context-variables panel (read-only in MVP — system + user
- *     scopes; multi-MSCC variables carry the `RG<rg>_` prefix per
- *     ARCHITECTURE.md §5)
- *   - Services panel ("N of M selected", per-MSCC checkboxes)
- *   - CCR preview tree (resolver from Task 3)
- *   - Regenerate button
- *   - Footer: Skip step / Send CCR
- *
- * Imperative actions go through the page-scoped store; Task 7 wires
- * the actual POSTs and the SSE-driven response loop.
+ * Layout (left | right):
+ *   Left (~380px):
+ *     - Step header (name · type chip · "Revert all")
+ *     - System variables (read-only, locked)
+ *     - User / scenario variables (editable — overrides sent with POST /step)
+ *     - Extracted variables (read-only, derived by prior steps)
+ *     - Services panel (multi-MSCC only)
+ *   Right (flex):
+ *     - CCR preview tree (live-resolved with current overrides)
+ *     - Regenerate button
+ *   Footer (below both columns):
+ *     - Skip step | Send CCR
  */
 import {
   Badge,
+  Box,
   Button,
   Checkbox,
   Code,
   Divider,
+  Flex,
   Group,
+  ScrollArea,
   Skeleton,
   Stack,
-  Table,
   Text,
+  TextInput,
   Title,
   Tooltip,
 } from '@mantine/core';
 import {
+  IconLock,
   IconPlayerPlay,
   IconPlayerSkipForward,
   IconRefresh,
@@ -59,23 +63,26 @@ export function StepEditorPane() {
   const servicesEnabled = useExecutionStore((s) => s.edit.servicesEnabled);
   const previewTree = useExecutionStore((s) => s.edit.previewTree);
   const dirty = useExecutionStore((s) => s.edit.dirty);
+  const overrides = useExecutionStore((s) => s.edit.overrides);
 
   const toggleService = useExecutionStore((s) => s.toggleService);
   const regenerate = useExecutionStore((s) => s.regenerate);
   const setPreviewTree = useExecutionStore((s) => s.setPreviewTree);
   const revertEdit = useExecutionStore((s) => s.revertEdit);
+  const setOverride = useExecutionStore((s) => s.setOverride);
   const sendCcr = useExecutionStore((s) => s.sendCcr);
   const skip = useExecutionStore((s) => s.skip);
 
   const executionQuery = useExecution(executionId);
   const scenarioQuery = useScenario(executionQuery.data?.scenarioId);
-
   const scenario = scenarioQuery.data;
-  const flatContext = useMemo(() => flattenContext(context), [context]);
 
-  // Compute the resolved tree on every input change and push it into
-  // the store so other consumers (and the unit tests reading the store
-  // directly) see the same tree.
+  // Merge overrides on top of context for live CCR preview resolution.
+  const flatContext = useMemo(
+    () => ({ ...flattenContext(context), ...overrides }),
+    [context, overrides],
+  );
+
   const resolved = useMemo<PreviewAvpNode[] | null>(() => {
     if (!scenario) return null;
     return resolvePreview(scenario, cursor, flatContext, servicesEnabled);
@@ -85,16 +92,12 @@ export function StepEditorPane() {
     setPreviewTree(resolved);
   }, [resolved, setPreviewTree]);
 
-  // When the cursor advances OR the scenario loads, seed
-  // `edit.servicesEnabled` from the step's defaults — but only when
-  // the user hasn't dirtied the edit state yet for this cursor.
+  // Seed servicesEnabled from the step defaults when the cursor advances.
   useEffect(() => {
     if (!scenario) return;
     if (dirty) return;
     if (servicesEnabled.size > 0) return;
     revertEdit(defaultServicesForStep(scenario, cursor));
-    // We intentionally exclude `dirty` from the deps — a transition to
-    // dirty must NOT trigger a reset.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scenario, cursor, revertEdit]);
 
@@ -111,13 +114,17 @@ export function StepEditorPane() {
 
   const interactive = runState === 'paused';
   const header = buildStepHeader(scenario, cursor);
-  const servicesAll = scenario.services.map((s) => s.id);
-  const servicesSelectedCount = servicesEnabled.size;
-  const servicesTotal = servicesAll.length;
   const isMultiMscc = scenario.serviceModel === 'multi-mscc';
+  const servicesSelectedCount = servicesEnabled.size;
+  const servicesTotal = scenario.services.length;
+
+  const systemVars = Object.entries(context.system);
+  const userVars = Object.entries(context.user);
+  const extractedVars = Object.entries(context.extracted);
 
   return (
-    <Stack gap="xs" data-testid="debugger-step-editor-pane">
+    <Stack gap="sm" h="100%" data-testid="debugger-step-editor-pane">
+      {/* Header row */}
       <Group justify="space-between" align="flex-start" wrap="nowrap">
         <Stack gap={2}>
           <Title order={5}>Step editor</Title>
@@ -149,49 +156,104 @@ export function StepEditorPane() {
         </Tooltip>
       </Group>
 
-      <Divider label="Context variables" labelPosition="left" />
-      <ContextVariablesPanel context={flatContext} />
+      {/* Two-column body */}
+      <Flex gap="md" style={{ flex: 1, minHeight: 0 }}>
+        {/* Left: variables + services */}
+        <ScrollArea w={380} style={{ flexShrink: 0 }}>
+          <Stack gap="xs">
+            {systemVars.length > 0 && (
+              <>
+                <Divider label="System variables" labelPosition="left" />
+                <Stack gap={4} data-testid="debugger-system-vars">
+                  {systemVars.map(([k, v]) => (
+                    <LockedVarRow key={k} name={k} value={v} />
+                  ))}
+                </Stack>
+              </>
+            )}
 
-      {isMultiMscc && (
-        <>
-          <Divider
-            label={`Services — ${servicesSelectedCount} of ${servicesTotal} selected`}
-            labelPosition="left"
-          />
-          <Stack gap={4} data-testid="debugger-services-panel">
-            {scenario.services.map((svc) => (
-              <Checkbox
-                key={svc.id}
-                label={svcLabel(svc)}
-                checked={servicesEnabled.has(svc.id)}
-                disabled={!interactive}
-                onChange={() => toggleService(svc.id)}
-                data-testid={`debugger-service-${svc.id}`}
-              />
-            ))}
+            {userVars.length > 0 && (
+              <>
+                <Divider label="Scenario variables" labelPosition="left" />
+                <Stack gap={4} data-testid="debugger-user-vars">
+                  {userVars.map(([k, v]) => (
+                    <EditableVarRow
+                      key={k}
+                      name={k}
+                      contextValue={String(v ?? '')}
+                      override={overrides[k]}
+                      disabled={!interactive}
+                      onChange={(val) => setOverride(k, val)}
+                    />
+                  ))}
+                </Stack>
+              </>
+            )}
+
+            {extractedVars.length > 0 && (
+              <>
+                <Divider label="Extracted variables" labelPosition="left" />
+                <Stack gap={4} data-testid="debugger-extracted-vars">
+                  {extractedVars.map(([k, v]) => (
+                    <LockedVarRow key={k} name={k} value={v} />
+                  ))}
+                </Stack>
+              </>
+            )}
+
+            {systemVars.length === 0 &&
+              userVars.length === 0 &&
+              extractedVars.length === 0 && (
+                <Text size="xs" c="dimmed">
+                  No context variables yet.
+                </Text>
+              )}
+
+            {isMultiMscc && (
+              <>
+                <Divider
+                  label={`Services — ${servicesSelectedCount} of ${servicesTotal}`}
+                  labelPosition="left"
+                />
+                <Stack gap={4} data-testid="debugger-services-panel">
+                  {scenario.services.map((svc) => (
+                    <Checkbox
+                      key={svc.id}
+                      label={svcLabel(svc)}
+                      checked={servicesEnabled.has(svc.id)}
+                      disabled={!interactive}
+                      onChange={() => toggleService(svc.id)}
+                      data-testid={`debugger-service-${svc.id}`}
+                    />
+                  ))}
+                </Stack>
+              </>
+            )}
           </Stack>
-        </>
-      )}
+        </ScrollArea>
 
-      <Divider
-        label={dirty ? 'CCR preview (changed — regenerate)' : 'CCR preview'}
-        labelPosition="left"
-      />
-      <CcrPreview tree={previewTree} />
+        {/* Right: CCR preview */}
+        <Stack gap="xs" style={{ flex: 1, minWidth: 0 }}>
+          <Divider label="CCR preview" labelPosition="left" />
+          <ScrollArea style={{ flex: 1 }}>
+            <CcrPreview tree={previewTree} />
+          </ScrollArea>
+          <Group justify="flex-end">
+            <Button
+              variant="subtle"
+              size="xs"
+              leftSection={<IconRefresh size={14} />}
+              onClick={() => regenerate()}
+              disabled={!interactive}
+              data-testid="debugger-regenerate"
+            >
+              Regenerate
+            </Button>
+          </Group>
+        </Stack>
+      </Flex>
 
-      <Group justify="flex-end" gap="xs">
-        <Button
-          variant="subtle"
-          size="xs"
-          leftSection={<IconRefresh size={14} />}
-          onClick={() => regenerate()}
-          disabled={!interactive}
-          data-testid="debugger-regenerate"
-        >
-          Regenerate
-        </Button>
-      </Group>
-
+      {/* Footer */}
       <Divider />
       <Group justify="space-between" wrap="nowrap">
         <Button
@@ -226,34 +288,68 @@ export function StepEditorPane() {
 // Sub-components
 // ---------------------------------------------------------------------------
 
-interface ContextVariablesPanelProps {
-  context: Record<string, unknown>;
+interface LockedVarRowProps {
+  name: string;
+  value: unknown;
 }
 
-function ContextVariablesPanel({ context }: ContextVariablesPanelProps) {
-  const entries = Object.entries(context);
-  if (entries.length === 0) {
-    return (
-      <Text size="xs" c="dimmed">
-        No variables resolved yet.
-      </Text>
-    );
-  }
+function LockedVarRow({ name, value }: LockedVarRowProps) {
   return (
-    <Tooltip label="Editing context mid-run lands in a follow-up Feature">
-      <Table withTableBorder withColumnBorders fz="xs" data-testid="debugger-context-vars">
-        <Table.Tbody>
-          {entries.map(([k, v]) => (
-            <Table.Tr key={k}>
-              <Table.Td style={{ fontFamily: 'monospace' }}>{k}</Table.Td>
-              <Table.Td>
-                <Code>{stringify(v)}</Code>
-              </Table.Td>
-            </Table.Tr>
-          ))}
-        </Table.Tbody>
-      </Table>
-    </Tooltip>
+    <Group gap="xs" wrap="nowrap" data-testid={`debugger-var-locked-${name}`}>
+      <IconLock size={11} color="var(--mantine-color-gray-5)" />
+      <Text size="xs" style={{ fontFamily: 'monospace', flexShrink: 0 }} miw={120}>
+        {name}
+      </Text>
+      <Code style={{ fontSize: 11 }}>{stringify(value)}</Code>
+    </Group>
+  );
+}
+
+interface EditableVarRowProps {
+  name: string;
+  contextValue: string;
+  override: string | undefined;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}
+
+function EditableVarRow({
+  name,
+  contextValue,
+  override,
+  disabled,
+  onChange,
+}: EditableVarRowProps) {
+  const isOverridden = override !== undefined;
+  return (
+    <Group gap="xs" wrap="nowrap" data-testid={`debugger-var-edit-${name}`}>
+      <Text
+        size="xs"
+        style={{ fontFamily: 'monospace', flexShrink: 0 }}
+        miw={120}
+        c={isOverridden ? 'orange' : undefined}
+      >
+        {name}
+      </Text>
+      <TextInput
+        size="xs"
+        value={override ?? contextValue}
+        disabled={disabled}
+        placeholder={contextValue || '(empty)'}
+        onChange={(e) => onChange(e.currentTarget.value)}
+        style={{ flex: 1, fontFamily: 'monospace' }}
+        styles={{
+          input: {
+            fontFamily: 'monospace',
+            fontSize: 11,
+            borderColor: isOverridden
+              ? 'var(--mantine-color-orange-5)'
+              : undefined,
+          },
+        }}
+        data-testid={`debugger-var-input-${name}`}
+      />
+    </Group>
   );
 }
 
@@ -285,7 +381,7 @@ interface PreviewNodeProps {
 
 function PreviewNode({ node, depth }: PreviewNodeProps) {
   return (
-    <Stack gap={2}>
+    <Box>
       <Group
         gap="xs"
         wrap="nowrap"
@@ -298,13 +394,15 @@ function PreviewNode({ node, depth }: PreviewNodeProps) {
           </Text>
         </Text>
         {node.value !== undefined && (
-          <Code data-testid={`avp-${node.name}`}>{node.value}</Code>
+          <Code style={{ fontSize: 11 }} data-testid={`avp-${node.name}`}>
+            {node.value}
+          </Code>
         )}
       </Group>
       {node.children?.map((c, i) => (
         <PreviewNode key={`${c.code}-${i}`} node={c} depth={depth + 1} />
       ))}
-    </Stack>
+    </Box>
   );
 }
 

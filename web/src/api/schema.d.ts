@@ -411,9 +411,10 @@ export interface paths {
         /**
          * Request a pause at the next safe point
          * @description Requests the engine to pause the execution at the next safe point
-         *     (between steps, or between consume-loop rounds). Returns the
-         *     current execution; the transition to `paused` is delivered via
-         *     the SSE `execution.paused` event when it actually happens.
+         *     (between steps). Returns the current execution; the transition to
+         *     `paused` is delivered via the SSE `execution.paused` event when
+         *     it actually happens. For continuous-mode executions prefer
+         *     `/interrupt`, which pauses after the current iteration completes.
          */
         post: operations["pauseExecution"];
         delete?: never;
@@ -461,8 +462,8 @@ export interface paths {
         /**
          * Advance exactly one step, then pause again
          * @description Only valid from `paused` state. Executes exactly one scenario step
-         *     and returns to `paused`. Consume steps advance one round per call.
-         *     Returns the step result including result code and assertion outcomes.
+         *     and returns to `paused`. Returns the step result including result
+         *     code and assertion outcomes.
          */
         post: operations["stepExecution"];
         delete?: never;
@@ -517,6 +518,56 @@ export interface paths {
          *     in `sessionMode: session` and has an active session.
          */
         post: operations["abortExecution"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{id}/interrupt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Interrupt a continuous execution after the current send
+         * @description Signals the engine to pause after the current iteration completes.
+         *     Only valid for continuous-mode executions in `active` state.
+         *     The execution transitions to `paused`; use `/run-to-end` to resume.
+         */
+        post: operations["interruptExecution"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{id}/run-to-end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume an interrupted execution to completion
+         * @description Resumes a continuous execution that was interrupted via `/interrupt`,
+         *     running the remaining steps to completion. Also triggers the next
+         *     step for interactive-mode executions in `paused` state.
+         */
+        post: operations["runToEnd"];
         delete?: never;
         options?: never;
         head?: never;
@@ -641,6 +692,30 @@ export interface paths {
         get: operations["subscribeEvents"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/expressions/evaluate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Evaluate a ruleevaluator expression
+         * @description Evaluates a ruleevaluator expression against a supplied variable map
+         *     and returns the result. Both `{{VAR}}` and bare `VAR` notation are
+         *     accepted — the engine normalises them before evaluation. Useful for
+         *     validating `repeatUntil`, `assertions`, and `guards` expressions
+         *     before saving a scenario.
+         */
+        post: operations["evaluateExpression"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1073,11 +1148,10 @@ export interface components {
             action: "continue" | "stop" | "retry";
         };
         RequestStep: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
+            /** @constant */
             kind: "request";
+            /** @description Optional display label shown in the execution history pane. */
+            label?: string;
             requestType: components["schemas"]["RequestType"];
             /**
              * @description Required in `multi-mscc` scenarios. Omitted in `root` and
@@ -1101,52 +1175,46 @@ export interface components {
             /** @description Pre-send predicates. On failure the step is skipped. */
             guards?: string[];
             resultHandlers?: components["schemas"]["ResultHandler"][];
-        };
-        /**
-         * @description Only legal in `sessionMode: session`. Expands at run time into an
-         *     auto-generated sequence of CCR-UPDATEs, re-rolling random service
-         *     selections each round, until `terminateWhen` fires or every
-         *     selected service becomes `exhausted` / `error`.
-         */
-        ConsumeStep: {
             /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
+             * @description Fixed iteration count. Mutually exclusive with `repeatUntil`.
+             *     Only meaningful for UPDATE steps.
              */
-            kind: "consume";
-            services?: components["schemas"]["ServiceSelection"];
-            windowMs: number;
-            maxRounds?: number;
-            /** @description Expression; when true, exits the consume loop. */
-            terminateWhen?: string;
-            overrides?: {
-                [key: string]: components["schemas"]["VarValue"];
-            };
-            assertions?: string[];
-        };
-        WaitStep: {
+            repeat?: number;
             /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
+             * @description Expression evaluated after each iteration. Loop exits when the
+             *     expression returns true. Mutually exclusive with `repeat`.
+             *     Both `{{VAR}}` and bare `VAR` notation are accepted.
              */
-            kind: "wait";
-            durationMs: number;
-        };
-        /**
-         * @description Authored breakpoint. Suspends execution until resumed. Honoured
-         *     only in `interactive` execution mode; ignored in `continuous`.
-         */
-        PauseStep: {
+            repeatUntil?: string;
             /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
+             * @description Safety cap when `repeatUntil` is set. Loop exits after this many
+             *     iterations even if the condition hasn't fired. Defaults to 100.
              */
-            kind: "pause";
-            label?: string;
-            prompt?: string;
+            maxRepeat?: number;
+            /**
+             * @description Fixed inter-iteration delay in seconds. Applied between
+             *     consecutive iterations of a repeat loop.
+             */
+            delaySec?: number;
+            /**
+             * @description Random jitter added to `delaySec`. Actual delay is
+             *     `delaySec + rand(0, delayJitterSec)` seconds.
+             */
+            delayJitterSec?: number;
+            /**
+             * @description When true, the inter-iteration delay is derived from the
+             *     Validity-Time AVP in the last CCA response, scaled by
+             *     `validityScale`. Overrides `delaySec`/`delayJitterSec`.
+             */
+            useValidityTime?: boolean;
+            /**
+             * @description Multiplier applied to the Validity-Time value when
+             *     `useValidityTime` is true. Defaults to 1.0.
+             */
+            validityScale?: number;
         };
-        /** @description Discriminated union by `kind`. */
-        ScenarioStep: components["schemas"]["RequestStep"] | components["schemas"]["ConsumeStep"] | components["schemas"]["WaitStep"] | components["schemas"]["PauseStep"];
+        /** @description A scenario step. All steps are request steps. */
+        ScenarioStep: components["schemas"]["RequestStep"];
         /** @description Row-level shape for the scenarios list view. */
         ScenarioSummary: {
             id: string;
@@ -1405,10 +1473,22 @@ export interface components {
             request?: {
                 [key: string]: unknown;
             };
-            /** @description Wire-level CCA snapshot. */
+            /**
+             * @description Pre-formatted Diameter wire text of the CCR (human-readable,
+             *     one AVP per line). Use this for display; use `request` for
+             *     structured access.
+             */
+            requestText?: string;
+            /** @description Wire-level CCA snapshot (structured). */
             response?: {
                 [key: string]: unknown;
             };
+            /**
+             * @description Pre-formatted Diameter wire text of the CCA (human-readable,
+             *     one AVP per line). Use this for display; use `response` for
+             *     structured access (result codes, extractions).
+             */
+            responseText?: string;
             assertionResults?: {
                 expression: string;
                 passed: boolean;
@@ -2402,6 +2482,54 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    interruptExecution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Interrupt accepted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["IllegalStateProblem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    runToEnd: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resumed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["IllegalStateProblem"];
+            default: components["responses"]["Problem"];
+        };
+    };
     applyContextOverride: {
         parameters: {
             query?: never;
@@ -2538,6 +2666,44 @@ export interface operations {
                     "application/json": components["schemas"]["SseEventPayload"];
                 };
             };
+        };
+    };
+    evaluateExpression: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Expression to evaluate (supports `{{VAR}}` and bare `VAR`). */
+                    expression: string;
+                    /** @description Variable map to evaluate the expression against. */
+                    vars?: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Evaluation result (always 200; parse errors are in the `error` field) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description The evaluated result (boolean, number, or string). */
+                        result?: unknown;
+                        /** @description Present when evaluation failed; absent on success. */
+                        error?: string;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationProblem"];
+            default: components["responses"]["Problem"];
         };
     };
     getResponseTimeSeries: {
