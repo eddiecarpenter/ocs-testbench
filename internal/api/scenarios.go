@@ -26,16 +26,16 @@ func mountScenarios(r chi.Router, s store.Store, dict template.Dictionary) {
 // every ScenarioInput field that is not promoted to its own column
 // (name, peerId, subscriberId are stored as columns).
 type scenarioBody struct {
-	Description   string          `json:"description,omitempty"`
-	SessionMode   string          `json:"sessionMode"`
-	ServiceModel  string          `json:"serviceModel"`
-	ServiceType   string          `json:"serviceType,omitempty"`
-	ServiceProfile string         `json:"serviceProfile,omitempty"`
-	Favourite     bool            `json:"favourite,omitempty"`
-	AvpTree       json.RawMessage `json:"avpTree"`
-	Services      json.RawMessage `json:"services"`
-	Variables     json.RawMessage `json:"variables"`
-	Steps         json.RawMessage `json:"steps"`
+	Description    string          `json:"description,omitempty"`
+	SessionMode    string          `json:"sessionMode"`
+	ServiceModel   string          `json:"serviceModel"`
+	ServiceType    string          `json:"serviceType,omitempty"`
+	ServiceProfile string          `json:"serviceProfile,omitempty"`
+	Favourite      bool            `json:"favourite,omitempty"`
+	AvpTree        json.RawMessage `json:"avpTree"`
+	Services       json.RawMessage `json:"services"`
+	Variables      json.RawMessage `json:"variables"`
+	Steps          json.RawMessage `json:"steps"`
 }
 
 // scenarioRequest is the decoded form of a ScenarioInput JSON body.

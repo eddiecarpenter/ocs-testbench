@@ -165,7 +165,6 @@ export function groupByBatch(
  */
 export function formatProgress(
   row: ExecutionSummary,
-  _runsByBatch: Map<string, ExecutionSummary[]>,
 ): string {
   if (row.mode === 'interactive') return '—';
   // Continuous — show completed / total repeats when available.

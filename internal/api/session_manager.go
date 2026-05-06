@@ -93,16 +93,16 @@ type stepHistoryRecord struct {
 }
 
 type sessionRecord struct {
-	id           string
-	scenarioID   string
-	scenarioName string
-	mode              string
-	repeats           int
+	id                  string
+	scenarioID          string
+	scenarioName        string
+	mode                string
+	repeats             int
 	completedIterations int
-	startedAt         string
-	sc           *engine.SessionContext
-	orc          *engine.Orchestrator
-	steps        []engine.ScenarioStep
+	startedAt           string
+	sc                  *engine.SessionContext
+	orc                 *engine.Orchestrator
+	steps               []engine.ScenarioStep
 
 	mu          sync.RWMutex
 	state       engine.SessionState
@@ -115,8 +115,8 @@ type sessionRecord struct {
 	interruptCh chan struct{}
 	done        chan struct{}
 
-	subsMu    sync.Mutex
-	subs      []chan ExecutionEvent
+	subsMu sync.Mutex
+	subs   []chan ExecutionEvent
 	// sleepUntil is non-zero while the engine is sleeping between
 	// iterations. Used to re-emit the sleeping event to late subscribers.
 	sleepStepIdx int

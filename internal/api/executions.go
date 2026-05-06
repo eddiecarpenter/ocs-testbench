@@ -174,7 +174,7 @@ type ExecutionEvent struct {
 	// DelaySec is set when State == "sleeping" and carries the actual
 	// inter-iteration sleep duration (including jitter) in whole seconds.
 	DelaySec int
-	Metrics   ExecutionMetrics
+	Metrics  ExecutionMetrics
 }
 
 // — JSON request / response shapes —
@@ -208,34 +208,34 @@ type executionSummaryJSON struct {
 // ExecutionDetailResponse is the JSON body returned by GET /executions/{id}.
 // Matches the OpenAPI Execution shape (ExecutionSummary + detail fields).
 type ExecutionDetailResponse struct {
-	ID           string                  `json:"id"`
-	ScenarioID   string                  `json:"scenarioId"`
-	ScenarioName string                  `json:"scenarioName"`
-	Mode         string                  `json:"mode"`
-	State        string                  `json:"state"`
-	StartedAt    string                  `json:"startedAt"`
-	CurrentStep  int                     `json:"currentStep"`
-	TotalSteps   int                     `json:"totalSteps"`
-	Steps        []StepRecordJSON        `json:"steps"`
-	Context      ExecutionContextJSON     `json:"context"`
+	ID           string               `json:"id"`
+	ScenarioID   string               `json:"scenarioId"`
+	ScenarioName string               `json:"scenarioName"`
+	Mode         string               `json:"mode"`
+	State        string               `json:"state"`
+	StartedAt    string               `json:"startedAt"`
+	CurrentStep  int                  `json:"currentStep"`
+	TotalSteps   int                  `json:"totalSteps"`
+	Steps        []StepRecordJSON     `json:"steps"`
+	Context      ExecutionContextJSON `json:"context"`
 }
 
 // StepRecordJSON is one entry in ExecutionDetailResponse.Steps.
 type StepRecordJSON struct {
-	N                int              `json:"n"`
-	Kind             string           `json:"kind"`
-	RequestType      string           `json:"requestType,omitempty"`
-	Label            string           `json:"label,omitempty"`
-	State            string           `json:"state"`
-	StartedAt        string           `json:"startedAt,omitempty"`
-	FinishedAt       string           `json:"finishedAt,omitempty"`
-	DurationMs       int64            `json:"durationMs,omitempty"`
-	ErrorDetail      string           `json:"errorDetail,omitempty"`
-	Request          map[string]any   `json:"request,omitempty"`
-	Response         map[string]any   `json:"response,omitempty"`
-	RequestText      string           `json:"requestText,omitempty"`
-	ResponseText     string           `json:"responseText,omitempty"`
-	AssertionResults []assertionJSON  `json:"assertionResults,omitempty"`
+	N                int             `json:"n"`
+	Kind             string          `json:"kind"`
+	RequestType      string          `json:"requestType,omitempty"`
+	Label            string          `json:"label,omitempty"`
+	State            string          `json:"state"`
+	StartedAt        string          `json:"startedAt,omitempty"`
+	FinishedAt       string          `json:"finishedAt,omitempty"`
+	DurationMs       int64           `json:"durationMs,omitempty"`
+	ErrorDetail      string          `json:"errorDetail,omitempty"`
+	Request          map[string]any  `json:"request,omitempty"`
+	Response         map[string]any  `json:"response,omitempty"`
+	RequestText      string          `json:"requestText,omitempty"`
+	ResponseText     string          `json:"responseText,omitempty"`
+	AssertionResults []assertionJSON `json:"assertionResults,omitempty"`
 }
 
 // ExecutionContextJSON is the context snapshot in ExecutionDetailResponse.

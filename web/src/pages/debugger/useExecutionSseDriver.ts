@@ -46,13 +46,17 @@ export function useExecutionSseDriver({
   enabled = true,
 }: UseExecutionSseDriverOptions): ExecutionSseController {
   const onEventRef = useRef(onEvent);
-  onEventRef.current = onEvent;
+  useEffect(() => {
+    onEventRef.current = onEvent;
+  });
 
   // Keep execution in a ref so the SSE effect doesn't restart on every
   // poll refetch — the connection must be stable across re-renders so
   // short-lived events (sleeping, step.sending) are never missed.
   const executionRef = useRef(execution);
-  executionRef.current = execution;
+  useEffect(() => {
+    executionRef.current = execution;
+  });
 
   useEffect(() => {
     if (!enabled) return;
@@ -122,9 +126,6 @@ export function useExecutionSseDriver({
     return () => {
       es.close();
     };
-  // Intentionally excludes `execution` — use executionRef so the
-  // connection survives poll-driven re-renders without reconnecting.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [executionId, enabled]);
 
   return useMemo<ExecutionSseController>(

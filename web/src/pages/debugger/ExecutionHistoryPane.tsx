@@ -193,7 +193,9 @@ function SleepCountdown({ totalSec, endsAt, onExpired }: SleepCountdownProps) {
   const rafRef = useRef<number | null>(null);
   const expiredTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onExpiredRef = useRef(onExpired);
-  onExpiredRef.current = onExpired;
+  useEffect(() => {
+    onExpiredRef.current = onExpired;
+  });
 
   useEffect(() => {
     const tick = () => {

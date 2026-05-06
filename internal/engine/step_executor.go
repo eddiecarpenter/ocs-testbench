@@ -157,7 +157,7 @@ func NewStepExecutor(engine *template.Engine, baseInput template.EngineInput) *S
 //  7. Auto-update sc.Vars from the CCA (RESULT_CODE, MSCC values).
 //  8. Assert — evaluate step.Assertions against updated sc.Vars.
 //  9. Result code handlers — return first matching action.
-//  9b/c/d. Built-in checks — goto_terminate on non-2xxx, all-MSCC-exhausted, FUI=TERMINATE.
+//     9b/c/d. Built-in checks — goto_terminate on non-2xxx, all-MSCC-exhausted, FUI=TERMINATE.
 //  10. Increment CCRequestNumber and update CC_REQUEST_NUMBER in sc.Vars.
 func (e *StepExecutor) Execute(
 	ctx context.Context,
