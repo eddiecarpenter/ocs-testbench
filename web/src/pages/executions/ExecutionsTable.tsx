@@ -196,7 +196,7 @@ export function ExecutionsTable({
                 ff="monospace"
                 data-testid={`executions-row-${row.id}-progress`}
               >
-                {formatProgress(row)}
+                {formatProgress(row, runsByBatch)}
               </Text>
             </Table.Td>
             <Table.Td>

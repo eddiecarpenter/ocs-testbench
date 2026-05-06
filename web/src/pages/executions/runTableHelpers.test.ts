@@ -58,35 +58,18 @@ describe('groupByBatch', () => {
 });
 
 describe('formatProgress', () => {
-  // Default `scn-a` is not in the fixture set so the lookup falls
-  // back to the first scenario (session-mode → 3 steps). Tests below
-  // pin that contract.
-  it('renders interactive terminal as 3 / 3 (session-mode default)', () => {
+  it('renders interactive as —', () => {
     expect(
-      formatProgress(
-        exec({ mode: 'interactive', state: 'success' }),
-      ),
-    ).toBe('3 / 3');
+      formatProgress(exec({ mode: 'interactive', state: 'success' }), new Map()),
+    ).toBe('—');
   });
 
-  it('renders interactive running as `… / 3` (session-mode default)', () => {
-    expect(
-      formatProgress(
-        exec({ mode: 'interactive', state: 'running' }),
-      ),
-    ).toBe('… / 3');
-  });
-
-  it('renders continuous standalone (no batch) terminal as 1 / 1', () => {
-    expect(formatProgress(exec({ state: 'success' }))).toBe(
-      '1 / 1',
-    );
+  it('renders continuous standalone terminal as 1 / 1', () => {
+    expect(formatProgress(exec({ state: 'success' }), new Map())).toBe('1 / 1');
   });
 
   it('renders continuous standalone running as 0 / 1', () => {
-    expect(formatProgress(exec({ state: 'running' }))).toBe(
-      '0 / 1',
-    );
+    expect(formatProgress(exec({ state: 'running' }), new Map())).toBe('0 / 1');
   });
 
   it('renders continuous batched as <terminal> / <total>', () => {
@@ -96,7 +79,8 @@ describe('formatProgress', () => {
       exec({ id: '3', batchId: 'b', state: 'running' }),
       exec({ id: '4', batchId: 'b', state: 'failure' }),
     ];
-    expect(formatProgress(siblings[0])).toBe('3 / 4');
+    const map = groupByBatch(siblings);
+    expect(formatProgress(siblings[0], map)).toBe('3 / 4');
   });
 });
 

@@ -16,32 +16,37 @@ import (
 	"github.com/eddiecarpenter/ocs-testbench/internal/store"
 )
 
-// scenarioFixture holds a pre-created peer and router for scenario tests.
+// scenarioFixture holds a pre-created peer, subscriber and router for scenario tests.
 type scenarioFixture struct {
-	s      store.Store
-	r      http.Handler
-	peerID string
+	s            store.Store
+	r            http.Handler
+	peerID       string
+	subscriberID string
 }
 
-// newScenarioFixture creates a store with a peer pre-seeded for scenario tests.
+// newScenarioFixture creates a store with a peer and subscriber pre-seeded for scenario tests.
 func newScenarioFixture(t *testing.T) *scenarioFixture {
 	t.Helper()
 	s := store.NewTestStore()
 	ctx := context.Background()
 	peer, err := s.InsertPeer(ctx, "peer-scen", []byte(`{}`))
 	require.NoError(t, err)
+	sub, err := s.InsertSubscriber(ctx, store.InsertSubscriberParams{Name: "sub-scen"})
+	require.NoError(t, err)
 	return &scenarioFixture{
-		s:      s,
-		r:      api.Router(s, nil, nil, nil),
-		peerID: api.UUIDStr(peer.ID),
+		s:            s,
+		r:            api.Router(s, nil, nil, nil),
+		peerID:       api.UUIDStr(peer.ID),
+		subscriberID: api.UUIDStr(sub.ID),
 	}
 }
 
 // minimalScenarioBody returns a minimal valid ScenarioInput body for seeding.
-func minimalScenarioBody(name, peerID string) map[string]any {
+func minimalScenarioBody(name, peerID, subscriberID string) map[string]any {
 	return map[string]any{
 		"name":         name,
 		"peerId":       peerID,
+		"subscriberId": subscriberID,
 		"sessionMode":  "session",
 		"serviceModel": "single-mscc",
 		"avpTree":      []any{},
@@ -54,7 +59,7 @@ func minimalScenarioBody(name, peerID string) map[string]any {
 // seedScenario creates a scenario via POST /scenarios.
 func (f *scenarioFixture) seedScenario(t *testing.T, name string) map[string]any {
 	t.Helper()
-	reqBody, _ := json.Marshal(minimalScenarioBody(name, f.peerID))
+	reqBody, _ := json.Marshal(minimalScenarioBody(name, f.peerID, f.subscriberID))
 	req := httptest.NewRequest(http.MethodPost, "/v1/scenarios", bytes.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -98,7 +103,7 @@ func TestScenario_CreateScenario_DuplicateName_Returns409(t *testing.T) {
 	f := newScenarioFixture(t)
 	f.seedScenario(t, "scen-dup")
 
-	reqBody, _ := json.Marshal(minimalScenarioBody("scen-dup", f.peerID))
+	reqBody, _ := json.Marshal(minimalScenarioBody("scen-dup", f.peerID, f.subscriberID))
 	req := httptest.NewRequest(http.MethodPost, "/v1/scenarios", bytes.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -154,7 +159,7 @@ func TestScenario_UpdateScenario_ValidBody_Returns200(t *testing.T) {
 	created := f.seedScenario(t, "scen-upd")
 	id := created["id"].(string)
 
-	updated := minimalScenarioBody("scen-upd-new", f.peerID)
+	updated := minimalScenarioBody("scen-upd-new", f.peerID, f.subscriberID)
 	updated["steps"] = []any{"step1"}
 	reqBody, _ := json.Marshal(updated)
 	req := httptest.NewRequest(http.MethodPut, "/v1/scenarios/"+id, bytes.NewReader(reqBody))

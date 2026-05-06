@@ -165,9 +165,16 @@ export function groupByBatch(
  */
 export function formatProgress(
   row: ExecutionSummary,
+  runsByBatch: Map<string, ExecutionSummary[]>,
 ): string {
   if (row.mode === 'interactive') return '—';
-  // Continuous — show completed / total repeats when available.
+  // Continuous batched: count terminal siblings vs total batch size.
+  if (row.batchId) {
+    const siblings = runsByBatch.get(row.batchId) ?? [];
+    const terminal = siblings.filter((s) => isTerminal(s.state)).length;
+    return `${terminal} / ${siblings.length}`;
+  }
+  // Continuous standalone — show completed / total repeats.
   const total = row.repeats ?? 1;
   const done = row.completedIterations ?? (isTerminal(row.state) ? total : 0);
   return `${done} / ${total}`;
