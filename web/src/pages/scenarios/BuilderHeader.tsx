@@ -1,7 +1,7 @@
 /**
  * Builder header — title row (editable scenario name + dirty badge +
- * Undo/Redo) plus the form fields (unit type, session mode, service
- * model, description).
+ * Undo/Redo) plus the form fields (vendor, service type, session mode,
+ * service model, description).
  *
  * The scenario name lives in the title itself: click the pencil to
  * switch the title into an edit input; Enter or blur commits, Esc
@@ -34,15 +34,24 @@ import { useSubscribers } from '../../api/resources/subscribers';
 import { useScenarioDraftStore } from './scenarioDraftStore';
 import type {
   ServiceModel,
+  ServiceProfile,
+  ServiceType,
   SessionMode,
-  UnitType,
 } from './types';
 import { DebouncedTextarea } from './DebouncedTextInput';
 
-const UNIT_OPTIONS: { value: UnitType; label: string }[] = [
-  { value: 'OCTET', label: 'Octet' },
-  { value: 'TIME', label: 'Time' },
-  { value: 'UNITS', label: 'Units' },
+const VENDOR_OPTIONS: { value: ServiceProfile; label: string }[] = [
+  { value: '3GPP', label: '3GPP' },
+  { value: 'HUAWEI', label: 'Huawei' },
+];
+
+const SERVICE_TYPE_OPTIONS: { value: ServiceType; label: string }[] = [
+  { value: 'VOICE', label: 'Voice' },
+  { value: 'DATA', label: 'Data' },
+  { value: 'SMS', label: 'SMS' },
+  { value: 'USSD1_EVENT', label: 'USSD1 Event' },
+  { value: 'USSD1_SESSION', label: 'USSD1 Session' },
+  { value: 'USSD2_SESSION', label: 'USSD2 Session' },
 ];
 
 const SESSION_OPTIONS: { value: SessionMode; label: string }[] = [
@@ -65,7 +74,8 @@ export function BuilderHeader({ isNew, isDirty }: BuilderHeaderProps) {
   const draft = useScenarioDraftStore((s) => s.draft);
   const setName = useScenarioDraftStore((s) => s.setName);
   const setDescription = useScenarioDraftStore((s) => s.setDescription);
-  const setUnitType = useScenarioDraftStore((s) => s.setUnitType);
+  const setServiceType = useScenarioDraftStore((s) => s.setServiceType);
+  const setServiceProfile = useScenarioDraftStore((s) => s.setServiceProfile);
   const setSessionMode = useScenarioDraftStore((s) => s.setSessionMode);
   const setServiceModel = useScenarioDraftStore((s) => s.setServiceModel);
   const setPeerId = useScenarioDraftStore((s) => s.setPeerId);
@@ -162,12 +172,22 @@ export function BuilderHeader({ isNew, isDirty }: BuilderHeaderProps) {
       <Grid columns={3}>
         <Grid.Col span={{ base: 3, sm: 1 }}>
           <Select
-            label="Unit type"
-            data={UNIT_OPTIONS}
-            value={draft.unitType}
-            onChange={(v) => v && setUnitType(v as UnitType)}
+            label="Vendor"
+            data={VENDOR_OPTIONS}
+            value={draft.serviceProfile ?? '3GPP'}
+            onChange={(v) => v && setServiceProfile(v as ServiceProfile)}
             allowDeselect={false}
-            data-testid="builder-unit-type"
+            data-testid="builder-service-profile"
+          />
+        </Grid.Col>
+        <Grid.Col span={{ base: 3, sm: 1 }}>
+          <Select
+            label="Service type"
+            data={SERVICE_TYPE_OPTIONS}
+            value={draft.serviceType ?? null}
+            onChange={(v) => v && setServiceType(v as ServiceType)}
+            allowDeselect={false}
+            data-testid="builder-service-type"
           />
         </Grid.Col>
         <Grid.Col span={{ base: 3, sm: 1 }}>
@@ -199,19 +219,21 @@ export function BuilderHeader({ isNew, isDirty }: BuilderHeaderProps) {
             onChange={(v) => setPeerId(v ?? '')}
             clearable
             searchable
+            withAsterisk
             disabled={peers.isLoading}
             data-testid="builder-peer"
           />
         </Grid.Col>
         <Grid.Col span={{ base: 3, sm: 1 }}>
           <Select
-            label="Subscriber (optional)"
-            placeholder="None"
+            label="Subscriber"
+            placeholder="Select a subscriber"
             data={subscriberOptions}
             value={draft.subscriberId || null}
             onChange={(v) => setSubscriberId(v ?? '')}
             clearable
             searchable
+            withAsterisk
             disabled={subscribers.isLoading}
             data-testid="builder-subscriber"
           />

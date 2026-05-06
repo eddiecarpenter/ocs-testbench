@@ -39,7 +39,7 @@ var levelVar = new(slog.LevelVar)
 // sink is the io.Writer every installed handler writes to. The
 // package-level variable is overridable from tests so the produced
 // output can be captured and asserted against.
-var sink io.Writer = os.Stderr
+var sink io.Writer = os.Stdout
 
 // exitFn is the os.Exit hook used by Fatal. Overridable from tests
 // so a Fatal call doesn't terminate the test runner.

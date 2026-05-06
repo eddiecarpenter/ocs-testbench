@@ -14,7 +14,8 @@ function baseScenario(overrides: Partial<Scenario> = {}): Scenario {
     id: 'scn',
     name: 'test',
     description: '',
-    unitType: 'OCTET',
+    serviceType: 'DATA',
+    serviceProfile: '3GPP',
     sessionMode: 'session',
     serviceModel: 'single-mscc',
     origin: 'user',
@@ -34,7 +35,7 @@ function baseScenario(overrides: Partial<Scenario> = {}): Scenario {
 describe('provisionVariables', () => {
   it('uses flat names for root scenarios (RSU_TOTAL, USU_TOTAL)', () => {
     const s = baseScenario({
-      unitType: 'TIME',
+      serviceType: 'VOICE',
       serviceModel: 'root',
       services: [{ id: 'root', requestedUnits: 'RSU_TOTAL', usedUnits: 'USU_TOTAL' }],
     });
@@ -46,7 +47,7 @@ describe('provisionVariables', () => {
 
   it('uses flat names for single-mscc scenarios', () => {
     const s = baseScenario({
-      unitType: 'OCTET',
+      serviceType: 'DATA',
       serviceModel: 'single-mscc',
       services: [
         {
@@ -67,7 +68,7 @@ describe('provisionVariables', () => {
 
   it('uses RG<rg>_ prefix for every multi-mscc service', () => {
     const s = baseScenario({
-      unitType: 'OCTET',
+      serviceType: 'DATA',
       serviceModel: 'multi-mscc',
       services: [
         {
@@ -100,7 +101,7 @@ describe('provisionVariables', () => {
 
   it('does not overwrite an already-declared variable', () => {
     const s = baseScenario({
-      unitType: 'OCTET',
+      serviceType: 'DATA',
       serviceModel: 'single-mscc',
       services: [
         {

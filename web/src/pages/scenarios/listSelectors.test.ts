@@ -1,12 +1,12 @@
 /**
  * Tests for list grouping and filter helpers.
  *
- * Covers AC-1 / AC-2 / AC-3 from Feature #77 — grouping by unit type,
+ * Covers AC-1 / AC-2 / AC-3 from Feature #77 — grouping by service type,
  * case-insensitive search across name + peer, and peer filter.
  */
 import { describe, expect, it } from 'vitest';
 
-import { filterScenarios, groupByUnit } from './listSelectors';
+import { filterScenarios, groupByServiceType } from './listSelectors';
 import type { ScenarioSummary } from './types';
 
 function row(overrides: Partial<ScenarioSummary>): ScenarioSummary {
@@ -14,7 +14,8 @@ function row(overrides: Partial<ScenarioSummary>): ScenarioSummary {
     id: 'scn',
     name: 'name',
     description: '',
-    unitType: 'OCTET',
+    serviceType: 'VOICE',
+    serviceProfile: '3GPP',
     sessionMode: 'session',
     serviceModel: 'single-mscc',
     origin: 'user',
@@ -27,24 +28,24 @@ function row(overrides: Partial<ScenarioSummary>): ScenarioSummary {
   };
 }
 
-describe('groupByUnit', () => {
-  it('groups rows under OCTET / TIME / UNITS in stable order', () => {
+describe('groupByServiceType', () => {
+  it('groups rows under each service type in stable order', () => {
     const rows = [
-      row({ id: 'a', unitType: 'TIME' }),
-      row({ id: 'b', unitType: 'OCTET' }),
-      row({ id: 'c', unitType: 'UNITS' }),
-      row({ id: 'd', unitType: 'OCTET' }),
+      row({ id: 'a', serviceType: 'DATA' }),
+      row({ id: 'b', serviceType: 'VOICE' }),
+      row({ id: 'c', serviceType: 'SMS' }),
+      row({ id: 'd', serviceType: 'VOICE' }),
     ];
-    const out = groupByUnit(rows);
-    expect(out.OCTET.map((r) => r.id)).toEqual(['b', 'd']);
-    expect(out.TIME.map((r) => r.id)).toEqual(['a']);
-    expect(out.UNITS.map((r) => r.id)).toEqual(['c']);
+    const out = groupByServiceType(rows);
+    expect(out.VOICE.map((r) => r.id)).toEqual(['b', 'd']);
+    expect(out.DATA.map((r) => r.id)).toEqual(['a']);
+    expect(out.SMS.map((r) => r.id)).toEqual(['c']);
   });
 
   it('returns empty arrays for groups with no rows', () => {
-    const out = groupByUnit([row({ unitType: 'OCTET' })]);
-    expect(out.TIME).toEqual([]);
-    expect(out.UNITS).toEqual([]);
+    const out = groupByServiceType([row({ serviceType: 'VOICE' })]);
+    expect(out.DATA).toEqual([]);
+    expect(out.SMS).toEqual([]);
   });
 });
 

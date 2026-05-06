@@ -8,7 +8,7 @@
 import type { ScenarioSummary } from '../scenarios/types';
 
 /**
- * Sub-header per AC-3: `<unit-type>-session · <peer> · <step-count> steps`.
+ * Sub-header per AC-3: `<service-type>-session · <peer> · <step-count> steps`.
  *
  * Falls back to the raw peer id when the peer query hasn't loaded yet,
  * and to "no peer" when the scenario has none assigned. Step count is
@@ -18,7 +18,8 @@ export function buildSubHeader(
   scenario: ScenarioSummary,
   peerNameById: Map<string, string>,
 ): string {
-  const session = `${scenario.unitType.toLowerCase()}-session`;
+  const label = (scenario.serviceType ?? 'unknown').toLowerCase();
+  const session = `${label}-session`;
   const peer = scenario.peerId
     ? (peerNameById.get(scenario.peerId) ?? scenario.peerId)
     : 'no peer';

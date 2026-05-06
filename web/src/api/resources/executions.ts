@@ -14,7 +14,10 @@ import {
 import ApiService from '../ApiService';
 import type { components } from '../schema';
 
-export type ExecutionSummary = components['schemas']['ExecutionSummary'];
+export type ExecutionSummary = components['schemas']['ExecutionSummary'] & {
+  repeats?: number;
+  completedIterations?: number;
+};
 export type ExecutionPage = components['schemas']['ExecutionPage'];
 export type ExecutionMode = components['schemas']['ExecutionMode'];
 export type ExecutionState = components['schemas']['ExecutionState'];
@@ -137,11 +140,21 @@ export function useExecutions(params: ListExecutionsParams = {}) {
   });
 }
 
+const TERMINAL_STATES = new Set(['success', 'failure', 'aborted', 'error']);
+
 export function useExecution(id: string) {
   return useQuery({
     queryKey: executionKeys.detail(id),
     queryFn: ({ signal }) => getExecution(id, signal),
     enabled: Boolean(id),
+    // Poll every 2 s while the execution is live so the history pane
+    // receives new step rows as the engine progresses. Stops automatically
+    // once the execution reaches a terminal state.
+    refetchInterval: (query) => {
+      const data = query.state.data as Execution | undefined;
+      if (!data || TERMINAL_STATES.has(data.state)) return false;
+      return 2000;
+    },
   });
 }
 

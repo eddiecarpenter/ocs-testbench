@@ -1,31 +1,23 @@
 /**
- * Right pane — last-response panel.
+ * Right pane (viewer mode) — CCA response for a completed step.
  *
- * Reads the active step record from the store (`historicalIndex`
- * first, else the most recently completed step) and renders:
- *   - a result-code chip (palette per resultCodeColor)
- *   - RTT (durationMs) and approximate request / response sizes
+ * Renders:
+ *   - result-code chip (palette per resultCodeColor) + RTT + sizes
  *   - assertion list with ✓ / ✗ markers
- *   - extractions list — `(not set)` for failed extractions
- *   - "View raw AVP tree" button → modal with pretty-printed JSON
- *
- * The pane is purely a renderer — it never evaluates assertion rules,
- * just shows whatever the (mocked or real) CCA payload reports.
+ *   - extractions list
+ *   - raw CCA AVP tree inline (wire-format text or pretty-printed JSON)
  */
 import {
   Badge,
-  Button,
   Code,
   Divider,
   Group,
-  Modal,
   ScrollArea,
   Stack,
   Text,
   Title,
 } from '@mantine/core';
-import { IconCheck, IconCode, IconX } from '@tabler/icons-react';
-import { useState } from 'react';
+import { IconCheck, IconX } from '@tabler/icons-react';
 
 import type { StepRecord } from '../../api/resources/executions';
 
@@ -46,16 +38,16 @@ export function LastResponsePane() {
   const cursor = useExecutionStore((s) => s.cursor);
   const historicalIndex = useExecutionStore((s) => s.historicalIndex);
   const viewHistorical = useExecutionStore((s) => s.viewHistorical);
+  const runState = useExecutionStore((s) => s.state);
 
   const record = pickDisplayedStep(steps, cursor, historicalIndex);
   const isHistorical = historicalIndex !== null;
-
-  const [rawOpen, setRawOpen] = useState(false);
+  const showBackToLive = isHistorical && runState === 'paused';
 
   if (!record) {
     return (
-      <Stack gap="xs" data-testid="debugger-last-response-pane">
-        <Title order={5}>Last response</Title>
+      <Stack gap="xs" h="100%" data-testid="debugger-last-response-pane">
+        <Title order={5}>Response</Title>
         <Text size="xs" c="dimmed">
           No responses yet.
         </Text>
@@ -68,24 +60,25 @@ export function LastResponsePane() {
   const extractions = extractExtractions(response);
 
   return (
-    <Stack gap="xs" data-testid="debugger-last-response-pane">
+    <Stack gap="xs" h="100%" data-testid="debugger-last-response-pane">
       <Group justify="space-between" align="flex-start" wrap="nowrap">
         <Stack gap={2}>
-          <Title order={5}>Last response</Title>
+          <Title order={5}>Response</Title>
           <Text size="xs" c="dimmed">
             Step {record.n}: {record.label ?? record.kind}
             {isHistorical ? ' (historical)' : ''}
           </Text>
         </Stack>
-        {isHistorical && (
-          <Button
-            variant="subtle"
+        {showBackToLive && (
+          <Text
             size="xs"
+            c="blue"
+            style={{ cursor: 'pointer', flexShrink: 0 }}
             onClick={() => viewHistorical(null)}
             data-testid="debugger-historical-back"
           >
             ← Back to live
-          </Button>
+          </Text>
         )}
       </Group>
 
@@ -121,31 +114,15 @@ export function LastResponsePane() {
       <Divider label="Extracted variables" labelPosition="left" />
       <ExtractionsList extractions={extractions} />
 
-      <Group justify="flex-end">
-        <Button
-          variant="default"
-          size="xs"
-          leftSection={<IconCode size={14} />}
-          onClick={() => setRawOpen(true)}
-          data-testid="debugger-view-raw"
+      <Divider label="CCA AVP tree" labelPosition="left" />
+      <ScrollArea style={{ flex: 1 }} data-testid="debugger-cca-avp-tree">
+        <Code
+          block
+          style={{ fontFamily: 'monospace', whiteSpace: 'pre', fontSize: 11 }}
         >
-          View raw AVP tree
-        </Button>
-      </Group>
-
-      <Modal
-        opened={rawOpen}
-        onClose={() => setRawOpen(false)}
-        title={`CCA — Step ${record.n}`}
-        size="xl"
-        data-testid="debugger-raw-modal"
-      >
-        <ScrollArea.Autosize mah={520}>
-          <Code block style={{ fontFamily: 'monospace', whiteSpace: 'pre' }}>
-            {prettyJson(response)}
-          </Code>
-        </ScrollArea.Autosize>
-      </Modal>
+          {record.responseText ?? prettyJson(response)}
+        </Code>
+      </ScrollArea>
     </Stack>
   );
 }
@@ -231,7 +208,7 @@ function ExtractionsList({ extractions }: ExtractionsListProps) {
                 (not set)
               </Text>
             ) : (
-              <Code>{stringify(value)}</Code>
+              <Code style={{ fontSize: 11 }}>{stringify(value)}</Code>
             )}
           </Group>
         );

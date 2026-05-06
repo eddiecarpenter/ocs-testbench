@@ -60,7 +60,7 @@ export function BuilderTabs() {
             Frame
           </Tabs.Tab>
           <Tabs.Tab value="services" data-testid="builder-tab-services">
-            Services
+            Charging
           </Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="steps" pt="md">

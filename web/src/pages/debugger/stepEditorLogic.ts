@@ -110,34 +110,11 @@ export function buildStepHeader(
 ): StepHeader | null {
   const step = scenario.steps[stepIndex];
   if (!step) return null;
-  switch (step.kind) {
-    case 'request':
-      return {
-        title: requestTitle(step.requestType),
-        kindLabel: 'Request',
-        kindColor: 'blue',
-      };
-    case 'consume':
-      return {
-        title: 'Consume loop',
-        kindLabel: 'Consume',
-        kindColor: 'grape',
-      };
-    case 'wait':
-      return {
-        title: `Wait ${step.durationMs} ms`,
-        kindLabel: 'Wait',
-        kindColor: 'gray',
-      };
-    case 'pause':
-      return {
-        title: step.label ?? 'Pause',
-        kindLabel: 'Pause',
-        kindColor: 'yellow',
-      };
-    default:
-      return null;
-  }
+  return {
+    title: step.label ?? requestTitle(step.requestType),
+    kindLabel: 'Request',
+    kindColor: 'blue',
+  };
 }
 
 function requestTitle(rt: 'INITIAL' | 'UPDATE' | 'TERMINATE' | 'EVENT'): string {

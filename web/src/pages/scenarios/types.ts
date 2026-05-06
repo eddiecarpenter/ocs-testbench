@@ -16,6 +16,8 @@ export type ScenarioDuplicateInput =
 export type ScenarioOrigin = components['schemas']['ScenarioOrigin'];
 
 export type UnitType = components['schemas']['UnitType'];
+export type ServiceType = components['schemas']['ServiceType'];
+export type ServiceProfile = components['schemas']['ServiceProfile'];
 export type SessionMode = components['schemas']['SessionMode'];
 export type ServiceModel = components['schemas']['ServiceModel'];
 export type RequestType = components['schemas']['RequestType'];
@@ -34,9 +36,6 @@ export type GeneratorRefresh = components['schemas']['GeneratorRefresh'];
 
 export type ScenarioStep = components['schemas']['ScenarioStep'];
 export type RequestStep = components['schemas']['RequestStep'];
-export type ConsumeStep = components['schemas']['ConsumeStep'];
-export type WaitStep = components['schemas']['WaitStep'];
-export type PauseStep = components['schemas']['PauseStep'];
 export type ServiceSelection = components['schemas']['ServiceSelection'];
 export type VarValue = components['schemas']['VarValue'];
 

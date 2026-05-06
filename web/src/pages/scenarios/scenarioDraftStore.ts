@@ -14,12 +14,21 @@
 import { create } from 'zustand';
 
 import { createHistory } from './history';
+import {
+  defaultSessionMode,
+  defaultStepsForMode,
+  defaultVariablesForServiceType,
+  mergeVariables,
+  replaceServiceInfoNode,
+} from './defaults';
 import { renameUsages } from './selectors';
 import type {
   AvpNode,
   Scenario,
   ScenarioStep,
   Service,
+  ServiceProfile,
+  ServiceType,
   Variable,
 } from './types';
 
@@ -48,7 +57,8 @@ export interface ScenarioDraftState {
 
   setName: (name: string) => void;
   setDescription: (description: string) => void;
-  setUnitType: (unitType: Scenario['unitType']) => void;
+  setServiceType: (serviceType: Scenario['serviceType']) => void;
+  setServiceProfile: (serviceProfile: Scenario['serviceProfile']) => void;
   setSessionMode: (sessionMode: Scenario['sessionMode']) => void;
   setServiceModel: (serviceModel: Scenario['serviceModel']) => void;
   setSubscriberId: (subscriberId: string | undefined) => void;
@@ -115,7 +125,16 @@ export const useScenarioDraftStore = create<ScenarioDraftState>((set, get) => ({
 
   load(scenario) {
     const history = createHistory();
-    set(() => ({ draft: structuredClone(scenario), dirty: false, _history: history }));
+    const cloned = structuredClone(scenario);
+    // Back-fill Service-Information if the stored avpTree pre-dates this change.
+    if (!cloned.avpTree.some((n) => n.name === 'Service-Information')) {
+      cloned.avpTree = replaceServiceInfoNode(
+        cloned.avpTree,
+        cloned.serviceType,
+        cloned.serviceProfile as ServiceProfile | undefined,
+      );
+    }
+    set(() => ({ draft: cloned, dirty: false, _history: history }));
   },
   reset() {
     set(() => ({ draft: null, dirty: false, _history: createHistory() }));
@@ -128,9 +147,26 @@ export const useScenarioDraftStore = create<ScenarioDraftState>((set, get) => ({
   setName: (name) => commit(set, get, (d) => ({ ...d, name })),
   setDescription: (description) =>
     commit(set, get, (d) => ({ ...d, description })),
-  setUnitType: (unitType) => commit(set, get, (d) => ({ ...d, unitType })),
+  setServiceType: (serviceType) =>
+    commit(set, get, (d) => ({
+      ...d,
+      serviceType,
+      sessionMode: defaultSessionMode(serviceType),
+      avpTree: replaceServiceInfoNode(d.avpTree, serviceType, d.serviceProfile as ServiceProfile | undefined),
+      variables: mergeVariables(d.variables, defaultVariablesForServiceType(serviceType as ServiceType)),
+    })),
+  setServiceProfile: (serviceProfile) =>
+    commit(set, get, (d) => ({
+      ...d,
+      serviceProfile,
+      avpTree: replaceServiceInfoNode(d.avpTree, d.serviceType, serviceProfile as ServiceProfile),
+    })),
   setSessionMode: (sessionMode) =>
-    commit(set, get, (d) => ({ ...d, sessionMode })),
+    commit(set, get, (d) => ({
+      ...d,
+      sessionMode,
+      steps: defaultStepsForMode(sessionMode as import('./types').SessionMode),
+    })),
   setServiceModel: (serviceModel) =>
     commit(set, get, (d) => ({ ...d, serviceModel })),
   setSubscriberId: (subscriberId) =>

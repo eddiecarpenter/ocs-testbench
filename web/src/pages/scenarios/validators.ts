@@ -7,6 +7,7 @@
  */
 import type {
   ServiceModel,
+  ServiceType,
   SessionMode,
   UnitType,
 } from './types';
@@ -17,29 +18,42 @@ export interface MatrixCell {
   hint?: string;
 }
 
+/** Derive the logical unit type (for the service-model matrix) from service type. */
+export function deriveUnitType(serviceType: ServiceType | undefined): UnitType {
+  switch (serviceType) {
+    case 'VOICE':
+    case 'USSD2_SESSION':
+      return 'TIME';
+    case 'DATA':
+      return 'VOLUME';
+    default:
+      return 'EVENT';
+  }
+}
+
 /**
- * `serviceModel × unitType` allowed combinations (architecture §4).
+ * `serviceModel × unitType` allowed combinations.
  *
- *                | OCTET | TIME  | UNITS |
- *   ------------ | ----- | ----- | ----- |
- *   root         | n/a   | OK    | OK    |
- *   single-mscc  | OK    | OK    | OK    |
- *   multi-mscc   | OK    | n/a   | n/a   |
+ *                | VOLUME | TIME  | EVENT |
+ *   ------------ | ------ | ----- | ----- |
+ *   root         | n/a    | OK    | OK    |
+ *   single-mscc  | OK     | OK    | OK    |
+ *   multi-mscc   | OK     | n/a   | n/a   |
  */
 export function matrix(
   unit: UnitType,
   model: ServiceModel,
 ): MatrixCell {
-  if (model === 'root' && unit === 'OCTET') {
+  if (model === 'root' && unit === 'VOLUME') {
     return {
       allowed: false,
-      hint: 'OCTET requires MSCC. Use Single or Multi MSCC.',
+      hint: 'VOLUME requires MSCC. Use Single or Multi MSCC.',
     };
   }
-  if (model === 'multi-mscc' && unit !== 'OCTET') {
+  if (model === 'multi-mscc' && unit !== 'VOLUME') {
     return {
       allowed: false,
-      hint: 'Multi-MSCC is only valid with OCTET unit type.',
+      hint: 'Multi-MSCC is only valid with VOLUME unit type.',
     };
   }
   return { allowed: true };
@@ -53,18 +67,19 @@ export interface ValidationIssue {
 
 /** Collect every UI-side validation issue into a flat list. */
 export function validateScenario(input: {
-  unitType: UnitType;
+  serviceType: ServiceType | undefined;
   serviceModel: ServiceModel;
   sessionMode: SessionMode;
   steps: { kind: string; requestType?: string }[];
 }): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
-  const cell = matrix(input.unitType, input.serviceModel);
+  const unitType = deriveUnitType(input.serviceType);
+  const cell = matrix(unitType, input.serviceModel);
   if (!cell.allowed) {
     issues.push({
       path: '/serviceModel',
-      message: cell.hint ?? 'serviceModel × unitType combination not allowed',
+      message: cell.hint ?? 'serviceModel × serviceType combination not allowed',
     });
   }
 

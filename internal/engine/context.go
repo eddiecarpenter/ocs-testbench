@@ -39,6 +39,10 @@ type SessionContext struct {
 	Mode ExecutionMode
 	// State tracks the lifecycle of this session.
 	State SessionState
+	// ServiceContextID is the Service-Context-Id AVP value sent in every
+	// CCR for this session. Set at session creation from the scenario
+	// definition; defaults to "32251@3gpp.org" when the scenario omits it.
+	ServiceContextID string
 	// Vars is the live substitution map carried across steps. It is
 	// pre-seeded with CC_REQUEST_NUMBER = 0 at creation and updated by
 	// extractions and derived-value evaluations during execution.

@@ -26,6 +26,7 @@ import {
   SegmentedControl,
   Select,
   Stack,
+  Switch,
   Text,
   UnstyledButton,
 } from '@mantine/core';
@@ -68,6 +69,8 @@ export interface StartRunInitialValues {
    * source so the form remounts with fresh defaults.
    */
   instance?: string;
+  /** Whether the "open viewer" toggle starts checked. Default true. */
+  openViewer?: boolean;
 }
 
 interface StartRunModalProps {
@@ -78,7 +81,7 @@ interface StartRunModalProps {
   /** Set while a launch is in flight. */
   isPending: boolean;
   onClose(): void;
-  onSubmit(input: StartExecutionInput): void;
+  onSubmit(input: StartExecutionInput, openViewer: boolean): void;
   fieldErrors?: Record<string, string>;
 }
 
@@ -123,7 +126,7 @@ interface StartRunFormProps {
   initial: StartRunInitialValues | undefined;
   isPending: boolean;
   onClose(): void;
-  onSubmit(input: StartExecutionInput): void;
+  onSubmit(input: StartExecutionInput, openViewer: boolean): void;
   fieldErrors?: Record<string, string>;
 }
 
@@ -150,11 +153,14 @@ function StartRunForm({
   const [concurrency, setConcurrency] = useState<number>(
     initial?.concurrency ?? 1,
   );
-  const [repeats, setRepeats] = useState<number>(initial?.repeats ?? 10);
+  const [repeats, setRepeats] = useState<number>(initial?.repeats ?? 1);
   const [overrideExpanded, setOverrideExpanded] = useState<boolean>(
     Boolean(
       initial?.overrideExpanded || initial?.peerId || initial?.subscriberId,
     ),
+  );
+  const [openViewer, setOpenViewer] = useState<boolean>(
+    initial?.openViewer !== false,
   );
 
   const peerOptions = useMemo(
@@ -183,6 +189,7 @@ function StartRunForm({
         concurrency,
         repeats,
       }),
+      openViewer,
     );
   };
 
@@ -321,6 +328,13 @@ function StartRunForm({
           </Stack>
         </Collapse>
       </Stack>
+
+      <Switch
+        label="Open viewer after starting"
+        checked={openViewer}
+        onChange={(e) => setOpenViewer(e.currentTarget.checked)}
+        data-testid="executions-start-run-open-viewer"
+      />
 
       <Group justify="flex-end" gap="sm">
         <Button

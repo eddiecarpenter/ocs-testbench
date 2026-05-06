@@ -1,28 +1,31 @@
 /**
  * Builder — Frame tab.
  *
- * Two-pane layout: a custom recursive AVP-tree view on the left
- * (engine-managed AVPs render dimmed and are not selectable for edit
- * — they remain visible to keep the §8 frame structure honest), and
- * a properties pane on the right scoped to the selected node.
+ * Two-pane layout: recursive AVP-tree on the left, properties on the right.
  *
- * Per-row Remove sits inline in the tree (no Remove button in the
- * properties pane); deleting a non-leaf prompts a confirmation
- * modal because it cascades into all descendants.
+ * Three tiers of AVP node:
+ *   engine-only  — injected at send time, NOT stored in avpTree, shown as
+ *                  informational rows above the tree (Session-Id).
+ *   locked leaf  — stored in avpTree, locked=true, no remove button, but
+ *                  valueRef IS editable (Origin-Host, Node-Functionality …).
+ *   locked group — stored in avpTree, locked=true, expand/collapse only;
+ *                  its children's values can still be edited.
+ *   user AVP     — fully editable + removable.
  *
- * Value reference on a leaf AVP is a Select of variable names
- * defined on the Variables tab — so the frame stays in lock-step
- * with the variable catalogue.
+ * Value reference on a leaf AVP is a free-text Autocomplete: the user may
+ * type a literal (e.g. "4", "32251@3gpp.org") or pick a variable name
+ * from the suggestion list.
  */
 import {
   ActionIcon,
+  Autocomplete,
   Badge,
   Button,
   Card,
+  Divider,
   Group,
   Modal,
   NumberInput,
-  Select,
   Stack,
   Text,
   TextInput,
@@ -49,13 +52,36 @@ import {
   addChildAt,
   type AvpPath,
   getNodeAt,
-  isManagedAvp,
+  isLockedAvp,
+  isLockedGroup,
   removeNodeAt,
   setNodeAt,
 } from './avpTree';
 
 function pathKey(path: AvpPath): string {
   return path.join('.');
+}
+
+/**
+ * Read-only informational row for AVPs that are 100% engine-managed and
+ * not stored in avpTree at all (e.g. Session-Id — always auto-generated).
+ */
+function EngineOnlyRow({ code, name, hint }: { code: number; name: string; hint: string }) {
+  return (
+    <Group
+      gap={6}
+      wrap="nowrap"
+      style={{ opacity: 0.55, padding: '4px 6px', cursor: 'not-allowed' }}
+    >
+      <IconCircleDot size={12} style={{ opacity: 0.4 }} />
+      <Badge variant="outline" size="xs">{code}</Badge>
+      <Text style={{ flex: 1 }} fw={400}>{name}</Text>
+      <Badge color="gray" variant="light" size="xs" leftSection={<IconLock size={10} />}>
+        engine
+      </Badge>
+      <Text size="xs" c="dimmed">{hint}</Text>
+    </Group>
+  );
 }
 
 /** Sum of node + all descendants — drives the delete-confirm copy. */
@@ -84,10 +110,14 @@ function AvpRow({
   onRequestRemove,
 }: AvpRowProps) {
   const key = pathKey(path);
-  const managed = isManagedAvp(node);
+  const locked = isLockedAvp(node);
+  const lockedGroup = isLockedGroup(node);
   const isGrouped = Array.isArray(node.children);
   const isOpen = expanded.has(key);
   const isSelected = selectedKey === key;
+
+  // Locked groups are expand/collapse only — not selectable for editing.
+  const selectable = !lockedGroup;
 
   return (
     <Stack gap={2} pl={path.length * 12}>
@@ -96,13 +126,16 @@ function AvpRow({
         wrap="nowrap"
         style={{
           backgroundColor: isSelected ? 'var(--mantine-color-blue-light)' : undefined,
-          opacity: managed ? 0.55 : 1,
           padding: '4px 6px',
           borderRadius: 4,
-          cursor: managed ? 'not-allowed' : 'pointer',
+          cursor: selectable ? 'pointer' : 'default',
         }}
         onClick={() => {
-          if (!managed) onSelect(path);
+          if (isGrouped) {
+            onToggle(key);
+          } else if (selectable) {
+            onSelect(path);
+          }
         }}
         data-testid={`avp-row-${key}`}
       >
@@ -128,25 +161,25 @@ function AvpRow({
         <Badge variant="outline" size="xs">
           {node.code}
         </Badge>
-        <Text style={{ flex: 1 }} fw={managed ? 400 : 500}>
+        <Text style={{ flex: 1 }} fw={500}>
           {node.name}
         </Text>
-        {managed && (
+        {locked && (
           <Badge
-            color="gray"
+            color="blue"
             variant="light"
             size="xs"
             leftSection={<IconLock size={10} />}
           >
-            engine-managed
+            engine
           </Badge>
         )}
         {!isGrouped && node.valueRef && (
           <Text size="xs" c="dimmed">
-            ← {`{{${node.valueRef}}}`}
+            ← {/^\d/.test(node.valueRef) ? node.valueRef : `{{${node.valueRef}}}`}
           </Text>
         )}
-        {!managed && (
+        {!locked && (
           <Tooltip label="Remove">
             <ActionIcon
               variant="subtle"
@@ -183,7 +216,6 @@ function AvpRow({
 interface PropertiesPaneProps {
   node: AvpNode;
   variableOptions: VariableOptionGroup[];
-  hasAnyVariable: boolean;
   onChange: (replacement: AvpNode) => void;
   onAddChild: () => void;
 }
@@ -191,23 +223,30 @@ interface PropertiesPaneProps {
 function PropertiesPane({
   node,
   variableOptions,
-  hasAnyVariable,
   onChange,
   onAddChild,
 }: PropertiesPaneProps) {
+  const locked = isLockedAvp(node);
   const isGrouped = Array.isArray(node.children);
+
+  // Flatten variable groups into a simple string list for Autocomplete.
+  const variableNames: string[] = variableOptions.flatMap((g) =>
+    g.items.map((item) => item.value),
+  );
 
   return (
     <Stack gap="md">
       <TextInput
         label="Name"
         value={node.name}
+        disabled={locked}
         onChange={(e) => onChange({ ...node, name: e.currentTarget.value })}
       />
       <NumberInput
         label="AVP code"
         min={0}
         value={node.code}
+        disabled={locked}
         onChange={(v) =>
           onChange({ ...node, code: typeof v === 'number' ? v : 0 })
         }
@@ -216,6 +255,7 @@ function PropertiesPane({
         label="Vendor-Id (optional)"
         min={0}
         value={node.vendorId ?? ''}
+        disabled={locked}
         onChange={(v) =>
           onChange({
             ...node,
@@ -224,23 +264,22 @@ function PropertiesPane({
         }
       />
       {!isGrouped && (
-        <Select
+        <Autocomplete
           label="Value reference"
-          description="Variable bound to this AVP — wraps to {{NAME}} in the wire frame. Includes engine-provided System variables and any User variables you define."
-          placeholder={
-            !hasAnyVariable ? 'No variables available' : '{{ ... }}'
+          description={
+            locked
+              ? 'Type a literal value (e.g. "4", "32251@3gpp.org") or a variable name from the list below.'
+              : 'Type a literal value or select a variable name — wraps to {{NAME}} in the wire frame.'
           }
-          data={variableOptions}
-          value={node.valueRef ?? null}
-          onChange={(v) =>
-            onChange({ ...node, valueRef: v ?? '' })
-          }
+          placeholder='e.g. "4" or MSISDN'
+          data={variableNames}
+          value={node.valueRef ?? ''}
+          onChange={(v) => onChange({ ...node, valueRef: v })}
           clearable
-          disabled={!hasAnyVariable}
           data-testid="avp-value-ref"
         />
       )}
-      {isGrouped && (
+      {isGrouped && !locked && (
         <Stack gap="xs">
           <Group justify="space-between">
             <Text size="sm" fw={500}>
@@ -271,6 +310,12 @@ function PropertiesPane({
           )}
         </Stack>
       )}
+      {isGrouped && locked && (
+        <Text size="sm" c="dimmed">
+          This is a mandatory grouped AVP — its structure is fixed. Select a
+          child leaf to change its value reference.
+        </Text>
+      )}
     </Stack>
   );
 }
@@ -285,7 +330,7 @@ export function FrameTab() {
 
   if (!draft) return null;
   const tree = draft.avpTree;
-  const { options: variableOptions, hasAny: hasAnyVariable } =
+  const { options: variableOptions } =
     buildVariableOptions(draft.variables);
 
   const selectedKey = selected ? pathKey(selected) : '';
@@ -341,6 +386,9 @@ export function FrameTab() {
   const pendingNode = pendingRemove ? getNodeAt(tree, pendingRemove) : null;
   const pendingDescendantCount = pendingNode ? countNodes(pendingNode) - 1 : 0;
 
+  // A locked-group node is not selectable; a locked-leaf IS selectable.
+  const canShowProperties = selectedNode !== null && !isLockedGroup(selectedNode);
+
   return (
     <>
       <Group align="flex-start" gap="lg" wrap="nowrap">
@@ -358,6 +406,9 @@ export function FrameTab() {
               </ActionIcon>
             </Group>
             <Stack gap={2}>
+              <EngineOnlyRow code={263} name="Session-Id"          hint="Auto-generated per RFC 6733 §8.8" />
+              <EngineOnlyRow code={258} name="Auth-Application-Id" hint="4 (Credit-Control / Gy)" />
+              <Divider my={4} />
               {tree.map((node, i) => (
                 <AvpRow
                   key={i}
@@ -380,18 +431,18 @@ export function FrameTab() {
         </Card>
 
         <Card withBorder padding="md" style={{ flex: 1, minWidth: 320 }}>
-          {selectedNode && !isManagedAvp(selectedNode) ? (
+          {canShowProperties ? (
             <PropertiesPane
-              node={selectedNode}
+              node={selectedNode!}
               variableOptions={variableOptions}
-              hasAnyVariable={hasAnyVariable}
               onChange={handleChange}
               onAddChild={handleAddChild}
             />
           ) : (
             <Text c="dimmed">
-              Select a non-managed AVP to edit its properties. Engine-managed
-              AVPs are read-only because the runtime owns their value.
+              {selectedNode && isLockedGroup(selectedNode)
+                ? 'This is a mandatory grouped AVP. Select a child leaf AVP to edit its value reference.'
+                : 'Select an AVP to edit its properties.'}
             </Text>
           )}
         </Card>

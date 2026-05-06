@@ -227,10 +227,76 @@ export function listSystemVariables(): SystemVariable[] {
       description: 'Destination-realm from the bound peer.',
     },
     {
-      name: 'SERVICE_CONTEXT',
+      name: 'SERVICE_CONTEXT_ID',
       kind: 'bound',
       description:
-        'Service-Context-Id (RFC 4006 §5.1.1.4) — bound from the application config (e.g. `gy.ocs.test@3gpp.org` on Gy).',
+        'Service-Context-Id (RFC 4006 §5.1.1.4) — defaults to 32251@3gpp.org.',
+    },
+    {
+      name: 'AUTH_APP_ID',
+      kind: 'bound',
+      description: 'Auth-Application-Id — always 4 for Diameter Credit-Control (Gy).',
+    },
+    {
+      name: 'SUB_ID_TYPE',
+      kind: 'generator',
+      description: 'Subscription-Id-Type — 0 = END_USER_E164 (MSISDN).',
+    },
+    {
+      name: 'MSISDN',
+      kind: 'bound',
+      description: 'Subscriber MSISDN from the bound subscriber.',
+    },
+    {
+      name: 'CALLING_PARTY_ADDRESS',
+      kind: 'bound',
+      description: 'Calling-party address — auto-set from subscriber MSISDN.',
+    },
+
+    // — Accumulation variables — updated by the engine after each send —
+
+    {
+      name: 'TOTAL_USU',
+      kind: 'generator',
+      description: 'Cumulative Used-Service-Unit total for the session — sum of USU_TOTAL across all UPDATE and TERMINATE steps sent so far.',
+    },
+
+    // — CCA auto-variables — written by the engine after each send —
+
+    {
+      name: 'RESULT_CODE',
+      kind: 'generator',
+      description: 'Top-level Result-Code from the last CCA (e.g. 2001 = SUCCESS, 4012 = QUOTA_EXHAUSTED).',
+    },
+    {
+      name: 'FUI_ACTION',
+      kind: 'generator',
+      description: 'Root-level Final-Unit-Action from the last CCA (-1 = absent, 0 = TERMINATE).',
+    },
+    {
+      name: 'RGn_GRANTED',
+      kind: 'generator',
+      description: 'Granted-Service-Unit (time, seconds) for rating group n — e.g. RG1_GRANTED.',
+    },
+    {
+      name: 'RGn_GRANTED_OCTETS',
+      kind: 'generator',
+      description: 'Granted-Service-Unit (total octets) for rating group n — e.g. RG1_GRANTED_OCTETS.',
+    },
+    {
+      name: 'RGn_VALIDITY',
+      kind: 'generator',
+      description: 'Validity-Time (seconds) granted for rating group n — e.g. RG1_VALIDITY.',
+    },
+    {
+      name: 'RGn_RESULT_CODE',
+      kind: 'generator',
+      description: 'Per-MSCC Result-Code for rating group n — e.g. RG1_RESULT_CODE (0 = absent).',
+    },
+    {
+      name: 'RGn_FUI_ACTION',
+      kind: 'generator',
+      description: 'Per-MSCC Final-Unit-Action for rating group n — e.g. RG1_FUI_ACTION (-1 = absent, 0 = TERMINATE).',
     },
   ];
 }

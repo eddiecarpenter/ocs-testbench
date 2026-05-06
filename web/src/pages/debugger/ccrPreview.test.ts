@@ -50,13 +50,14 @@ const literal: Variable['source'] = {
 function buildScenario(opts: {
   serviceModel: Scenario['serviceModel'];
   services: Service[];
-  unitType?: Scenario['unitType'];
+  serviceType?: Scenario['serviceType'];
 }): Scenario {
   return {
     id: 'scn-test',
     name: 'Test scenario',
     description: 'Test',
-    unitType: opts.unitType ?? 'OCTET',
+    serviceType: opts.serviceType ?? 'DATA',
+    serviceProfile: '3GPP',
     sessionMode: 'session',
     serviceModel: opts.serviceModel,
     origin: 'user',
@@ -131,7 +132,7 @@ describe('resolveCcrPreview — root scenarios', () => {
     const scn = buildScenario({
       serviceModel: 'root',
       services: [ROOT_SERVICE],
-      unitType: 'TIME',
+      serviceType: 'VOICE',
     });
     const tree = resolveCcrPreview(scn, 0, FULL_CONTEXT, new Set());
     const originHost = tree.find((n) => n.name === 'Origin-Host');
@@ -148,7 +149,7 @@ describe('resolveCcrPreview — root scenarios', () => {
     const scn = buildScenario({
       serviceModel: 'root',
       services: [ROOT_SERVICE],
-      unitType: 'TIME',
+      serviceType: 'VOICE',
     });
     const ctx: ContextVars = { MSISDN: '27821234567' };
     const tree = resolveCcrPreview(scn, 0, ctx, new Set());
@@ -165,7 +166,7 @@ describe('resolveCcrPreview — root scenarios', () => {
     const scn = buildScenario({
       serviceModel: 'root',
       services: [ROOT_SERVICE],
-      unitType: 'TIME',
+      serviceType: 'VOICE',
     });
     const tree = resolveCcrPreview(scn, 0, FULL_CONTEXT, new Set());
     expect(

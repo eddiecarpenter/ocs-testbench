@@ -3,17 +3,32 @@
  * `ScenariosListPage` and exercised by unit tests so AC-1 / AC-2 /
  * AC-3 (grouping + search + peer filter) have explicit coverage.
  */
-import type { ScenarioSummary, UnitType } from './types';
+import type { ScenarioSummary, ServiceType } from './types';
 
-export const UNIT_GROUP_ORDER: UnitType[] = ['OCTET', 'TIME', 'UNITS'];
+export const SERVICE_TYPE_GROUP_ORDER: ServiceType[] = [
+  'VOICE', 'DATA', 'SMS', 'USSD1_EVENT', 'USSD1_SESSION', 'USSD2_SESSION',
+];
 
-export function groupByUnit(rows: ScenarioSummary[]): Record<UnitType, ScenarioSummary[]> {
-  const out: Record<UnitType, ScenarioSummary[]> = {
-    OCTET: [],
-    TIME: [],
-    UNITS: [],
-  };
-  for (const r of rows) out[r.unitType].push(r);
+export const SERVICE_TYPE_LABELS: Record<ServiceType, string> = {
+  VOICE: 'Voice',
+  DATA: 'Data',
+  SMS: 'SMS',
+  USSD1_EVENT: 'USSD1 Event',
+  USSD1_SESSION: 'USSD1 Session',
+  USSD2_SESSION: 'USSD2 Session',
+};
+
+const UNGROUPED = '__ungrouped__' as const;
+type GroupKey = ServiceType | typeof UNGROUPED;
+
+export function groupByServiceType(
+  rows: ScenarioSummary[],
+): Record<GroupKey, ScenarioSummary[]> {
+  const out = Object.fromEntries([
+    ...SERVICE_TYPE_GROUP_ORDER.map((t) => [t, [] as ScenarioSummary[]]),
+    [UNGROUPED, [] as ScenarioSummary[]],
+  ]) as Record<GroupKey, ScenarioSummary[]>;
+  for (const r of rows) out[r.serviceType ?? UNGROUPED].push(r);
   return out;
 }
 

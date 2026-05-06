@@ -212,7 +212,11 @@ func (s *concreteSender) Send(ctx context.Context, peerName string, req *CCR) (*
 			return nil, fmt.Errorf("messaging: peer %q dropped during request: %w",
 				peerName, ErrCorrelatorClosed)
 		}
-		return DecodeCCAMessage(resp)
+		cca, err := DecodeCCAMessage(resp)
+		if err == nil && cca != nil {
+			cca.SentMessage = msg
+		}
+		return cca, err
 	case <-ctx.Done():
 		correlator.deregister(e2eID)
 		return nil, ctx.Err()

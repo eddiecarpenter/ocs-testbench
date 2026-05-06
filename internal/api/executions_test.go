@@ -20,18 +20,19 @@ import (
 // for unit tests. All methods are configurable via function fields so
 // each test can inject the behaviour it needs.
 type fakeExecutionEngine struct {
-	startFn     func(ctx context.Context, scenarioID, mode string) (string, error)
+	startFn     func(ctx context.Context, scenarioID, mode string, repeats int) (api.StartInfo, error)
 	stopFn      func(ctx context.Context, sessionID string) error
 	stepFn      func(ctx context.Context, sessionID string, overrides map[string]any) (api.ExecutionStepResult, error)
-	statusFn    func(ctx context.Context, sessionID string) (api.ExecutionStatus, error)
+	skipFn      func(ctx context.Context, sessionID string) error
+	detailFn    func(ctx context.Context, sessionID string) (api.ExecutionDetailResponse, error)
 	subscribeFn func(ctx context.Context, sessionID string) (<-chan api.ExecutionEvent, error)
 }
 
-func (f *fakeExecutionEngine) Start(ctx context.Context, scenarioID, mode string) (string, error) {
+func (f *fakeExecutionEngine) Start(ctx context.Context, scenarioID, mode string, repeats int) (api.StartInfo, error) {
 	if f.startFn != nil {
-		return f.startFn(ctx, scenarioID, mode)
+		return f.startFn(ctx, scenarioID, mode, repeats)
 	}
-	return "session-001", nil
+	return api.StartInfo{SessionID: "session-001", ScenarioName: "test-scenario"}, nil
 }
 
 func (f *fakeExecutionEngine) Stop(ctx context.Context, sessionID string) error {
@@ -51,14 +52,25 @@ func (f *fakeExecutionEngine) Step(ctx context.Context, sessionID string, overri
 	}, nil
 }
 
-func (f *fakeExecutionEngine) Status(ctx context.Context, sessionID string) (api.ExecutionStatus, error) {
-	if f.statusFn != nil {
-		return f.statusFn(ctx, sessionID)
+func (f *fakeExecutionEngine) Skip(ctx context.Context, sessionID string) error {
+	if f.skipFn != nil {
+		return f.skipFn(ctx, sessionID)
 	}
-	return api.ExecutionStatus{
-		SessionID:   sessionID,
-		State:       "active",
+	return nil
+}
+
+func (f *fakeExecutionEngine) Detail(ctx context.Context, sessionID string) (api.ExecutionDetailResponse, error) {
+	if f.detailFn != nil {
+		return f.detailFn(ctx, sessionID)
+	}
+	return api.ExecutionDetailResponse{
+		ID:          sessionID,
+		Mode:        "interactive",
+		State:       "running",
 		CurrentStep: 0,
+		TotalSteps:  1,
+		Steps:       []api.StepRecordJSON{},
+		Context:     api.ExecutionContextJSON{System: map[string]any{}, User: map[string]any{}, Extracted: map[string]any{}},
 	}, nil
 }
 
@@ -69,6 +81,17 @@ func (f *fakeExecutionEngine) Subscribe(ctx context.Context, sessionID string) (
 	ch := make(chan api.ExecutionEvent)
 	close(ch)
 	return ch, nil
+}
+
+func (f *fakeExecutionEngine) List(_ context.Context) []api.ExecutionSummary {
+	return nil
+}
+
+func (f *fakeExecutionEngine) Interrupt(_ context.Context, _ string) error { return nil }
+func (f *fakeExecutionEngine) RunToEnd(_ context.Context, _ string) error  { return nil }
+
+func (f *fakeExecutionEngine) ResponseTimeSeries(_ context.Context, window string) (api.ResponseTimeSeries, error) {
+	return api.ResponseTimeSeries{Window: window, Points: []api.ResponseTimePoint{}}, nil
 }
 
 // execFixture wires a store, fake engine, and chi router for
@@ -102,7 +125,7 @@ func newExecFixture(t *testing.T) *execFixture {
 	require.NoError(t, err)
 
 	exec := &fakeExecutionEngine{}
-	r := api.Router(s, nil, exec)
+	r := api.Router(s, nil, exec, nil)
 	return &execFixture{
 		s:      s,
 		exec:   exec,
@@ -133,8 +156,12 @@ func TestStartExecution_ValidRequest_Returns202(t *testing.T) {
 
 	var resp map[string]any
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
-	sessionID, ok := resp["sessionId"].(string)
-	require.True(t, ok, "response must have sessionId string field")
+	items, ok := resp["items"].([]any)
+	require.True(t, ok && len(items) > 0, "response must have items array")
+	item, ok := items[0].(map[string]any)
+	require.True(t, ok, "items[0] must be an object")
+	sessionID, ok := item["id"].(string)
+	require.True(t, ok, "items[0].id must be a string")
 	assert.NotEmpty(t, sessionID)
 }
 
@@ -179,8 +206,8 @@ func TestStartExecution_InvalidMode_Returns400(t *testing.T) {
 func TestStartExecution_ScenarioNotFound_Returns404(t *testing.T) {
 	f := newExecFixture(t)
 
-	f.exec.startFn = func(_ context.Context, _, _ string) (string, error) {
-		return "", api.ErrScenarioNotFound
+	f.exec.startFn = func(_ context.Context, _, _ string, _ int) (api.StartInfo, error) {
+		return api.StartInfo{}, api.ErrScenarioNotFound
 	}
 
 	body, _ := json.Marshal(map[string]string{
@@ -318,16 +345,15 @@ func TestStepExecution_NotFound_Returns404(t *testing.T) {
 func TestGetExecution_Running_Returns200WithStatus(t *testing.T) {
 	f := newExecFixture(t)
 
-	f.exec.statusFn = func(_ context.Context, sessionID string) (api.ExecutionStatus, error) {
-		return api.ExecutionStatus{
-			SessionID:   sessionID,
-			State:       "active",
+	f.exec.detailFn = func(_ context.Context, sessionID string) (api.ExecutionDetailResponse, error) {
+		return api.ExecutionDetailResponse{
+			ID:          sessionID,
+			Mode:        "interactive",
+			State:       "running",
 			CurrentStep: 3,
-			Metrics: api.ExecutionMetrics{
-				TotalRequests: 3,
-				SuccessCount:  3,
-				AvgRTTMs:      42.5,
-			},
+			TotalSteps:  5,
+			Steps:       []api.StepRecordJSON{},
+			Context:     api.ExecutionContextJSON{System: map[string]any{}, User: map[string]any{}, Extracted: map[string]any{}},
 		}, nil
 	}
 
@@ -339,13 +365,10 @@ func TestGetExecution_Running_Returns200WithStatus(t *testing.T) {
 	require.Equal(t, http.StatusOK, rr.Code)
 	var resp map[string]any
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
-	assert.Equal(t, "session-001", resp["sessionId"])
-	assert.Equal(t, "active", resp["state"])
+	assert.Equal(t, "session-001", resp["id"])
+	assert.Equal(t, "running", resp["state"])
 	assert.Equal(t, float64(3), resp["currentStep"])
-	metrics, ok := resp["metrics"].(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, float64(3), metrics["totalRequests"])
-	assert.Equal(t, float64(42.5), metrics["avgRttMs"])
+	assert.Equal(t, float64(5), resp["totalSteps"])
 }
 
 // TestGetExecution_NotFound_Returns404 verifies that querying an
@@ -353,8 +376,8 @@ func TestGetExecution_Running_Returns200WithStatus(t *testing.T) {
 func TestGetExecution_NotFound_Returns404(t *testing.T) {
 	f := newExecFixture(t)
 
-	f.exec.statusFn = func(_ context.Context, _ string) (api.ExecutionStatus, error) {
-		return api.ExecutionStatus{}, api.ErrSessionNotFound
+	f.exec.detailFn = func(_ context.Context, _ string) (api.ExecutionDetailResponse, error) {
+		return api.ExecutionDetailResponse{}, api.ErrSessionNotFound
 	}
 
 	req := httptest.NewRequest(http.MethodGet,
@@ -371,7 +394,7 @@ func TestGetExecution_NotFound_Returns404(t *testing.T) {
 // execution endpoints return 503 when no engine is wired.
 func TestExecutionEndpoints_NilEngine_Returns503(t *testing.T) {
 	s := store.NewTestStore()
-	r := api.Router(s, nil, nil)
+	r := api.Router(s, nil, nil, nil)
 
 	paths := []struct {
 		method string

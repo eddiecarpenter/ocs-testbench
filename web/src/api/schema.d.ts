@@ -256,8 +256,7 @@ export interface paths {
         /**
          * List scenarios (system starters + user scenarios)
          * @description Returns both system starters (`origin: "system"`, immutable) and
-         *     user scenarios (`origin: "user"`). UI groups by `unitType` in the
-         *     list view (OCTET / TIME / UNITS). Client-side filtering expected;
+         *     user scenarios (`origin: "user"`). Client-side filtering expected;
          *     no server-side pagination.
          */
         get: operations["listScenarios"];
@@ -382,10 +381,11 @@ export interface paths {
         };
         /**
          * Get a single execution with its full step-by-step detail
-         * @description Returns the full execution detail including every completed step
-         *     and a live snapshot of the variables map. For running executions
-         *     this is a point-in-time snapshot; subsequent state is delivered
-         *     via the SSE `execution.progress` event which carries the same shape.
+         * @description Returns the current status of an execution session, including
+         *     lifecycle state, current step index, and aggregated timing
+         *     metrics. For running executions this is a point-in-time snapshot;
+         *     real-time updates are delivered via the SSE
+         *     `GET /events/executions/{id}` endpoint.
          */
         get: operations["getExecution"];
         put?: never;
@@ -411,9 +411,10 @@ export interface paths {
         /**
          * Request a pause at the next safe point
          * @description Requests the engine to pause the execution at the next safe point
-         *     (between steps, or between consume-loop rounds). Returns the
-         *     current execution; the transition to `paused` is delivered via
-         *     the SSE `execution.paused` event when it actually happens.
+         *     (between steps). Returns the current execution; the transition to
+         *     `paused` is delivered via the SSE `execution.paused` event when
+         *     it actually happens. For continuous-mode executions prefer
+         *     `/interrupt`, which pauses after the current iteration completes.
          */
         post: operations["pauseExecution"];
         delete?: never;
@@ -461,9 +462,37 @@ export interface paths {
         /**
          * Advance exactly one step, then pause again
          * @description Only valid from `paused` state. Executes exactly one scenario step
-         *     and returns to `paused`. Consume steps advance one round per call.
+         *     and returns to `paused`. Returns the step result including result
+         *     code and assertion outcomes.
          */
         post: operations["stepExecution"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop a running execution after the current step
+         * @description Requests the engine to stop the execution cleanly. The execution
+         *     finishes its current step and then transitions to `completed` or
+         *     `terminated`. Returns immediately — the actual stop happens
+         *     asynchronously. This is the clean-stop variant; use `/abort`
+         *     for immediate forceful termination.
+         */
+        post: operations["stopExecution"];
         delete?: never;
         options?: never;
         head?: never;
@@ -489,6 +518,56 @@ export interface paths {
          *     in `sessionMode: session` and has an active session.
          */
         post: operations["abortExecution"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{id}/interrupt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Interrupt a continuous execution after the current send
+         * @description Signals the engine to pause after the current iteration completes.
+         *     Only valid for continuous-mode executions in `active` state.
+         *     The execution transitions to `paused`; use `/run-to-end` to resume.
+         */
+        post: operations["interruptExecution"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{id}/run-to-end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume an interrupted execution to completion
+         * @description Resumes a continuous execution that was interrupted via `/interrupt`,
+         *     running the remaining steps to completion. Also triggers the next
+         *     step for interactive-mode executions in `paused` state.
+         */
+        post: operations["runToEnd"];
         delete?: never;
         options?: never;
         head?: never;
@@ -613,6 +692,30 @@ export interface paths {
         get: operations["subscribeEvents"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/expressions/evaluate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Evaluate a ruleevaluator expression
+         * @description Evaluates a ruleevaluator expression against a supplied variable map
+         *     and returns the result. Both `{{VAR}}` and bare `VAR` notation are
+         *     accepted — the engine normalises them before evaluation. Useful for
+         *     validating `repeatUntil`, `assertions`, and `guards` expressions
+         *     before saving a scenario.
+         */
+        post: operations["evaluateExpression"];
         delete?: never;
         options?: never;
         head?: never;
@@ -777,11 +880,11 @@ export interface components {
             year?: number;
         };
         /**
-         * @description Service unit type. Drives which CC-* inner AVP the engine places
-         *     into RSU/USU/GSU.
+         * @description Service unit type. Derived from `serviceType` by the engine —
+         *     not set directly by the user.
          * @enum {string}
          */
-        UnitType: "OCTET" | "TIME" | "UNITS";
+        UnitType: "VOLUME" | "TIME" | "EVENT";
         /**
          * @description Session-based vs event-based charging model.
          *     - `session` — INITIAL → UPDATE(s) → TERMINATE lifecycle.
@@ -804,6 +907,41 @@ export interface components {
          * @enum {string}
          */
         ScenarioOrigin: "system" | "user";
+        /**
+         * @description Semantic service classification. Drives unit type, default session
+         *     mode, and the Service-Information child AVP injected by the engine.
+         *     Combined with `serviceProfile` for the AVP code mapping.
+         *
+         *     | Value         | Unit type | Session mode | Service-Info child              |
+         *     |---------------|-----------|--------------|----------------------------------|
+         *     | VOICE         | TIME      | session      | IMS-Information / IN_INFORMATION |
+         *     | DATA          | VOLUME    | session      | PS-Information (both profiles)   |
+         *     | SMS           | EVENT     | session      | SMS-Information / SMS_INFORMATION|
+         *     | USSD1_EVENT   | EVENT     | event        | USSD-Information / DCD_INFORMATION|
+         *     | USSD1_SESSION | EVENT     | session      | USSD-Information / DCD_INFORMATION|
+         *     | USSD2_SESSION | TIME      | session      | USSD-Information / DCD_INFORMATION|
+         * @enum {string}
+         */
+        ServiceType: "VOICE" | "DATA" | "SMS" | "USSD1_EVENT" | "USSD1_SESSION" | "USSD2_SESSION";
+        /**
+         * @description OCS vendor profile. Selects the AVP code mapping for the
+         *     `serviceType` → `Service-Information` child AVP.
+         *
+         *     **3GPP** (vendor-id 10415):
+         *     - VOICE         → IMS-Information (876)
+         *     - DATA          → PS-Information (874)
+         *     - SMS           → SMS-Information (2000)
+         *     - USSD1_EVENT, USSD1_SESSION, USSD2_SESSION → USSD-Information (885)
+         *
+         *     **HUAWEI** (Huawei-specific AVPs use vendor-id 2011):
+         *     - VOICE         → IN_INFORMATION (20300)
+         *     - DATA          → PS-Information (874, vendor 10415)
+         *     - SMS           → SMS_INFORMATION (20400)
+         *     - USSD1_EVENT, USSD1_SESSION, USSD2_SESSION → DCD_INFORMATION (2115)
+         * @default 3GPP
+         * @enum {string}
+         */
+        ServiceProfile: "3GPP" | "HUAWEI";
         /** @enum {string} */
         RequestType: "INITIAL" | "UPDATE" | "TERMINATE" | "EVENT";
         /**
@@ -918,6 +1056,14 @@ export interface components {
             /** @description Grouped AVP body. Present iff this is a grouped AVP. */
             children?: components["schemas"]["AvpNode"][];
             valueRef?: components["schemas"]["VarRef"];
+            /**
+             * @description When true the Builder prevents deletion of this node and marks
+             *     it with an [engine] badge. Leaf nodes with `locked: true` still
+             *     allow their `valueRef` to be edited; locked grouped nodes are
+             *     read-only (expand/collapse only). Used for system-mandatory AVPs
+             *     (Origin-Host, Session-Id, Service-Information sub-tree, etc.).
+             */
+            locked?: boolean;
         };
         /**
          * @description One service entry on a scenario. Controls how the engine
@@ -1002,11 +1148,10 @@ export interface components {
             action: "continue" | "stop" | "retry";
         };
         RequestStep: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
+            /** @constant */
             kind: "request";
+            /** @description Optional display label shown in the execution history pane. */
+            label?: string;
             requestType: components["schemas"]["RequestType"];
             /**
              * @description Required in `multi-mscc` scenarios. Omitted in `root` and
@@ -1030,58 +1175,53 @@ export interface components {
             /** @description Pre-send predicates. On failure the step is skipped. */
             guards?: string[];
             resultHandlers?: components["schemas"]["ResultHandler"][];
-        };
-        /**
-         * @description Only legal in `sessionMode: session`. Expands at run time into an
-         *     auto-generated sequence of CCR-UPDATEs, re-rolling random service
-         *     selections each round, until `terminateWhen` fires or every
-         *     selected service becomes `exhausted` / `error`.
-         */
-        ConsumeStep: {
             /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
+             * @description Fixed iteration count. Mutually exclusive with `repeatUntil`.
+             *     Only meaningful for UPDATE steps.
              */
-            kind: "consume";
-            services?: components["schemas"]["ServiceSelection"];
-            windowMs: number;
-            maxRounds?: number;
-            /** @description Expression; when true, exits the consume loop. */
-            terminateWhen?: string;
-            overrides?: {
-                [key: string]: components["schemas"]["VarValue"];
-            };
-            assertions?: string[];
-        };
-        WaitStep: {
+            repeat?: number;
             /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
+             * @description Expression evaluated after each iteration. Loop exits when the
+             *     expression returns true. Mutually exclusive with `repeat`.
+             *     Both `{{VAR}}` and bare `VAR` notation are accepted.
              */
-            kind: "wait";
-            durationMs: number;
-        };
-        /**
-         * @description Authored breakpoint. Suspends execution until resumed. Honoured
-         *     only in `interactive` execution mode; ignored in `continuous`.
-         */
-        PauseStep: {
+            repeatUntil?: string;
             /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
+             * @description Safety cap when `repeatUntil` is set. Loop exits after this many
+             *     iterations even if the condition hasn't fired. Defaults to 100.
              */
-            kind: "pause";
-            label?: string;
-            prompt?: string;
+            maxRepeat?: number;
+            /**
+             * @description Fixed inter-iteration delay in seconds. Applied between
+             *     consecutive iterations of a repeat loop.
+             */
+            delaySec?: number;
+            /**
+             * @description Random jitter added to `delaySec`. Actual delay is
+             *     `delaySec + rand(0, delayJitterSec)` seconds.
+             */
+            delayJitterSec?: number;
+            /**
+             * @description When true, the inter-iteration delay is derived from the
+             *     Validity-Time AVP in the last CCA response, scaled by
+             *     `validityScale`. Overrides `delaySec`/`delayJitterSec`.
+             */
+            useValidityTime?: boolean;
+            /**
+             * @description Multiplier applied to the Validity-Time value when
+             *     `useValidityTime` is true. Defaults to 1.0.
+             */
+            validityScale?: number;
         };
-        /** @description Discriminated union by `kind`. */
-        ScenarioStep: components["schemas"]["RequestStep"] | components["schemas"]["ConsumeStep"] | components["schemas"]["WaitStep"] | components["schemas"]["PauseStep"];
+        /** @description A scenario step. All steps are request steps. */
+        ScenarioStep: components["schemas"]["RequestStep"];
         /** @description Row-level shape for the scenarios list view. */
         ScenarioSummary: {
             id: string;
             name: string;
             description?: string;
-            unitType: components["schemas"]["UnitType"];
+            serviceType?: components["schemas"]["ServiceType"];
+            serviceProfile?: components["schemas"]["ServiceProfile"];
             sessionMode: components["schemas"]["SessionMode"];
             serviceModel: components["schemas"]["ServiceModel"];
             origin: components["schemas"]["ScenarioOrigin"];
@@ -1121,7 +1261,8 @@ export interface components {
         ScenarioInput: {
             name: string;
             description?: string;
-            unitType: components["schemas"]["UnitType"];
+            serviceType?: components["schemas"]["ServiceType"];
+            serviceProfile?: components["schemas"]["ServiceProfile"];
             sessionMode: components["schemas"]["SessionMode"];
             serviceModel: components["schemas"]["ServiceModel"];
             /** @default false */
@@ -1192,6 +1333,72 @@ export interface components {
              * @default 1
              */
             repeats: number;
+        };
+        /**
+         * @description Simplified response for `POST /executions`. Returns the session
+         *     ID that can be used with `/executions/{id}` and
+         *     `/events/executions/{id}`.
+         */
+        StartExecutionSimpleResult: {
+            /** @description Opaque identifier for the started execution session. */
+            sessionId: string;
+        };
+        /**
+         * @description Current status of an execution session returned by
+         *     `GET /executions/{id}`.
+         */
+        ExecutionStatusResult: {
+            sessionId: string;
+            /**
+             * @description Lifecycle state: `active`, `paused`, `completed`,
+             *     `terminated`, or `error`.
+             */
+            state: string;
+            /** @description 0-based index of the current or last-completed step. */
+            currentStep: number;
+            metrics: components["schemas"]["ExecutionMetricsResult"];
+        };
+        ExecutionMetricsResult: {
+            totalRequests: number;
+            successCount: number;
+            failureCount: number;
+            minRttMs: number;
+            maxRttMs: number;
+            avgRttMs: number;
+        };
+        /**
+         * @description Optional body for `POST /executions/{id}/step`. Supplies
+         *     per-step variable overrides that shadow the session context for
+         *     this one step only.
+         */
+        StepExecutionInput: {
+            /** @description Variable name → value map for this step only. */
+            overrides?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * @description Result of a single step execution returned by
+         *     `POST /executions/{id}/step`.
+         */
+        StepExecutionResult: {
+            /** @description 0-based index of the step that executed. */
+            stepIndex: number;
+            /** @description True when a guard prevented the CCR from being sent. */
+            skipped: boolean;
+            /**
+             * @description Top-level Result-Code from the CCA. Zero when skipped or
+             *     when a transport error occurred.
+             */
+            resultCode: number;
+            /** @description True when all assertions on the step evaluated to true. */
+            assertionsPassed: boolean;
+            assertions: {
+                expression: string;
+                passed: boolean;
+                /** @description Non-empty when passed is false. */
+                message?: string;
+            }[];
         };
         StartExecutionResult: {
             /**
@@ -1266,10 +1473,22 @@ export interface components {
             request?: {
                 [key: string]: unknown;
             };
-            /** @description Wire-level CCA snapshot. */
+            /**
+             * @description Pre-formatted Diameter wire text of the CCR (human-readable,
+             *     one AVP per line). Use this for display; use `request` for
+             *     structured access.
+             */
+            requestText?: string;
+            /** @description Wire-level CCA snapshot (structured). */
             response?: {
                 [key: string]: unknown;
             };
+            /**
+             * @description Pre-formatted Diameter wire text of the CCA (human-readable,
+             *     one AVP per line). Use this for display; use `response` for
+             *     structured access (result codes, extractions).
+             */
+            responseText?: string;
             assertionResults?: {
                 expression: string;
                 passed: boolean;
@@ -1874,8 +2093,8 @@ export interface operations {
             query?: {
                 /** @description Filter by origin */
                 origin?: components["schemas"]["ScenarioOrigin"];
-                /** @description Filter by unit type */
-                unitType?: components["schemas"]["UnitType"];
+                /** @description Filter by service type */
+                serviceType?: components["schemas"]["ServiceType"];
                 /** @description Filter by bound peer */
                 peerId?: string;
             };
@@ -2093,15 +2312,16 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Execution(s) started */
-            201: {
+            /** @description Execution started; returns the session identifier */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StartExecutionResult"];
+                    "application/json": components["schemas"]["StartExecutionSimpleResult"];
                 };
             };
+            404: components["responses"]["NotFound"];
             422: components["responses"]["ValidationProblem"];
             default: components["responses"]["Problem"];
         };
@@ -2118,13 +2338,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Execution detail */
+            /** @description Execution status */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Execution"];
+                    "application/json": components["schemas"]["ExecutionStatusResult"];
                 };
             };
             404: components["responses"]["NotFound"];
@@ -2193,19 +2413,46 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["StepExecutionInput"];
+            };
+        };
         responses: {
-            /** @description Step executed; back in paused state */
+            /** @description Step executed */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Execution"];
+                    "application/json": components["schemas"]["StepExecutionResult"];
                 };
             };
             404: components["responses"]["NotFound"];
             409: components["responses"]["IllegalStateProblem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    stopExecution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Stop accepted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
             default: components["responses"]["Problem"];
         };
     };
@@ -2229,6 +2476,54 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Execution"];
                 };
+            };
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["IllegalStateProblem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    interruptExecution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Interrupt accepted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["IllegalStateProblem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    runToEnd: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Resource identifier */
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resumed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             404: components["responses"]["NotFound"];
             409: components["responses"]["IllegalStateProblem"];
@@ -2371,6 +2666,44 @@ export interface operations {
                     "application/json": components["schemas"]["SseEventPayload"];
                 };
             };
+        };
+    };
+    evaluateExpression: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Expression to evaluate (supports `{{VAR}}` and bare `VAR`). */
+                    expression: string;
+                    /** @description Variable map to evaluate the expression against. */
+                    vars?: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Evaluation result (always 200; parse errors are in the `error` field) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description The evaluated result (boolean, number, or string). */
+                        result?: unknown;
+                        /** @description Present when evaluation failed; absent on success. */
+                        error?: string;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationProblem"];
+            default: components["responses"]["Problem"];
         };
     };
     getResponseTimeSeries: {

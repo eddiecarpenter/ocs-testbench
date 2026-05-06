@@ -47,11 +47,15 @@ export interface DebuggerEditState {
   previewTree: PreviewAvpNode[] | null;
   /** True after any edit since the last regenerate / cursor advance. */
   dirty: boolean;
+  /** User-supplied variable overrides sent with POST /step. */
+  overrides: Record<string, string>;
 }
 
 export interface ExecutionStoreState {
   /** Execution id this store is bound to (constant for the page lifetime). */
   executionId: string;
+  /** Execution mode — "interactive" or "continuous". */
+  mode: string;
   /** Authoritative state machine — server-driven via REST + SSE. */
   state: ExecutionState;
   /** 0-based cursor; equals `steps.length` when the run is terminal. */
@@ -72,6 +76,12 @@ export interface ExecutionStoreState {
   edit: DebuggerEditState;
   /** Last failure detail (rendered in the failure banner when terminal). */
   failureReason: string | null;
+  /**
+   * Active inter-iteration sleep countdown. Set by the `step.sleeping` SSE
+   * event; cleared when `step.sending` fires for the next iteration.
+   * `null` when no sleep is in progress.
+   */
+  sleepCountdown: { totalSec: number; endsAt: number } | null;
 
   /**
    * Effective start of the run from the page's perspective. Initialised
@@ -111,14 +121,21 @@ export interface ExecutionStoreState {
    * scenario service selection, so the store stays scenario-agnostic.
    */
   revertEdit: (defaultServices: Set<string>) => void;
+  /** Set a single variable override (sent with POST /step). */
+  setOverride: (name: string, value: string) => void;
+  /** Clear all variable overrides. */
+  clearOverrides: () => void;
   /** Click a completed step in the Progress pane. */
   viewHistorical: (stepIndex: number | null) => void;
+  /** Clear the sleep countdown (called when it reaches zero or on terminal events). */
+  clearSleepCountdown: () => void;
 
   // imperative actions — Task 7
   sendCcr: () => Promise<void>;
   skip: () => Promise<void>;
   pause: () => Promise<void>;
   resume: () => Promise<void>;
+  interrupt: () => Promise<void>;
   runToEnd: () => Promise<void>;
   stop: () => Promise<void>;
   restart: () => Promise<void>;
@@ -133,6 +150,7 @@ export interface ExecutionStoreState {
 export type SseEventPayload =
   | { type: 'execution.started'; data: Execution }
   | { type: 'step.sending'; data: { executionId: string; stepIndex: number } }
+  | { type: 'step.sleeping'; data: { executionId: string; stepIndex: number; delaySec: number } }
   | {
       type: 'step.responded';
       data: { executionId: string; step: StepRecord };
@@ -203,6 +221,7 @@ const EMPTY_EDIT: DebuggerEditState = {
   servicesEnabled: new Set<string>(),
   previewTree: null,
   dirty: false,
+  overrides: {},
 };
 
 export type ExecutionStore = StoreApi<ExecutionStoreState>;
@@ -215,6 +234,7 @@ export type ExecutionStore = StoreApi<ExecutionStoreState>;
 export function createExecutionStore(executionId: string): ExecutionStore {
   return createStore<ExecutionStoreState>((set, get) => ({
     executionId,
+    mode: 'continuous',
     state: 'pending',
     cursor: 0,
     totalSteps: 0,
@@ -223,6 +243,7 @@ export function createExecutionStore(executionId: string): ExecutionStore {
     historicalIndex: null,
     edit: EMPTY_EDIT,
     failureReason: null,
+    sleepCountdown: null,
     startedAt: null,
     finishedAt: null,
 
@@ -235,7 +256,23 @@ export function createExecutionStore(executionId: string): ExecutionStore {
       // value is null. Refetches re-running this method must not
       // clobber a session-local timestamp set by an earlier SSE
       // event.
+      // For terminal executions, auto-select the last completed step so
+      // the response pane shows something immediately rather than "No
+      // responses yet".
+      const TERMINAL_STATES = new Set(['success', 'failure', 'aborted', 'error', 'completed']);
+      let autoHistoricalIndex: number | null = null;
+      if (TERMINAL_STATES.has(snapshot.state)) {
+        for (let i = snapshot.steps.length - 1; i >= 0; i--) {
+          const s = snapshot.steps[i]?.state;
+          if (s === 'success' || s === 'failure' || s === 'error') {
+            autoHistoricalIndex = i;
+            break;
+          }
+        }
+      }
+
       set(() => ({
+        mode: snapshot.mode,
         state: nextState,
         cursor: snapshot.currentStep,
         totalSteps: snapshot.totalSteps,
@@ -246,10 +283,9 @@ export function createExecutionStore(executionId: string): ExecutionStore {
           servicesEnabled: new Set<string>(),
           previewTree: null,
           dirty: false,
+          overrides: {},
         },
-        // Following the live cursor on every snapshot is the right
-        // default — historical inspection is opt-in per click.
-        historicalIndex: null,
+        historicalIndex: autoHistoricalIndex,
       }));
     },
 
@@ -268,12 +304,23 @@ export function createExecutionStore(executionId: string): ExecutionStore {
           }));
           return;
         }
+        case 'step.sleeping': {
+          // Engine is sleeping between iterations — start the countdown.
+          set(() => ({
+            sleepCountdown: {
+              totalSec: event.data.delaySec,
+              endsAt: Date.now() + event.data.delaySec * 1000,
+            },
+          }));
+          return;
+        }
         case 'step.sending': {
-          // Update cursor to the active step and flip to running. The
-          // step's row turns into a spinner via the `running` state.
+          // Update cursor to the active step and flip to running. Clear
+          // any active sleep countdown (the delay has ended).
           set(() => ({
             state: reduceTransition(cur.state, 'running'),
             cursor: event.data.stepIndex,
+            sleepCountdown: null,
           }));
           return;
         }
@@ -315,6 +362,7 @@ export function createExecutionStore(executionId: string): ExecutionStore {
             totalSteps: event.data.totalSteps,
             steps: event.data.steps,
             context: event.data.context,
+            sleepCountdown: null,
             finishedAt: new Date().toISOString(),
           }));
           return;
@@ -380,12 +428,33 @@ export function createExecutionStore(executionId: string): ExecutionStore {
           servicesEnabled: new Set(defaultServices),
           previewTree: null,
           dirty: false,
+          overrides: {},
         },
       }));
     },
 
+    setOverride(name, value) {
+      const cur = get();
+      set(() => ({
+        edit: {
+          ...cur.edit,
+          overrides: { ...cur.edit.overrides, [name]: value },
+          dirty: true,
+        },
+      }));
+    },
+
+    clearOverrides() {
+      const cur = get();
+      set(() => ({ edit: { ...cur.edit, overrides: {}, dirty: false } }));
+    },
+
     viewHistorical(stepIndex) {
       set(() => ({ historicalIndex: stepIndex }));
+    },
+
+    clearSleepCountdown() {
+      set(() => ({ sleepCountdown: null }));
     },
 
     // Imperative actions. Each posts to the corresponding endpoint
@@ -396,26 +465,39 @@ export function createExecutionStore(executionId: string): ExecutionStore {
     // real — the same code path runs in both worlds.
     async sendCcr() {
       const cur = get();
-      // Optimistically flip to running; the next `step.responded`
-      // SSE event will append the step record and freeze us here
-      // again at `paused` (single-step semantics — see OpenAPI
-      // `stepExecution`).
       set(() => ({ state: reduceTransition(cur.state, 'running') }));
-      await ApiService.post<void>(
-        `/executions/${encodeURIComponent(cur.executionId)}/step`,
-      );
+      const body =
+        Object.keys(cur.edit.overrides).length > 0
+          ? { overrides: cur.edit.overrides }
+          : undefined;
+      try {
+        await ApiService.post<void>(
+          `/executions/${encodeURIComponent(cur.executionId)}/step`,
+          body,
+        );
+        const snapshot = await ApiService.get<Execution>(
+          `/executions/${encodeURIComponent(cur.executionId)}`,
+        );
+        get().ingestSnapshot(snapshot);
+      } catch (err) {
+        console.warn('[executionStore] sendCcr failed:', err);
+        // Revert optimistic running state.
+        set(() => ({ state: 'paused' }));
+      }
     },
     async skip() {
       const cur = get();
-      // No CCR is sent — advance the cursor locally and confirm
-      // server-side. The fakeApi `/skip` endpoint exists but is a
-      // no-op on the engine until that surface lands.
-      set(() => ({
-        cursor: Math.min(cur.cursor + 1, cur.totalSteps),
-      }));
-      await ApiService.post<void>(
-        `/executions/${encodeURIComponent(cur.executionId)}/skip`,
-      );
+      try {
+        await ApiService.post<void>(
+          `/executions/${encodeURIComponent(cur.executionId)}/skip`,
+        );
+        const snapshot = await ApiService.get<Execution>(
+          `/executions/${encodeURIComponent(cur.executionId)}`,
+        );
+        get().ingestSnapshot(snapshot);
+      } catch (err) {
+        console.warn('[executionStore] skip failed:', err);
+      }
     },
     async pause() {
       const cur = get();
@@ -431,23 +513,47 @@ export function createExecutionStore(executionId: string): ExecutionStore {
         `/executions/${encodeURIComponent(cur.executionId)}/resume`,
       );
     },
-    async runToEnd() {
-      // Run-to-end is the same wire call as resume — the engine just
-      // doesn't pause again until terminal. Naming differs in the UI
-      // because the user sees "I'm letting it run".
+    async interrupt() {
       const cur = get();
-      set(() => ({ state: reduceTransition(cur.state, 'running') }));
+      set(() => ({ state: reduceTransition(cur.state, 'paused') }));
       await ApiService.post<void>(
-        `/executions/${encodeURIComponent(cur.executionId)}/resume`,
+        `/executions/${encodeURIComponent(cur.executionId)}/interrupt`,
       );
+    },
+    async runToEnd() {
+      const cur = get();
+      if (cur.mode === 'continuous') {
+        // Continuous mode: server resumes from current position.
+        set(() => ({ state: reduceTransition(cur.state, 'running') }));
+        await ApiService.post<void>(
+          `/executions/${encodeURIComponent(cur.executionId)}/run-to-end`,
+        );
+        return;
+      }
+      // Interactive mode: step-by-step until terminal.
+      set(() => ({ state: reduceTransition(cur.state, 'running') }));
+      const terminalStates = new Set(['success', 'failure', 'aborted', 'error']);
+      let snapshot: Execution | undefined;
+      while (true) {
+        await ApiService.post<void>(
+          `/executions/${encodeURIComponent(get().executionId)}/step`,
+        );
+        snapshot = await ApiService.get<Execution>(
+          `/executions/${encodeURIComponent(get().executionId)}`,
+        );
+        set(() => ({
+          cursor: snapshot!.currentStep,
+          steps: snapshot!.steps,
+        }));
+        if (terminalStates.has(snapshot.state) || snapshot.state !== 'paused') break;
+      }
+      if (snapshot) get().ingestSnapshot(snapshot);
     },
     async stop() {
       const cur = get();
-      // Optimistically transition. Aborted is a terminal state so the
-      // store stops emitting elapsed ticks.
       set(() => ({ state: reduceTransition(cur.state, 'aborted') }));
       await ApiService.post<void>(
-        `/executions/${encodeURIComponent(cur.executionId)}/abort`,
+        `/executions/${encodeURIComponent(cur.executionId)}/stop`,
       );
     },
     async restart() {

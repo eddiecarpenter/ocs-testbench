@@ -13,6 +13,7 @@ import {
   ActionIcon,
   Badge,
   Card,
+  Checkbox,
   Group,
   Menu,
   NumberInput,
@@ -20,7 +21,7 @@ import {
   Stack,
   Table,
   Text,
-  Textarea,
+  TextInput,
   Title,
 } from '@mantine/core';
 import {
@@ -51,17 +52,16 @@ import { CSS } from '@dnd-kit/utilities';
 import { useMediaQuery } from '@mantine/hooks';
 import { useMemo, useState } from 'react';
 
+import { listSystemVariables } from '../selectors';
 import { useScenarioDraftStore } from '../scenarioDraftStore';
 import type {
-  ConsumeStep,
-  PauseStep,
   RequestStep,
   RequestType,
   ScenarioStep,
   SessionMode,
   VarValue,
-  WaitStep,
 } from '../types';
+import { ExpressionInput } from './ExpressionInput';
 import { isLegalRequestType, legalRequestTypes } from './stepsValidation';
 
 /** Default kind / requestType for a freshly-added step. */
@@ -111,11 +111,8 @@ function SortableRow({
     cursor: 'pointer',
   } as const;
 
-  const stepLabel = step.kind === 'request' ? step.requestType : step.kind.toUpperCase();
-  const overrideCount =
-    step.kind === 'request' || step.kind === 'consume'
-      ? Object.keys(step.overrides ?? {}).length
-      : 0;
+  const stepLabel = step.label ?? step.requestType;
+  const overrideCount = Object.keys(step.overrides ?? {}).length;
 
   return (
     <Table.Tr
@@ -252,6 +249,23 @@ interface StepEditorProps {
   onChange: (step: ScenarioStep) => void;
 }
 
+/** Build a zero-value test variable map from scenario + system variable names. */
+function buildTestVars(variableNames: string[]): Record<string, unknown> {
+  const vars: Record<string, unknown> = {};
+  // Seed system CCA auto-variables with representative values.
+  for (const sv of listSystemVariables()) {
+    vars[sv.name] = sv.name.includes('RESULT') ? 2001
+      : sv.name.includes('FUI') ? -1
+      : sv.name.includes('GRANTED') || sv.name.includes('VALIDITY') ? 0
+      : '';
+  }
+  // User-defined variables default to 0.
+  for (const name of variableNames) {
+    if (!(name in vars)) vars[name] = 0;
+  }
+  return vars;
+}
+
 function StepEditor({
   step,
   index,
@@ -259,81 +273,17 @@ function StepEditor({
   variableNames,
   onChange,
 }: StepEditorProps) {
+  const testVars = buildTestVars(variableNames);
   return (
     <Stack gap="md">
       <Title order={5}>Step {index + 1}</Title>
-
-      <Select
-        label="Step kind"
-        data={[
-          { value: 'request', label: 'Request' },
-          { value: 'consume', label: 'Consume' },
-          { value: 'wait', label: 'Wait' },
-          { value: 'pause', label: 'Pause' },
-        ]}
-        value={step.kind}
-        onChange={(v) => {
-          if (!v || v === step.kind) return;
-          if (v === 'request') {
-            const fresh: RequestStep = {
-              kind: 'request',
-              requestType:
-                sessionMode === 'session' ? 'UPDATE' : 'EVENT',
-            };
-            onChange(fresh);
-          } else if (v === 'consume') {
-            const fresh: ConsumeStep = { kind: 'consume', windowMs: 1000 };
-            onChange(fresh);
-          } else if (v === 'wait') {
-            const fresh: WaitStep = { kind: 'wait', durationMs: 1000 };
-            onChange(fresh);
-          } else if (v === 'pause') {
-            const fresh: PauseStep = { kind: 'pause' };
-            onChange(fresh);
-          }
-        }}
-        allowDeselect={false}
+      <RequestFields
+        step={step as RequestStep}
+        sessionMode={sessionMode}
+        variableNames={variableNames}
+        testVars={testVars}
+        onChange={onChange}
       />
-
-      {step.kind === 'request' && (
-        <RequestFields
-          step={step}
-          sessionMode={sessionMode}
-          variableNames={variableNames}
-          onChange={onChange}
-        />
-      )}
-
-      {step.kind === 'consume' && (
-        <ConsumeFields
-          step={step}
-          variableNames={variableNames}
-          onChange={onChange}
-        />
-      )}
-
-      {step.kind === 'wait' && (
-        <NumberInput
-          label="Duration (ms)"
-          min={0}
-          value={step.durationMs}
-          onChange={(v) =>
-            onChange({ ...step, durationMs: typeof v === 'number' ? v : 0 })
-          }
-        />
-      )}
-
-      {step.kind === 'pause' && (
-        <Stack gap="xs">
-          <Textarea
-            label="Pause prompt (optional)"
-            value={step.prompt ?? ''}
-            onChange={(e) =>
-              onChange({ ...step, prompt: e.currentTarget.value })
-            }
-          />
-        </Stack>
-      )}
     </Stack>
   );
 }
@@ -346,17 +296,29 @@ interface RequestFieldsProps {
   step: RequestStep;
   sessionMode: SessionMode;
   variableNames: string[];
+  testVars: Record<string, unknown>;
   onChange: (step: ScenarioStep) => void;
 }
 
-function RequestFields({ step, sessionMode, variableNames, onChange }: RequestFieldsProps) {
+function RequestFields({ step, sessionMode, variableNames, testVars, onChange }: RequestFieldsProps) {
   const legal = legalRequestTypes(sessionMode);
   const requestTypeError = !isLegalRequestType(sessionMode, step.requestType)
     ? `Request type ${step.requestType} is not legal under sessionMode ${sessionMode}`
     : null;
 
+  const isUpdate = step.requestType === 'UPDATE';
+  const useUntil = step.repeatUntil !== undefined;
+  const useValidity = step.useValidityTime ?? false;
+
   return (
     <Stack gap="md">
+      <TextInput
+        label="Label (optional)"
+        placeholder="e.g. CCR-U data"
+        value={step.label ?? ''}
+        onChange={(e) => onChange({ ...step, label: e.currentTarget.value || undefined })}
+      />
+
       <Select
         label="Request type"
         data={(['INITIAL', 'UPDATE', 'TERMINATE', 'EVENT'] as RequestType[]).map(
@@ -375,43 +337,98 @@ function RequestFields({ step, sessionMode, variableNames, onChange }: RequestFi
         data-testid="step-request-type"
       />
 
-      <OverridesEditor
-        overrides={step.overrides ?? {}}
-        variableNames={variableNames}
-        onChange={(overrides) => onChange({ ...step, overrides })}
-      />
-    </Stack>
-  );
-}
+      {isUpdate && (
+        <Stack gap="xs">
+          <Text size="sm" fw={500}>Repeat</Text>
 
-interface ConsumeFieldsProps {
-  step: ConsumeStep;
-  variableNames: string[];
-  onChange: (step: ScenarioStep) => void;
-}
+          <Checkbox
+            label="Repeat until condition"
+            checked={useUntil}
+            onChange={(e) =>
+              onChange({
+                ...step,
+                repeatUntil: e.currentTarget.checked ? '' : undefined,
+                repeat: e.currentTarget.checked ? undefined : (step.repeat ?? 1),
+              })
+            }
+          />
 
-function ConsumeFields({ step, variableNames, onChange }: ConsumeFieldsProps) {
-  return (
-    <Stack gap="md">
-      <NumberInput
-        label="Window (ms)"
-        min={0}
-        value={step.windowMs}
-        onChange={(v) =>
-          onChange({ ...step, windowMs: typeof v === 'number' ? v : 0 })
-        }
-      />
-      <NumberInput
-        label="Max rounds (optional)"
-        min={0}
-        value={step.maxRounds ?? ''}
-        onChange={(v) =>
-          onChange({
-            ...step,
-            maxRounds: typeof v === 'number' ? v : undefined,
-          })
-        }
-      />
+          {useUntil ? (
+            <Stack gap="xs">
+              <ExpressionInput
+                label="Exit when (expression)"
+                placeholder="e.g. {{RESULT_CODE}} != 2001"
+                value={step.repeatUntil ?? ''}
+                onChange={(v) => onChange({ ...step, repeatUntil: v })}
+                testVars={testVars}
+              />
+              <NumberInput
+                label="Max iterations (safety cap)"
+                min={1}
+                value={step.maxRepeat ?? ''}
+                onChange={(v) =>
+                  onChange({ ...step, maxRepeat: typeof v === 'number' ? v : undefined })
+                }
+              />
+            </Stack>
+          ) : (
+            <NumberInput
+              label="Repeat count"
+              description="Number of times to send this step"
+              min={1}
+              value={step.repeat ?? 1}
+              onChange={(v) =>
+                onChange({ ...step, repeat: typeof v === 'number' ? v : 1 })
+              }
+            />
+          )}
+
+          <Text size="sm" fw={500} mt="xs">Delay between sends</Text>
+
+          <Checkbox
+            label="Use Validity-Time from CCA"
+            checked={useValidity}
+            onChange={(e) =>
+              onChange({ ...step, useValidityTime: e.currentTarget.checked || undefined })
+            }
+          />
+
+          {useValidity ? (
+            <NumberInput
+              label="Validity-Time scale (0.8 = 80% of interval)"
+              min={0.1}
+              max={2}
+              step={0.1}
+              decimalScale={2}
+              value={step.validityScale ?? 1}
+              onChange={(v) =>
+                onChange({ ...step, validityScale: typeof v === 'number' ? v : 1 })
+              }
+            />
+          ) : (
+            <Group grow>
+              <NumberInput
+                label="Base delay (s)"
+                min={0}
+                value={step.delaySec ?? 0}
+                onChange={(v) =>
+                  onChange({ ...step, delaySec: typeof v === 'number' ? v : 0 })
+                }
+              />
+              <NumberInput
+                label="Jitter (s)"
+                description="Random ±jitter added each send"
+                min={0}
+                value={step.delayJitterSec ?? 0}
+                onChange={(v) =>
+                  onChange({ ...step, delayJitterSec: typeof v === 'number' ? v : 0 })
+                }
+              />
+            </Group>
+          )}
+        </Stack>
+      )}
+
       <OverridesEditor
         overrides={step.overrides ?? {}}
         variableNames={variableNames}

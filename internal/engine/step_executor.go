@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/eddiecarpenter/ruleevaluator"
@@ -11,6 +12,113 @@ import (
 	"github.com/eddiecarpenter/ocs-testbench/internal/diameter/messaging"
 	"github.com/eddiecarpenter/ocs-testbench/internal/template"
 )
+
+// templateBracesRe matches {{VARNAME}} tokens used in AVP value fields.
+// Expressions in repeatUntil / assertions / guards may use either notation;
+// stripping braces before evaluation makes both forms equivalent.
+var templateBracesRe = regexp.MustCompile(`\{\{(\w+)\}\}`)
+
+// stringLiteralRe matches single- or double-quoted string literals so that
+// identifiers inside them are not mistaken for variable references.
+var stringLiteralRe = regexp.MustCompile(`'[^']*'|"[^"]*"`)
+
+// identRe extracts word tokens that could be variable names.
+var identRe = regexp.MustCompile(`\b([A-Za-z_]\w*)\b`)
+
+// exprKeywords are tokens that ruleevaluator treats as operators or literals,
+// not as variable lookups. They are excluded from unknown-variable checks.
+var exprKeywords = map[string]bool{
+	"true": true, "false": true, "null": true, "nil": true,
+	"is": true, "not": true, "and": true, "or": true,
+}
+
+// systemVars is the fixed set of variables the engine auto-provisions into
+// every session context. Names here are never flagged as unknown.
+var systemVars = map[string]bool{
+	"SESSION_ID":        true,
+	"MSISDN":            true,
+	"CC_REQUEST_NUMBER": true,
+	"RESULT_CODE":       true,
+	"FUI_ACTION":        true,
+	"TOTAL_USU":         true,
+}
+
+// toInt64 coerces common numeric types to int64 for arithmetic.
+func toInt64(v any) int64 {
+	switch n := v.(type) {
+	case int64:
+		return n
+	case int32:
+		return int64(n)
+	case int:
+		return int64(n)
+	case float64:
+		return int64(n)
+	case float32:
+		return int64(n)
+	}
+	return 0
+}
+
+// rgVarRe matches per-rating-group variables (RG1_GRANTED, RG2_VALIDITY, …).
+var rgVarRe = regexp.MustCompile(`^RG\d+_(GRANTED|GRANTED_OCTETS|VALIDITY|RESULT_CODE|FUI_ACTION)$`)
+
+// isKnownVar reports whether name is a declared or system-provided variable.
+func isKnownVar(name string, declared map[string]bool) bool {
+	return declared[name] || systemVars[name] || rgVarRe.MatchString(name)
+}
+
+// unknownVars returns the set of identifier tokens in expr that are not
+// present in vars and are not operator/literal keywords.
+// expr must already have {{}} notation stripped.
+func unknownVars(vars map[string]any, expr string) []string {
+	// Blank out string literals so we don't match identifiers inside them.
+	noStrings := stringLiteralRe.ReplaceAllString(expr, "''")
+	var missing []string
+	seen := map[string]bool{}
+	for _, m := range identRe.FindAllString(noStrings, -1) {
+		if seen[m] || exprKeywords[strings.ToLower(m)] {
+			continue
+		}
+		seen[m] = true
+		if _, ok := vars[m]; !ok {
+			missing = append(missing, m)
+		}
+	}
+	return missing
+}
+
+// ValidateExpr checks that every variable referenced in expr is listed in
+// declaredVars or is a well-known system variable. Both {{VAR}} and bare VAR
+// notation are accepted. Returns an error naming the unknown identifiers.
+func ValidateExpr(declaredVars []string, expr string) error {
+	if expr == "" {
+		return nil
+	}
+	stripped := templateBracesRe.ReplaceAllString(expr, "$1")
+	noStrings := stringLiteralRe.ReplaceAllString(stripped, "''")
+
+	known := make(map[string]bool, len(declaredVars))
+	for _, v := range declaredVars {
+		known[v] = true
+	}
+
+	var bad []string
+	seen := map[string]bool{}
+	for _, m := range identRe.FindAllString(noStrings, -1) {
+		if seen[m] || exprKeywords[strings.ToLower(m)] {
+			continue
+		}
+		seen[m] = true
+		if !isKnownVar(m, known) {
+			bad = append(bad, m)
+		}
+	}
+	if len(bad) != 0 {
+		return fmt.Errorf("unknown variable(s): %s", strings.Join(bad, ", "))
+	}
+	return nil
+}
 
 // StepExecutor is a stateless processor that takes a single step definition
 // plus a session context and produces a StepResult.
@@ -49,6 +157,7 @@ func NewStepExecutor(engine *template.Engine, baseInput template.EngineInput) *S
 //  7. Auto-update sc.Vars from the CCA (RESULT_CODE, MSCC values).
 //  8. Assert — evaluate step.Assertions against updated sc.Vars.
 //  9. Result code handlers — return first matching action.
+//     9b/c/d. Built-in checks — goto_terminate on non-2xxx, all-MSCC-exhausted, FUI=TERMINATE.
 //  10. Increment CCRequestNumber and update CC_REQUEST_NUMBER in sc.Vars.
 func (e *StepExecutor) Execute(
 	ctx context.Context,
@@ -78,8 +187,14 @@ func (e *StepExecutor) Execute(
 	}
 
 	// — Step 4: Build CCR via template engine —
+	// Derive the request type first so it can be injected into the value map
+	// before rendering — the engine uses CC_REQUEST_TYPE to apply §7 RSU/USU
+	// presence rules (INITIAL→no USU, TERMINATE→no RSU, etc.).
+	ccReqType := mapRequestType(step.RequestType)
+
 	// Merge sc.Vars with step-level overrides for this send only.
 	mergedVars := mergeVars(sc.Vars, step.Overrides)
+	mergedVars["CC_REQUEST_TYPE"] = ccReqType
 
 	input := e.baseInput
 	input.Values = mergedVars
@@ -88,13 +203,12 @@ func (e *StepExecutor) Execute(
 	if err != nil {
 		return StepResult{}, fmt.Errorf("step executor: render CCR: %w", err)
 	}
-
-	ccReqType := mapRequestType(step.RequestType)
 	req := &messaging.CCR{
-		SessionID:       sc.SessionID,
-		CCRequestType:   ccReqType,
-		CCRequestNumber: sc.CCRequestNumber,
-		ExtraAVPs:       avps,
+		SessionID:        sc.SessionID,
+		CCRequestType:    ccReqType,
+		CCRequestNumber:  sc.CCRequestNumber,
+		ServiceContextID: sc.ServiceContextID,
+		ExtraAVPs:        avps,
 	}
 
 	// — Step 5: Send —
@@ -113,11 +227,47 @@ func (e *StepExecutor) Execute(
 		autoUpdateVarsFromCCA(sc.Vars, result.CCA)
 	}
 
+	// Accumulate used service units into TOTAL_USU after each UPDATE or
+	// TERMINATE so repeatUntil / assertions can reference the running total.
+	if step.RequestType == "UPDATE" || step.RequestType == "TERMINATE" {
+		usu := toInt64(mergedVars["USU_TOTAL"])
+		prev, _ := sc.Vars["TOTAL_USU"].(int64)
+		sc.Vars["TOTAL_USU"] = prev + usu
+	}
+
 	// — Step 8: Assertions —
 	assertions := e.evaluateAssertions(sc.Vars, step.Assertions)
 
 	// — Step 9: Result code handlers —
 	action := e.evaluateResultHandlers(sc.Vars, step.ResultHandlers)
+
+	// — Steps 9b/9c: Built-in termination checks —
+	// These fire only when no scenario result handler has overridden the action.
+	// All cases use ActionGotoTerminate so the session ends with a proper
+	// CCR-T (the last step) rather than dropping the Diameter session cold.
+	if action == ActionContinue && result.CCA != nil {
+		// 9b: Root-level non-success result code.
+		// A 4xxx or 5xxx code means the OCS rejected the request; reporting
+		// usage after this is a protocol violation (e.g. 5012 USED_MORE_THAN_GRANTED).
+		rc := result.CCA.ResultCode
+		if rc != 0 && (rc < 2000 || rc > 2999) {
+			action = ActionGotoTerminate
+		}
+
+		// 9c: All MSCC blocks denied or quota-exhausted (FUI=TERMINATE).
+		// When every rating group the OCS responded to has either a non-2xxx
+		// result code or FUI=TERMINATE, there is no grant left to continue with.
+		if action == ActionContinue && isAllMSCCExhausted(result.CCA) {
+			action = ActionGotoTerminate
+		}
+
+		// 9d: Root-level FUI=TERMINATE.
+		// The OCS signals the last quota grant; the session must terminate
+		// per RFC 4006 §5.6 once that quota is exhausted.
+		if action == ActionContinue && isFUITerminate(result.CCA) {
+			action = ActionGotoTerminate
+		}
+	}
 
 	// — Step 10: Increment CCRequestNumber —
 	sc.CCRequestNumber++
@@ -227,9 +377,34 @@ func (e *StepExecutor) evaluateResultHandlers(vars map[string]any, handlers []Re
 // — Package-level utilities —
 
 // evalExpr evaluates a ruleevaluator expression against a variable map.
+// {{VARNAME}} tokens are stripped to bare VARNAME before evaluation so
+// both the template-style {{VAR}} notation and bare VAR notation work.
 func evalExpr(vars map[string]any, expr string) (any, error) {
+	expr = templateBracesRe.ReplaceAllString(expr, "$1")
 	ev := ruleevaluator.NewRuleEvaluator(vars)
 	return ev.Evaluate(expr)
+}
+
+// EvalExprPublic is the exported entry point for the API expression-evaluate
+// endpoint. It applies the same {{}} normalisation as the execution engine and
+// additionally rejects expressions that reference variables not present in vars,
+// catching typos before they silently evaluate to nil.
+func EvalExprPublic(vars map[string]any, expr string) (any, error) {
+	stripped := templateBracesRe.ReplaceAllString(expr, "$1")
+	if missing := unknownVars(vars, stripped); len(missing) != 0 {
+		// Also allow system vars and RGn_* that the caller may not have seeded.
+		var reallyMissing []string
+		for _, m := range missing {
+			if !isKnownVar(m, nil) {
+				reallyMissing = append(reallyMissing, m)
+			}
+		}
+		if len(reallyMissing) != 0 {
+			return nil, fmt.Errorf("unknown variable(s): %s", strings.Join(reallyMissing, ", "))
+		}
+	}
+	ev := ruleevaluator.NewRuleEvaluator(vars)
+	return ev.Evaluate(stripped)
 }
 
 // isTruthy converts a ruleevaluator result to a Go boolean. Any non-nil,
@@ -288,6 +463,8 @@ func parseAction(s string) ResultCodeAction {
 	switch strings.ToLower(s) {
 	case "terminate":
 		return ActionTerminate
+	case "goto_terminate":
+		return ActionGotoTerminate
 	case "retry":
 		return ActionRetry
 	case "pause":
@@ -393,7 +570,24 @@ func autoUpdateVarsFromCCA(vars map[string]any, cca *messaging.CCA) {
 	}
 	vars["RESULT_CODE"] = int64(cca.ResultCode)
 	vars["SESSION_ID"] = cca.SessionID
-	// Per-MSCC auto-provisioned variables: RG<n>_GRANTED, RG<n>_VALIDITY.
+	// Root-level FUI_ACTION: -1 means no FUI present in the CCA.
+	vars["FUI_ACTION"] = int64(cca.FUIAction)
+
+	// Zero out all previously-set RG variables before re-populating.
+	// This ensures that when a CCA omits a rating group, its variables
+	// reset to 0 rather than carrying stale values into the next CCR.
+	for k := range vars {
+		if strings.HasPrefix(k, "RG") &&
+			(strings.HasSuffix(k, "_GRANTED") ||
+				strings.HasSuffix(k, "_GRANTED_OCTETS") ||
+				strings.HasSuffix(k, "_VALIDITY") ||
+				strings.HasSuffix(k, "_RESULT_CODE") ||
+				strings.HasSuffix(k, "_FUI_ACTION")) {
+			vars[k] = int64(0)
+		}
+	}
+
+	// Per-MSCC auto-provisioned variables.
 	for _, block := range cca.MSCC {
 		rg := block.RatingGroup
 		prefix := fmt.Sprintf("RG%d", rg)
@@ -404,5 +598,34 @@ func autoUpdateVarsFromCCA(vars map[string]any, cca *messaging.CCA) {
 		if block.ValidityTime > 0 {
 			vars[prefix+"_VALIDITY"] = int64(block.ValidityTime)
 		}
+		// Per-MSCC result code: 0 means absent (OCS omitted it).
+		vars[prefix+"_RESULT_CODE"] = int64(block.ResultCode)
+		// Per-MSCC FUI action: -1 means no FUI present in this block.
+		vars[prefix+"_FUI_ACTION"] = int64(block.FUIAction)
 	}
+}
+
+// isFUITerminate reports whether the CCA carries a root-level
+// Final-Unit-Action=TERMINATE (0). Per RFC 4006 §5.6 the session must
+// terminate once the granted quota is exhausted.
+func isFUITerminate(cca *messaging.CCA) bool {
+	return cca.FUIAction == messaging.FUIActionTerminate
+}
+
+// isAllMSCCExhausted reports whether every MSCC block the OCS returned has
+// either a non-2xxx result code (quota denied) or FUI=TERMINATE (last grant).
+// Returns false when the CCA contains no MSCC blocks (root service model).
+func isAllMSCCExhausted(cca *messaging.CCA) bool {
+	if len(cca.MSCC) == 0 {
+		return false
+	}
+	for _, block := range cca.MSCC {
+		rc := block.ResultCode
+		rcFailed := rc != 0 && (rc < 2000 || rc > 2999)
+		fuiTerminate := block.FUIAction == messaging.FUIActionTerminate
+		if !rcFailed && !fuiTerminate {
+			return false // at least one block is still active
+		}
+	}
+	return true
 }

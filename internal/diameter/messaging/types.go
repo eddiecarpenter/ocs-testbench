@@ -180,6 +180,10 @@ type CCA struct {
 	// so callers that need a field not surfaced above can dig it
 	// out via FindAVP / FindAVPs.
 	Raw *diam.Message
+
+	// SentMessage is the *diam.Message that was transmitted as the CCR.
+	// Set by the Sender so the session recorder can format it for display.
+	SentMessage *diam.Message
 }
 
 // Sentinel errors raised by this package. Callers branch via

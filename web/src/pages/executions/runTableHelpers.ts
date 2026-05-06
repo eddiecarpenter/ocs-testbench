@@ -9,7 +9,6 @@ import type {
   ExecutionState,
   ExecutionSummary,
 } from '../../api/resources/executions';
-import { defaultTotalStepsForScenario } from '../../mocks/data/executionDetails';
 
 /** Mantine palette key per execution state — matches the dashboard card. */
 export const STATE_COLOR: Record<ExecutionState, string> = {
@@ -168,18 +167,17 @@ export function formatProgress(
   row: ExecutionSummary,
   runsByBatch: Map<string, ExecutionSummary[]>,
 ): string {
-  if (row.mode === 'interactive') {
-    const total = defaultTotalStepsForScenario(row.scenarioId);
-    return isTerminal(row.state) ? `${total} / ${total}` : `… / ${total}`;
-  }
-  // Continuous
+  if (row.mode === 'interactive') return '—';
+  // Continuous batched: count terminal siblings vs total batch size.
   if (row.batchId) {
     const siblings = runsByBatch.get(row.batchId) ?? [];
-    const total = siblings.length;
-    const done = siblings.filter((s) => isTerminal(s.state)).length;
-    return `${done} / ${total}`;
+    const terminal = siblings.filter((s) => isTerminal(s.state)).length;
+    return `${terminal} / ${siblings.length}`;
   }
-  return isTerminal(row.state) ? '1 / 1' : '0 / 1';
+  // Continuous standalone — show completed / total repeats.
+  const total = row.repeats ?? 1;
+  const done = row.completedIterations ?? (isTerminal(row.state) ? total : 0);
+  return `${done} / ${total}`;
 }
 
 /** Format a row's duration as `mm:ss` (or `–` for runs that never finished). */

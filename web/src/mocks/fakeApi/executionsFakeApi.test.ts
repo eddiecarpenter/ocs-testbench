@@ -91,7 +91,7 @@ describe('GET /executions — list filters', () => {
 
 describe('POST /executions — start', () => {
   const validInteractive: StartExecutionInput = {
-    scenarioId: 'scn-octet-single-001',
+    scenarioId: 'scn-data-single-001',
     mode: 'interactive',
     concurrency: 1,
     repeats: 1,
@@ -120,7 +120,7 @@ describe('POST /executions — start', () => {
       '/executions',
       validInteractive,
     );
-    expect(res.items[0].scenarioName).toBe('OCTET × single-MSCC — data session baseline');
+    expect(res.items[0].scenarioName).toBe('Data — single-MSCC (3GPP)');
   });
 
   it('honours peer / subscriber overrides', async () => {
@@ -139,7 +139,7 @@ describe('POST /executions — start', () => {
     const res = await ApiService.post<StartExecutionResult, StartExecutionInput>(
       '/executions',
       {
-        scenarioId: 'scn-octet-single-001',
+        scenarioId: 'scn-data-single-001',
         mode: 'continuous',
         concurrency: 3,
         repeats: 2,
@@ -153,7 +153,7 @@ describe('POST /executions — start', () => {
   it('rejects interactive + concurrency > 1 with 422', async () => {
     await expect(
       ApiService.post<StartExecutionResult, StartExecutionInput>('/executions', {
-        scenarioId: 'scn-octet-single-001',
+        scenarioId: 'scn-data-single-001',
         mode: 'interactive',
         concurrency: 2,
         repeats: 1,
@@ -173,7 +173,7 @@ describe('POST /executions — start', () => {
   it('rejects out-of-range concurrency with 422', async () => {
     await expect(
       ApiService.post<StartExecutionResult, StartExecutionInput>('/executions', {
-        scenarioId: 'scn-octet-single-001',
+        scenarioId: 'scn-data-single-001',
         mode: 'continuous',
         concurrency: 11,
         repeats: 1,
@@ -228,7 +228,7 @@ describe('POST /executions/:id/rerun', () => {
     const stub: StartExecutionResult = await ApiService.post<
       StartExecutionResult
     >('/executions', {
-      scenarioId: 'scn-octet-single-001',
+      scenarioId: 'scn-data-single-001',
       mode: 'continuous',
       concurrency: 1,
       repeats: 1,

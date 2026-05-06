@@ -77,7 +77,7 @@ function makeFakeScheduler(): SchedulerLike & {
 }
 
 const interactiveScenario = scenarioFixtures.find(
-  (s) => s.serviceModel === 'single-mscc' && s.unitType === 'OCTET',
+  (s) => s.serviceModel === 'single-mscc' && s.serviceType === 'DATA',
 )!;
 
 describe('buildPlan', () => {

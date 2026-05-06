@@ -1,5 +1,5 @@
 /**
- * Tests for `serviceModel × unitType` matrix enforcement and the
+ * Tests for `serviceModel × serviceType` matrix enforcement and the
  * `sessionMode × requestType` step validator.
  *
  * Covers AC-25 / AC-26 / AC-19 from Feature #77.
@@ -9,34 +9,34 @@ import { describe, expect, it } from 'vitest';
 import { matrix, validateScenario } from './validators';
 
 describe('matrix(unit, model)', () => {
-  it('disallows OCTET × root and surfaces a hint', () => {
-    const cell = matrix('OCTET', 'root');
+  it('disallows VOLUME × root and surfaces a hint', () => {
+    const cell = matrix('VOLUME', 'root');
     expect(cell.allowed).toBe(false);
     expect(cell.hint).toMatch(/MSCC/);
   });
 
-  it('disallows multi-mscc for TIME and UNITS', () => {
+  it('disallows multi-mscc for TIME and EVENT', () => {
     expect(matrix('TIME', 'multi-mscc').allowed).toBe(false);
-    expect(matrix('UNITS', 'multi-mscc').allowed).toBe(false);
+    expect(matrix('EVENT', 'multi-mscc').allowed).toBe(false);
   });
 
-  it('allows OCTET × single-mscc, OCTET × multi-mscc', () => {
-    expect(matrix('OCTET', 'single-mscc').allowed).toBe(true);
-    expect(matrix('OCTET', 'multi-mscc').allowed).toBe(true);
+  it('allows VOLUME × single-mscc, VOLUME × multi-mscc', () => {
+    expect(matrix('VOLUME', 'single-mscc').allowed).toBe(true);
+    expect(matrix('VOLUME', 'multi-mscc').allowed).toBe(true);
   });
 
-  it('allows TIME × root, TIME × single-mscc, UNITS × root, UNITS × single-mscc', () => {
+  it('allows TIME × root, TIME × single-mscc, EVENT × root, EVENT × single-mscc', () => {
     expect(matrix('TIME', 'root').allowed).toBe(true);
     expect(matrix('TIME', 'single-mscc').allowed).toBe(true);
-    expect(matrix('UNITS', 'root').allowed).toBe(true);
-    expect(matrix('UNITS', 'single-mscc').allowed).toBe(true);
+    expect(matrix('EVENT', 'root').allowed).toBe(true);
+    expect(matrix('EVENT', 'single-mscc').allowed).toBe(true);
   });
 });
 
 describe('validateScenario', () => {
   it('rejects EVENT under sessionMode=session', () => {
     const issues = validateScenario({
-      unitType: 'OCTET',
+      serviceType: 'DATA',
       serviceModel: 'single-mscc',
       sessionMode: 'session',
       steps: [{ kind: 'request', requestType: 'EVENT' }],
@@ -53,7 +53,7 @@ describe('validateScenario', () => {
 
   it('rejects INITIAL/UPDATE/TERMINATE under sessionMode=event', () => {
     const issues = validateScenario({
-      unitType: 'UNITS',
+      serviceType: 'SMS',
       serviceModel: 'single-mscc',
       sessionMode: 'event',
       steps: [{ kind: 'request', requestType: 'UPDATE' }],
@@ -61,9 +61,9 @@ describe('validateScenario', () => {
     expect(issues.some((i) => i.path.endsWith('/requestType'))).toBe(true);
   });
 
-  it('flags an invalid serviceModel × unitType cell as a top-level issue', () => {
+  it('flags an invalid serviceModel × serviceType cell as a top-level issue', () => {
     const issues = validateScenario({
-      unitType: 'OCTET',
+      serviceType: 'DATA',
       serviceModel: 'root',
       sessionMode: 'session',
       steps: [],
@@ -77,7 +77,7 @@ describe('validateScenario', () => {
 
   it('returns no issues for a fully-valid scenario', () => {
     const issues = validateScenario({
-      unitType: 'OCTET',
+      serviceType: 'DATA',
       serviceModel: 'single-mscc',
       sessionMode: 'session',
       steps: [
