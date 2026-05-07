@@ -116,11 +116,22 @@ func (e *Engine) buildAVPNode(
 		if node.Code == 0 {
 			return nil, err
 		}
+		// Name not in dictionary but node has an explicit code — synthesise
+		// metadata (vendor-specific AVPs absent from the built-in XML).
+		// Grouped vs leaf is inferred from child presence; leaf type defaults
+		// to OctetString.
 		meta = AVPMetadata{
 			Code:     node.Code,
 			Grouped:  len(node.AVPs) > 0,
 			DataType: "OctetString",
 		}
+	} else if node.Code != 0 && node.Code != meta.Code {
+		// The dictionary found a match by name, but the node carries an
+		// explicit code that differs (e.g. a Huawei AVP named
+		// "Calling-Party-Address" with code 20336 vs the 3GPP entry at
+		// code 831). Honour the node's code; keep the dictionary's DataType
+		// so encoding still works for known types.
+		meta.Code = node.Code
 	}
 
 	// Step 2 — vendor-id inheritance (AC-7, AC-8).
