@@ -275,11 +275,6 @@ export function listSystemVariables(
       description: 'Subscriber MSISDN from the bound subscriber.',
     },
     {
-      name: 'CALLING_PARTY_ADDRESS',
-      kind: 'bound',
-      description: 'Calling-party address — auto-set from subscriber MSISDN.',
-    },
-    {
       name: 'TOTAL_USU',
       kind: 'generator',
       description: 'Cumulative Used-Service-Unit total — sum across all UPDATE and TERMINATE steps.',

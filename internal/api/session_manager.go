@@ -795,8 +795,10 @@ func smResolveVariables(
 		if sub.Imei.Valid {
 			vals["IMEI"] = sub.Imei.String
 		}
-		// Auto-seed IMS calling-party from subscriber MSISDN so VOICE scenarios
-		// get a valid SIP URI without requiring an explicit variable definition.
+		// Auto-seed CALLING_PARTY_ADDRESS from subscriber MSISDN so MO VOICE
+		// scenarios work without an explicit variable definition. MT scenarios
+		// override this by defining CALLING_PARTY_ADDRESS as a user variable
+		// (remote party number) and setting CALLED_PARTY_ADDRESS to the MSISDN.
 		vals["CALLING_PARTY_ADDRESS"] = sub.Msisdn
 	}
 	for _, v := range vars {
