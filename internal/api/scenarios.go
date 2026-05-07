@@ -113,20 +113,20 @@ func toSummaryResponse(sc store.Scenario) scenarioSummaryResponse {
 	var b scenarioBody
 	_ = json.Unmarshal(sc.Body, &b)
 	return scenarioSummaryResponse{
-		ID:             uuidToString(sc.ID),
-		Name:           sc.Name,
-		Description:    b.Description,
-		ServiceType:    b.ServiceType,
-		ServiceProfile: b.ServiceProfile,
-		SessionMode:    b.SessionMode,
-		ServiceModel:   b.ServiceModel,
-		Origin:         "user",
-		Favourite:      b.Favourite,
+		ID:               uuidToString(sc.ID),
+		Name:             sc.Name,
+		Description:      b.Description,
+		ServiceType:      b.ServiceType,
+		ServiceProfile:   b.ServiceProfile,
+		SessionMode:      b.SessionMode,
+		ServiceModel:     b.ServiceModel,
+		Origin:           "user",
+		Favourite:        b.Favourite,
 		SubscriberID:     uuidToString(sc.SubscriberID),
 		PeerID:           uuidToString(sc.PeerID),
 		ServiceContextID: b.ServiceContextID,
 		StepCount:        countJSONArray(b.Steps),
-		UpdatedAt:      sc.UpdatedAt.Time.UTC().Format("2006-01-02T15:04:05Z07:00"),
+		UpdatedAt:        sc.UpdatedAt.Time.UTC().Format("2006-01-02T15:04:05Z07:00"),
 	}
 }
 

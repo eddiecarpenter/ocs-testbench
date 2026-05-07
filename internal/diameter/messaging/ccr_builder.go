@@ -19,16 +19,16 @@ import (
 // CCR struct fields. ExtraAVPs carrying these codes are silently
 // dropped to prevent duplicate-AVP rejections from the OCS.
 var builderOwnedAVP = map[uint32]bool{
-	avp.SessionID:          true, // 263
-	avp.OriginHost:         true, // 264
-	avp.OriginRealm:        true, // 296
-	avp.DestinationRealm:   true, // 283
-	avp.DestinationHost:    true, // 293
-	avp.AuthApplicationID:  true, // 258
-	avp.ServiceContextID:   true, // 461
-	avp.CCRequestType:      true, // 416
-	avp.CCRequestNumber:    true, // 415
-	avp.EventTimestamp:     true, // 55
+	avp.SessionID:         true, // 263
+	avp.OriginHost:        true, // 264
+	avp.OriginRealm:       true, // 296
+	avp.DestinationRealm:  true, // 283
+	avp.DestinationHost:   true, // 293
+	avp.AuthApplicationID: true, // 258
+	avp.ServiceContextID:  true, // 461
+	avp.CCRequestType:     true, // 416
+	avp.CCRequestNumber:   true, // 415
+	avp.EventTimestamp:    true, // 55
 }
 
 // BuildCCRMessage encodes a CCR onto a *diam.Message. The caller
