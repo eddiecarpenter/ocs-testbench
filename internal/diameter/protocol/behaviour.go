@@ -185,7 +185,11 @@ func (b *Behaviour) Send(ctx context.Context, peerName string, req *messaging.CC
 		state := b.sessions[req.SessionID]
 		terminated := state != nil && state.terminated
 		b.mu.Unlock()
-		if terminated {
+		// CCR-Terminate is always allowed through — it is the session cleanup
+		// message and must reach the OCS even when a prior 5xxx response caused
+		// the Behaviour to mark the session terminated. Any other request type
+		// after termination is rejected as before.
+		if terminated && req.CCRequestType != messaging.CCRTypeTerminate {
 			return nil, fmt.Errorf("%w: session %q", ErrSessionTerminated, req.SessionID)
 		}
 	}

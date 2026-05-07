@@ -280,7 +280,11 @@ func (e *StepExecutor) Execute(
 		// 9c: All MSCC blocks denied or quota-exhausted (FUI=TERMINATE).
 		// When every rating group the OCS responded to has either a non-2xxx
 		// result code or FUI=TERMINATE, there is no grant left to continue with.
-		if action == ActionContinue && isAllMSCCExhausted(result.CCA) {
+		// This check can upgrade ActionTerminate (set by a top-level 5xxx in 9b)
+		// to ActionGotoTerminate so that the TERMINATE step is still executed as
+		// session cleanup — the protocol layer now permits CCR-T even on a
+		// terminated session for exactly this reason.
+		if (action == ActionContinue || action == ActionTerminate) && isAllMSCCExhausted(result.CCA) {
 			action = ActionGotoTerminate
 		}
 
