@@ -106,9 +106,21 @@ func (e *Engine) buildAVPNode(
 	inheritedVendorID int64,
 ) (*diam.AVP, error) {
 	// Step 1 — dictionary lookup (AC-6: unknown name → UNKNOWN_AVP).
+	// When the name is not in the loaded dictionary but the node carries an
+	// explicit Code (vendor-specific AVPs absent from the built-in XML), we
+	// synthesise metadata from the node itself so the encode step can
+	// proceed. Grouped vs leaf is inferred from whether child AVPs are
+	// present; leaf type defaults to OctetString.
 	meta, err := d.Lookup(node.Name)
 	if err != nil {
-		return nil, err
+		if node.Code == 0 {
+			return nil, err
+		}
+		meta = AVPMetadata{
+			Code:     node.Code,
+			Grouped:  len(node.AVPs) > 0,
+			DataType: "OctetString",
+		}
 	}
 
 	// Step 2 — vendor-id inheritance (AC-7, AC-8).

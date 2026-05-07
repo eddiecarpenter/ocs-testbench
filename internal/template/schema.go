@@ -60,6 +60,12 @@ type AVPNode struct {
 	// (e.g. "Origin-Host", "Service-Information"). Required.
 	Name string `json:"name"`
 
+	// Code is the AVP code. When non-zero and the Name is not found in
+	// the loaded dictionary, the engine uses Code directly instead of
+	// failing. This allows vendor-specific AVPs that are absent from the
+	// built-in dictionary to be encoded as long as their code is known.
+	Code uint32 `json:"code,omitempty"`
+
 	// VendorID is the Vendor-Id for this AVP and is inherited by
 	// descendant nodes that do not declare their own VendorID.
 	// Zero means "no vendor" (IETF base AVPs).
