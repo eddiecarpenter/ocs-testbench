@@ -6,26 +6,42 @@ import {
   Card,
   Divider,
   Group,
+  Modal,
   NumberInput,
   SegmentedControl,
   Select,
+  Skeleton,
   Stack,
   Switch,
   Text,
+  Textarea,
   TextInput,
   Title,
-  Tooltip,
   useMantineColorScheme,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
+import { useDisclosure } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import {
+  IconCheck,
   IconDeviceLaptop,
   IconMoon,
+  IconPlus,
+  IconRefresh,
   IconSun,
-  IconUpload,
+  IconTrash,
 } from '@tabler/icons-react';
+import { useState } from 'react';
 
+import {
+  type CustomDictionary,
+  type CustomDictionaryInput,
+  useCreateDictionary,
+  useDeleteDictionary,
+  useDictionaries,
+  useUpdateDictionary,
+} from '../../api/resources/dictionaries';
+import { notifyError } from '../../utils/notify';
 import {
   DIAMETER_TRANSPORTS,
   LOG_LEVELS,
@@ -35,26 +51,10 @@ import {
   type Settings as AppSettings,
 } from '../../settings/settings';
 
-/** RFC-7807-shaped placeholder list for built-in dictionaries — matches
- * the catalogue documented in ARCHITECTURE.md §11 plus a couple of
- * illustrative custom entries from Figma 06-settings.png. The v0.2
- * OpenAPI does not expose a /dictionaries endpoint yet, so this list is
- * rendered as a visual reference; Upload XML is disabled with a tooltip
- * explaining the gap. When the endpoint lands, swap the static fixture
- * for a `useDictionaries()` query. */
-interface DictionaryRow {
-  id: string;
-  name: string;
-  origin: 'built-in' | 'custom';
-  avpCount: number;
-}
-
-const DICTIONARY_FIXTURES: DictionaryRow[] = [
-  { id: 'rfc6733', name: 'RFC 6733 base', origin: 'built-in', avpCount: 147 },
-  { id: 'rfc4006', name: 'RFC 4006 credit control', origin: 'built-in', avpCount: 89 },
-  { id: 'ts32299', name: '3GPP TS 32.299 Ro/Rf', origin: 'built-in', avpCount: 312 },
-  { id: 'nokia-vendor', name: 'Nokia vendor-specific', origin: 'custom', avpCount: 42 },
-  { id: 'ericsson-sms', name: 'Ericsson SMS extensions', origin: 'custom', avpCount: 18 },
+const BUILT_IN_DICTIONARIES = [
+  { id: 'rfc6733',  name: 'RFC 6733 — Diameter Base Protocol' },
+  { id: 'rfc4006',  name: 'RFC 4006 — Diameter Credit Control' },
+  { id: 'ts32299',  name: '3GPP TS 32.299 — Ro/Rf Charging' },
 ];
 
 /** Labelled section heading — shared with the Peers / Subscribers forms. */
@@ -284,38 +284,7 @@ export function SettingsPage() {
           </Card>
 
           {/* ─── AVP Dictionaries ──────────────────────────────── */}
-          <Card padding="lg" withBorder shadow="xs">
-            <Stack gap="md">
-              <Group justify="space-between" align="flex-start" wrap="nowrap">
-                <Stack gap={4}>
-                  <SectionLabel>AVP Dictionaries</SectionLabel>
-                  <Text size="xs" c="dimmed">
-                    Built-in RFC dictionaries plus custom XML uploads
-                  </Text>
-                </Stack>
-                <Tooltip
-                  label="Upload endpoint not available in OpenAPI v0.2 yet"
-                  withArrow
-                  position="left"
-                >
-                  <ActionIcon
-                    variant="default"
-                    size="lg"
-                    disabled
-                    aria-label="Upload custom dictionary XML"
-                  >
-                    <IconUpload size={16} />
-                  </ActionIcon>
-                </Tooltip>
-              </Group>
-
-              <Stack gap="xs">
-                {DICTIONARY_FIXTURES.map((d) => (
-                  <DictionaryRow key={d.id} row={d} />
-                ))}
-              </Stack>
-            </Stack>
-          </Card>
+          <DictionariesCard />
 
           <Divider />
 
@@ -346,9 +315,90 @@ export function SettingsPage() {
   );
 }
 
-/** Single row in the AVP Dictionaries section. */
-function DictionaryRow({ row }: { row: DictionaryRow }) {
-  const originLabel = row.origin === 'built-in' ? 'Built-in' : 'Custom';
+// ─── Dictionary management ────────────────────────────────────────────────
+
+function DictionariesCard() {
+  const { data: customs, isLoading } = useDictionaries();
+  const [editTarget, setEditTarget] = useState<CustomDictionary | null>(null);
+  const [createOpen, { open: openCreate, close: closeCreate }] = useDisclosure(false);
+
+  return (
+    <Card padding="lg" withBorder shadow="xs">
+      <Stack gap="md">
+        <Group justify="space-between" align="flex-start" wrap="nowrap">
+          <Stack gap={4}>
+            <SectionLabel>AVP Dictionaries</SectionLabel>
+            <Text size="xs" c="dimmed">
+              Built-in RFC/3GPP dictionaries plus custom XML vendor extensions.
+              Changes take effect after a server restart.
+            </Text>
+          </Stack>
+          <ActionIcon
+            variant="filled"
+            size="lg"
+            aria-label="Add custom dictionary"
+            onClick={openCreate}
+          >
+            <IconPlus size={16} />
+          </ActionIcon>
+        </Group>
+
+        <Stack gap="xs">
+          {/* Built-in (read-only) */}
+          {BUILT_IN_DICTIONARIES.map((d) => (
+            <DictRow key={d.id} name={d.name} builtIn />
+          ))}
+
+          {/* Custom — live from API */}
+          {isLoading && <Skeleton height={48} radius="sm" />}
+          {customs?.map((d) => (
+            <DictRow
+              key={d.id}
+              name={d.name}
+              description={d.description}
+              isActive={d.isActive}
+              onEdit={() => setEditTarget(d)}
+            />
+          ))}
+          {!isLoading && customs?.length === 0 && (
+            <Text size="sm" c="dimmed" ta="center" py="sm">
+              No custom dictionaries yet. Click + to add one.
+            </Text>
+          )}
+        </Stack>
+      </Stack>
+
+      {/* Create modal */}
+      <DictModal
+        opened={createOpen}
+        onClose={closeCreate}
+        title="Add custom dictionary"
+      />
+
+      {/* Edit modal */}
+      <DictModal
+        opened={editTarget !== null}
+        onClose={() => setEditTarget(null)}
+        title="Edit dictionary"
+        existing={editTarget ?? undefined}
+      />
+    </Card>
+  );
+}
+
+function DictRow({
+  name,
+  description,
+  isActive,
+  builtIn,
+  onEdit,
+}: {
+  name: string;
+  description?: string;
+  isActive?: boolean;
+  builtIn?: boolean;
+  onEdit?: () => void;
+}) {
   return (
     <Group
       justify="space-between"
@@ -362,45 +412,182 @@ function DictionaryRow({ row }: { row: DictionaryRow }) {
       }}
     >
       <Group gap="sm" wrap="nowrap">
-        <Text
-          size="sm"
-          fw={500}
-          c={row.origin === 'built-in' ? 'teal' : 'blue'}
-          aria-hidden="true"
-        >
+        <Text size="sm" c={builtIn ? 'teal' : isActive ? 'blue' : 'dimmed'} aria-hidden>
           ●
         </Text>
         <Stack gap={0}>
           <Text size="sm" fw={500}>
-            {row.name}
+            {name}
           </Text>
-          <Text size="xs" c="dimmed">
-            {originLabel} · {row.avpCount} AVPs
-          </Text>
+          {(description || builtIn) && (
+            <Text size="xs" c="dimmed">
+              {builtIn ? 'Built-in' : description}
+            </Text>
+          )}
         </Stack>
       </Group>
-      {row.origin === 'built-in' ? (
-        <Badge variant="light" color="gray" radius="sm">
-          Built-in
-        </Badge>
+
+      {builtIn ? (
+        <Badge variant="light" color="gray" radius="sm">Built-in</Badge>
       ) : (
-        <Tooltip
-          label="Remove endpoint not available in OpenAPI v0.2 yet"
-          withArrow
-          position="left"
-        >
-          <Anchor
-            component="button"
-            type="button"
-            size="sm"
-            c="red"
-            disabled
-            style={{ opacity: 0.5, cursor: 'not-allowed' }}
-          >
-            Remove
-          </Anchor>
-        </Tooltip>
+        <Group gap="xs">
+          <Badge variant="light" color={isActive ? 'blue' : 'gray'} radius="sm">
+            {isActive ? 'Active' : 'Inactive'}
+          </Badge>
+          <ActionIcon variant="subtle" size="sm" onClick={onEdit} aria-label="Edit">
+            <IconRefresh size={14} />
+          </ActionIcon>
+        </Group>
       )}
     </Group>
+  );
+}
+
+interface DictModalProps {
+  opened: boolean;
+  onClose: () => void;
+  title: string;
+  existing?: CustomDictionary;
+}
+
+function DictModal({ opened, onClose, title, existing }: DictModalProps) {
+  const createMut = useCreateDictionary();
+  const updateMut = useUpdateDictionary();
+  const deleteMut = useDeleteDictionary();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const form = useForm<CustomDictionaryInput>({
+    initialValues: {
+      name: existing?.name ?? '',
+      description: existing?.description ?? '',
+      xmlContent: existing?.xmlContent ?? '',
+      isActive: existing?.isActive ?? true,
+    },
+  });
+
+  // Re-seed when existing changes (edit different row)
+  const handleOpen = () => {
+    form.setValues({
+      name: existing?.name ?? '',
+      description: existing?.description ?? '',
+      xmlContent: existing?.xmlContent ?? '',
+      isActive: existing?.isActive ?? true,
+    });
+    form.resetDirty();
+    setConfirmDelete(false);
+  };
+
+  const handleSubmit = form.onSubmit(async (values) => {
+    try {
+      if (existing) {
+        await updateMut.mutateAsync({ id: existing.id, input: values });
+        notifications.show({ color: 'teal', message: 'Dictionary updated. Restart to apply.' });
+      } else {
+        await createMut.mutateAsync(values);
+        notifications.show({ color: 'teal', message: 'Dictionary created. Restart to apply.' });
+      }
+      onClose();
+    } catch (e) {
+      notifyError({ title: 'Failed to save dictionary', message: String(e) });
+    }
+  });
+
+  const handleDelete = async () => {
+    if (!existing) return;
+    try {
+      await deleteMut.mutateAsync(existing.id);
+      notifications.show({ color: 'orange', message: 'Dictionary deleted.' });
+      onClose();
+    } catch (e) {
+      notifyError({ title: 'Failed to delete dictionary', message: String(e) });
+    }
+  };
+
+  const busy = createMut.isPending || updateMut.isPending || deleteMut.isPending;
+
+  return (
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      title={title}
+      size="xl"
+      onTransitionEnd={handleOpen}
+    >
+      <form onSubmit={handleSubmit}>
+        <Stack gap="md">
+          <Group grow>
+            <TextInput
+              label="Name"
+              placeholder="Huawei-Gy"
+              required
+              {...form.getInputProps('name')}
+            />
+            <TextInput
+              label="Description"
+              placeholder="Huawei vendor-specific IN_INFORMATION AVPs"
+              {...form.getInputProps('description')}
+            />
+          </Group>
+
+          <Switch
+            label="Active — load at startup"
+            {...form.getInputProps('isActive', { type: 'checkbox' })}
+          />
+
+          <Textarea
+            label="XML content"
+            description="Diameter dictionary XML in go-diameter format"
+            placeholder={'<?xml version="1.0" encoding="UTF-8"?>\n<diameter>\n  <application id="4" …>\n    …\n  </application>\n</diameter>'}
+            required
+            autosize
+            minRows={14}
+            maxRows={28}
+            styles={{ input: { fontFamily: 'monospace', fontSize: 12 } }}
+            {...form.getInputProps('xmlContent')}
+          />
+
+          <Group justify="space-between">
+            {existing ? (
+              confirmDelete ? (
+                <Group gap="xs">
+                  <Text size="sm" c="red">Delete this dictionary?</Text>
+                  <Button size="xs" color="red" loading={deleteMut.isPending} onClick={handleDelete}>
+                    Confirm
+                  </Button>
+                  <Button size="xs" variant="subtle" onClick={() => setConfirmDelete(false)}>
+                    Cancel
+                  </Button>
+                </Group>
+              ) : (
+                <ActionIcon
+                  variant="subtle"
+                  color="red"
+                  size="lg"
+                  aria-label="Delete dictionary"
+                  onClick={() => setConfirmDelete(true)}
+                >
+                  <IconTrash size={16} />
+                </ActionIcon>
+              )
+            ) : (
+              <span />
+            )}
+
+            <Group gap="xs">
+              <Button variant="default" onClick={onClose} disabled={busy}>
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                loading={createMut.isPending || updateMut.isPending}
+                leftSection={<IconCheck size={14} />}
+              >
+                {existing ? 'Save' : 'Create'}
+              </Button>
+            </Group>
+          </Group>
+        </Stack>
+      </form>
+    </Modal>
   );
 }
