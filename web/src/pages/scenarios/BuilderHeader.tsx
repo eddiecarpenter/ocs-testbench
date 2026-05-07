@@ -33,7 +33,6 @@ import { usePeers } from '../../api/resources/peers';
 import { useSubscribers } from '../../api/resources/subscribers';
 import { useScenarioDraftStore } from './scenarioDraftStore';
 import type {
-  ServiceModel,
   ServiceProfile,
   ServiceType,
   SessionMode,
@@ -59,12 +58,6 @@ const SESSION_OPTIONS: { value: SessionMode; label: string }[] = [
   { value: 'event', label: 'Event' },
 ];
 
-const SERVICE_MODEL_OPTIONS: { value: ServiceModel; label: string }[] = [
-  { value: 'root', label: 'Root' },
-  { value: 'single-mscc', label: 'Single MSCC' },
-  { value: 'multi-mscc', label: 'Multi MSCC' },
-];
-
 interface BuilderHeaderProps {
   isNew: boolean;
   isDirty: boolean;
@@ -77,9 +70,9 @@ export function BuilderHeader({ isNew, isDirty }: BuilderHeaderProps) {
   const setServiceType = useScenarioDraftStore((s) => s.setServiceType);
   const setServiceProfile = useScenarioDraftStore((s) => s.setServiceProfile);
   const setSessionMode = useScenarioDraftStore((s) => s.setSessionMode);
-  const setServiceModel = useScenarioDraftStore((s) => s.setServiceModel);
   const setPeerId = useScenarioDraftStore((s) => s.setPeerId);
   const setSubscriberId = useScenarioDraftStore((s) => s.setSubscriberId);
+  const setServiceContextId = useScenarioDraftStore((s) => s.setServiceContextId);
   const undo = useScenarioDraftStore((s) => s.undo);
   const redo = useScenarioDraftStore((s) => s.redo);
   const canUndo = useScenarioDraftStore((s) => s.canUndo());
@@ -202,16 +195,6 @@ export function BuilderHeader({ isNew, isDirty }: BuilderHeaderProps) {
         </Grid.Col>
         <Grid.Col span={{ base: 3, sm: 1 }}>
           <Select
-            label="Service model"
-            data={SERVICE_MODEL_OPTIONS}
-            value={draft.serviceModel}
-            onChange={(v) => v && setServiceModel(v as ServiceModel)}
-            allowDeselect={false}
-            data-testid="builder-service-model"
-          />
-        </Grid.Col>
-        <Grid.Col span={{ base: 3, sm: 1 }}>
-          <Select
             label="Peer"
             placeholder="Select a peer"
             data={peerOptions}
@@ -236,6 +219,15 @@ export function BuilderHeader({ isNew, isDirty }: BuilderHeaderProps) {
             withAsterisk
             disabled={subscribers.isLoading}
             data-testid="builder-subscriber"
+          />
+        </Grid.Col>
+        <Grid.Col span={{ base: 3, sm: 1 }}>
+          <TextInput
+            label="Service-Context-Id"
+            placeholder="32251@3gpp.org"
+            value={draft.serviceContextId ?? ''}
+            onChange={(e) => setServiceContextId(e.currentTarget.value || undefined)}
+            data-testid="builder-service-context-id"
           />
         </Grid.Col>
       </Grid>

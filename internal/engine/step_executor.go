@@ -61,7 +61,7 @@ func toInt64(v any) int64 {
 }
 
 // rgVarRe matches per-rating-group variables (RG1_GRANTED, RG2_VALIDITY, …).
-var rgVarRe = regexp.MustCompile(`^RG\d+_(GRANTED|GRANTED_OCTETS|VALIDITY|RESULT_CODE|FUI_ACTION)$`)
+var rgVarRe = regexp.MustCompile(`^RG\d+_(GRANTED|GRANTED_UNITS|VALIDITY|RESULT_CODE|FUI_ACTION)$`)
 
 // isKnownVar reports whether name is a declared or system-provided variable.
 func isKnownVar(name string, declared map[string]bool) bool {
@@ -133,6 +133,9 @@ type StepExecutor struct {
 	// baseInput carries the scenario-level template data (Tree, MSCC,
 	// Dictionary, UnitType, ServiceModel). Values is overridden per step.
 	baseInput template.EngineInput
+	// Refreshers is called before DerivedValues on every Execute — each
+	// function re-randomizes one variable declared with refresh:"per-send".
+	Refreshers []func(map[string]any)
 }
 
 // NewStepExecutor creates a StepExecutor with the given template engine and
@@ -181,6 +184,16 @@ func (e *StepExecutor) Execute(
 		}
 	}
 
+	// — Step 2.5: Per-send variable refresh —
+	// Variables declared with refresh:"per-send" are re-randomized here so
+	// each CCR gets a fresh value. This runs after extractions (step 2) so
+	// CCA-derived values are already in sc.Vars, and before derived values
+	// (step 3) so expressions that reference the refreshed variable see the
+	// new value (e.g. a USU accumulator that adds the current random USU).
+	for _, refresh := range e.Refreshers {
+		refresh(sc.Vars)
+	}
+
 	// — Step 3: Derived values —
 	if err := e.applyDerivedValues(sc, step.DerivedValues); err != nil {
 		return StepResult{}, fmt.Errorf("step executor: apply derived values: %w", err)
@@ -208,6 +221,8 @@ func (e *StepExecutor) Execute(
 		CCRequestType:    ccReqType,
 		CCRequestNumber:  sc.CCRequestNumber,
 		ServiceContextID: sc.ServiceContextID,
+		DestinationRealm: sc.DestRealm,
+		DestinationHost:  sc.DestHost,
 		ExtraAVPs:        avps,
 	}
 
@@ -247,11 +262,19 @@ func (e *StepExecutor) Execute(
 	// CCR-T (the last step) rather than dropping the Diameter session cold.
 	if action == ActionContinue && result.CCA != nil {
 		// 9b: Root-level non-success result code.
-		// A 4xxx or 5xxx code means the OCS rejected the request; reporting
-		// usage after this is a protocol violation (e.g. 5012 USED_MORE_THAN_GRANTED).
+		// 5xxx (permanent failure): the OCS has irrevocably rejected the session.
+		// The protocol layer already marks it terminated, so a CCR-T attempt
+		// would be rejected with ErrSessionTerminated. Use ActionTerminate to
+		// stop cleanly without sending CCR-T.
+		// 4xxx (transient failure): the session may still be alive on the OCS.
+		// Use ActionGotoTerminate so CCR-T is sent to release resources.
 		rc := result.CCA.ResultCode
 		if rc != 0 && (rc < 2000 || rc > 2999) {
-			action = ActionGotoTerminate
+			if rc >= 5000 {
+				action = ActionTerminate
+			} else {
+				action = ActionGotoTerminate
+			}
 		}
 
 		// 9c: All MSCC blocks denied or quota-exhausted (FUI=TERMINATE).
@@ -579,7 +602,7 @@ func autoUpdateVarsFromCCA(vars map[string]any, cca *messaging.CCA) {
 	for k := range vars {
 		if strings.HasPrefix(k, "RG") &&
 			(strings.HasSuffix(k, "_GRANTED") ||
-				strings.HasSuffix(k, "_GRANTED_OCTETS") ||
+				strings.HasSuffix(k, "_GRANTED_UNITS") ||
 				strings.HasSuffix(k, "_VALIDITY") ||
 				strings.HasSuffix(k, "_RESULT_CODE") ||
 				strings.HasSuffix(k, "_FUI_ACTION")) {
@@ -587,13 +610,15 @@ func autoUpdateVarsFromCCA(vars map[string]any, cca *messaging.CCA) {
 		}
 	}
 
-	// Per-MSCC auto-provisioned variables.
-	for _, block := range cca.MSCC {
-		rg := block.RatingGroup
-		prefix := fmt.Sprintf("RG%d", rg)
+	// Per-MSCC auto-provisioned variables — keyed by 1-based position in the
+	// CCA response (RG1 = first block, RG2 = second, …). OCS implementations
+	// mirror back MSCC blocks in request order, so position is stable and more
+	// user-friendly than using the raw rating-group number (e.g. 100200100).
+	for i, block := range cca.MSCC {
+		prefix := fmt.Sprintf("RG%d", i+1)
 		vars[prefix+"_GRANTED"] = int64(block.GrantedTime)
 		if block.GrantedTotalOctets > 0 {
-			vars[prefix+"_GRANTED_OCTETS"] = int64(block.GrantedTotalOctets)
+			vars[prefix+"_GRANTED_UNITS"] = int64(block.GrantedTotalOctets)
 		}
 		if block.ValidityTime > 0 {
 			vars[prefix+"_VALIDITY"] = int64(block.ValidityTime)

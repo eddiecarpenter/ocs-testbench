@@ -2,10 +2,12 @@ package api
 
 import (
 	"context"
+	crand "crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"sort"
 	"strconv"
 	"strings"
@@ -64,6 +66,7 @@ type variableSrcJSON struct {
 	Field    string         `json:"field,omitempty"`
 	Strategy string         `json:"strategy,omitempty"`
 	Params   map[string]any `json:"params,omitempty"`
+	Refresh  string         `json:"refresh,omitempty"` // "per-send" → re-randomize before every CCR
 }
 
 // peerIdentityBody is the minimal subset of the peer body needed for
@@ -71,6 +74,8 @@ type variableSrcJSON struct {
 type peerIdentityBody struct {
 	OriginHost  string `json:"originHost"`
 	OriginRealm string `json:"originRealm"`
+	DestHost    string `json:"destHost"`
+	DestRealm   string `json:"destRealm"`
 }
 
 // — Session record —
@@ -224,7 +229,7 @@ func (m *SessionManager) Start(ctx context.Context, scenarioID string, mode stri
 		return StartInfo{}, fmt.Errorf("session manager: parse steps: %w", err)
 	}
 
-	peerName, originHost, originRealm, err := m.loadPeerInfo(ctx, scRow.PeerID)
+	peerName, originHost, originRealm, destHost, destRealm, err := m.loadPeerInfo(ctx, scRow.PeerID)
 	if err != nil {
 		return StartInfo{}, fmt.Errorf("session manager: load peer: %w", err)
 	}
@@ -244,7 +249,7 @@ func (m *SessionManager) Start(ctx context.Context, scenarioID string, mode stri
 		}
 	}
 
-	values := smResolveVariables(variables, sub, originHost, originRealm)
+	values := smResolveVariables(variables, sub, originHost, originRealm, destHost, destRealm)
 
 	baseInput := template.EngineInput{
 		Tree:         smConvertAvpTree(avpNodes),
@@ -265,6 +270,8 @@ func (m *SessionManager) Start(ctx context.Context, scenarioID string, mode stri
 		svcCtxID = "32251@3gpp.org"
 	}
 	sc.ServiceContextID = svcCtxID
+	sc.DestRealm = destRealm
+	sc.DestHost = destHost
 	for k, v := range values {
 		sc.Vars[k] = v
 	}
@@ -272,6 +279,7 @@ func (m *SessionManager) Start(ctx context.Context, scenarioID string, mode stri
 	sc.Vars["SERVICE_CONTEXT_ID"] = svcCtxID
 
 	stepExec := engine.NewStepExecutor(m.tmpl, baseInput)
+	stepExec.Refreshers = smBuildRefreshers(variables)
 	orc := engine.NewOrchestrator(stepExec)
 
 	sessionID := uuid.New().String()
@@ -737,17 +745,21 @@ func (m *SessionManager) getSession(sessionID string) (*sessionRecord, error) {
 	return rec, nil
 }
 
-func (m *SessionManager) loadPeerInfo(ctx context.Context, peerID pgtype.UUID) (name, originHost, originRealm string, err error) {
+func (m *SessionManager) loadPeerInfo(ctx context.Context, peerID pgtype.UUID) (name, originHost, originRealm, destHost, destRealm string, err error) {
 	if !peerID.Valid {
-		return "", "", "", fmt.Errorf("scenario has no peer assigned")
+		return "", "", "", "", "", fmt.Errorf("scenario has no peer assigned")
 	}
 	peer, err := m.store.GetPeer(ctx, peerID)
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", "", "", err
 	}
 	var body peerIdentityBody
 	_ = json.Unmarshal(peer.Body, &body)
-	return peer.Name, body.OriginHost, body.OriginRealm, nil
+	dr := body.DestRealm
+	if dr == "" {
+		dr = body.OriginRealm
+	}
+	return peer.Name, body.OriginHost, body.OriginRealm, body.DestHost, dr, nil
 }
 
 func parseScenarioUUID(s string) (pgtype.UUID, error) {
@@ -764,13 +776,15 @@ func parseScenarioUUID(s string) (pgtype.UUID, error) {
 func smResolveVariables(
 	vars []variableJSON,
 	sub *store.Subscriber,
-	originHost, originRealm string,
+	originHost, originRealm, destHost, destRealm string,
 ) map[string]any {
 	vals := make(map[string]any, len(vars)+12)
 	vals["ORIGIN_HOST"] = originHost
 	vals["ORIGIN_REALM"] = originRealm
-	// Destination-Realm defaults to the peer's own realm (same domain).
-	vals["DEST_REALM"] = originRealm
+	vals["DEST_REALM"] = destRealm
+	if destHost != "" {
+		vals["DEST_HOST"] = destHost
+	}
 	// Auth-Application-Id is always 4 (Diameter Credit-Control / Gy).
 	vals["AUTH_APP_ID"] = uint32(4)
 	// END_USER_E164 (0) — constant for MSISDN-based Subscription-Id-Type AVP.
@@ -796,6 +810,30 @@ func smResolveVariables(
 	return vals
 }
 
+// smResolveIntParam resolves a generator param value that may be either a
+// plain number or a {{VAR}} placeholder referencing another variable. The
+// vals map must already contain the referenced variable's value (i.e. the
+// bound / literal variables are resolved before generator ones).
+func smResolveIntParam(raw any, vals map[string]any) (int64, bool) {
+	// Plain number — fast path.
+	if n, ok := toInt64Param(raw); ok {
+		return n, true
+	}
+	// String — check for {{VAR}} placeholder.
+	s, ok := raw.(string)
+	if !ok {
+		return 0, false
+	}
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "{{") && strings.HasSuffix(s, "}}") {
+		varName := s[2 : len(s)-2]
+		if v, ok := vals[varName]; ok {
+			return toInt64Param(v)
+		}
+	}
+	return 0, false
+}
+
 func smResolveGenerator(vals map[string]any, name string, src variableSrcJSON) {
 	switch src.Strategy {
 	case "literal":
@@ -804,7 +842,122 @@ func smResolveGenerator(vals map[string]any, name string, src variableSrcJSON) {
 		}
 	case "uuid":
 		vals[name] = uuid.New().String()
+	case "random-int":
+		min, max := int64(0), int64(math.MaxInt32)
+		if src.Params != nil {
+			if v, ok := smResolveIntParam(src.Params["min"], vals); ok {
+				min = v
+			}
+			if v, ok := smResolveIntParam(src.Params["max"], vals); ok {
+				max = v
+			}
+		}
+		if max <= min {
+			max = min + 1
+		}
+		n, _ := cryptoRandInt64(max - min)
+		vals[name] = min + n
+	case "random-string":
+		length := 8
+		charset := "alphanumeric"
+		if src.Params != nil {
+			if v, ok := src.Params["length"]; ok {
+				if n, ok := toInt64Param(v); ok && n > 0 {
+					length = int(n)
+				}
+			}
+			if v, ok := src.Params["charset"].(string); ok && v != "" {
+				charset = v
+			}
+		}
+		vals[name] = smRandomString(length, charset)
+	case "random-choice":
+		if src.Params != nil {
+			if raw, ok := src.Params["options"]; ok {
+				if options, ok := raw.([]any); ok && len(options) > 0 {
+					n, _ := cryptoRandInt64(int64(len(options)))
+					vals[name] = fmt.Sprintf("%v", options[n])
+				}
+			}
+		}
+	case "incrementer":
+		start := int64(0)
+		if src.Params != nil {
+			if v, ok := toInt64Param(src.Params["start"]); ok {
+				start = v
+			}
+		}
+		vals[name] = start
 	}
+}
+
+// smBuildRefreshers returns a slice of functions, one per generator variable
+// that carries refresh:"per-send". Each function re-randomizes that variable
+// in the provided vars map when called — the StepExecutor invokes all of them
+// before derived-value evaluation on every CCR send.
+func smBuildRefreshers(vars []variableJSON) []func(map[string]any) {
+	var refreshers []func(map[string]any)
+	for _, v := range vars {
+		if v.Source.Kind != "generator" || v.Source.Refresh != "per-send" {
+			continue
+		}
+		name := v.Name // capture by value
+		src := v.Source
+		refreshers = append(refreshers, func(vals map[string]any) {
+			smResolveGenerator(vals, name, src)
+		})
+	}
+	return refreshers
+}
+
+// cryptoRandInt64 returns a cryptographically random int64 in [0, n).
+func cryptoRandInt64(n int64) (int64, error) {
+	if n <= 0 {
+		return 0, nil
+	}
+	big, err := crand.Int(crand.Reader, big.NewInt(n))
+	if err != nil {
+		return 0, err
+	}
+	return big.Int64(), nil
+}
+
+// toInt64Param coerces a JSON-decoded value (typically float64) to int64.
+func toInt64Param(v any) (int64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return int64(n), true
+	case int64:
+		return n, true
+	case int:
+		return int64(n), true
+	case json.Number:
+		i, err := n.Int64()
+		return i, err == nil
+	}
+	return 0, false
+}
+
+// smRandomString generates a random string of the given length using the
+// named charset: "alpha", "numeric", "alphanumeric", or "hex".
+func smRandomString(length int, charset string) string {
+	var chars []byte
+	switch charset {
+	case "alpha":
+		chars = []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	case "numeric":
+		chars = []byte("0123456789")
+	case "hex":
+		chars = []byte("0123456789abcdef")
+	default: // alphanumeric
+		chars = []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+	}
+	out := make([]byte, length)
+	for i := range out {
+		n, _ := cryptoRandInt64(int64(len(chars)))
+		out[i] = chars[n]
+	}
+	return string(out)
 }
 
 func smResolveBound(vals map[string]any, name string, src variableSrcJSON, sub *store.Subscriber, originHost, originRealm string) {
@@ -833,15 +986,17 @@ func smResolveBound(vals map[string]any, name string, src variableSrcJSON, sub *
 	}
 }
 
-// smDeriveUnitType returns the Diameter unit type implied by the service type.
+// smDeriveUnitType returns the template.UnitType constant implied by the
+// service type. Values must match the constants defined in the template
+// package (UnitTypeOctet="OCTET", UnitTypeTime="TIME", UnitTypeUnits="UNITS").
 func smDeriveUnitType(serviceType string) string {
 	switch strings.ToUpper(serviceType) {
 	case "VOICE", "USSD2_SESSION":
-		return "TIME"
+		return string(template.UnitTypeTime) // "TIME"
 	case "DATA":
-		return "VOLUME"
+		return string(template.UnitTypeOctet) // "OCTET"
 	default: // SMS, USSD1_EVENT, USSD1_SESSION
-		return "EVENT"
+		return string(template.UnitTypeUnits) // "UNITS"
 	}
 }
 

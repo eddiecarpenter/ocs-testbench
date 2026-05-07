@@ -76,6 +76,15 @@ type PeerConfig struct {
 	OriginHost string
 	// OriginRealm is the local realm advertised in CER.
 	OriginRealm string
+
+	// DestHost is the Destination-Host AVP sent in every CCR. When
+	// empty the AVP is omitted and the OCS routes by Destination-Realm
+	// alone (the common case).
+	DestHost string
+	// DestRealm is the Destination-Realm AVP sent in every CCR.
+	// Defaults to OriginRealm when empty so existing peers need no
+	// migration.
+	DestRealm string
 	// OriginIP is the local IP address advertised as Host-IP-Address
 	// in CER. When empty the go-diameter stack auto-detects the local
 	// address from the dialled connection.

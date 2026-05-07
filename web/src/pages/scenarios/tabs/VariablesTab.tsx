@@ -21,6 +21,7 @@ import {
   Badge,
   Button,
   Card,
+  Collapse,
   Group,
   Modal,
   NumberInput,
@@ -52,6 +53,7 @@ import {
 import type {
   GeneratorRefresh,
   GeneratorStrategy,
+  ServiceModel,
   Variable,
   VariableSource,
   VariableSourceBound,
@@ -105,37 +107,61 @@ function Sidebar({
   onProvision,
   onRequestRemove,
 }: SidebarProps) {
+  const [systemOpen, setSystemOpen] = useState(false);
+  const [userOpen, setUserOpen] = useState(true);
+
   return (
     <Card withBorder padding="sm" style={{ width: 280 }}>
       <Stack gap="xs">
-        <Group justify="space-between">
-          <Title order={6}>System</Title>
+
+        {/* ── System section ── */}
+        <Group
+          justify="space-between"
+          style={{ cursor: 'pointer' }}
+          onClick={() => setSystemOpen((o) => !o)}
+        >
+          <Group gap="xs">
+            <Text size="xs" c="dimmed">{systemOpen ? '▾' : '▸'}</Text>
+            <Title order={6}>System</Title>
+          </Group>
           <Badge variant="outline">{system.length}</Badge>
         </Group>
-        <Stack gap={2}>
-          {system.map((v) => (
-            <Group
-              key={v.name}
-              gap="xs"
-              wrap="nowrap"
-              style={{
-                cursor: 'pointer',
-                padding: '4px 6px',
-                borderRadius: 4,
-                backgroundColor:
-                  selected === `system:${v.name}`
-                    ? 'var(--mantine-color-blue-light)'
-                    : undefined,
-              }}
-              onClick={() => onSelect(v.name, true)}
-            >
-              {chipFor(v.kind)}
-              <Text size="sm">{v.name}</Text>
-            </Group>
-          ))}
-        </Stack>
+        <Collapse expanded={systemOpen}>
+          <Stack gap={2}>
+            {system.map((v) => (
+              <Group
+                key={v.name}
+                gap="xs"
+                wrap="nowrap"
+                style={{
+                  cursor: 'pointer',
+                  padding: '4px 6px',
+                  borderRadius: 4,
+                  backgroundColor:
+                    selected === `system:${v.name}`
+                      ? 'var(--mantine-color-blue-light)'
+                      : undefined,
+                }}
+                onClick={() => onSelect(v.name, true)}
+              >
+                {chipFor(v.kind)}
+                <Text size="sm">{v.name}</Text>
+              </Group>
+            ))}
+          </Stack>
+        </Collapse>
+
+        {/* ── User section ── */}
         <Group justify="space-between">
-          <Title order={6}>User</Title>
+          <Group
+            gap="xs"
+            style={{ cursor: 'pointer', flex: 1 }}
+            onClick={() => setUserOpen((o) => !o)}
+          >
+            <Text size="xs" c="dimmed">{userOpen ? '▾' : '▸'}</Text>
+            <Title order={6}>User</Title>
+            <Badge variant="outline">{user.length}</Badge>
+          </Group>
           <Group gap={4}>
             <Tooltip
               label="Auto-provision: add the variables this scenario's services and serviceModel imply but aren't defined yet (won't overwrite existing ones)"
@@ -166,61 +192,64 @@ function Sidebar({
             </Tooltip>
           </Group>
         </Group>
-        <Stack gap={2}>
-          {user.length === 0 && (
-            <Text size="sm" c="dimmed">
-              No user variables yet.
-            </Text>
-          )}
-          {user.map((v) => {
-            const inUseCount = userUsageCounts[v.name] ?? 0;
-            const inUse = inUseCount > 0;
-            return (
-              <Group
-                key={v.name}
-                gap="xs"
-                wrap="nowrap"
-                style={{
-                  cursor: 'pointer',
-                  padding: '4px 6px',
-                  borderRadius: 4,
-                  backgroundColor:
-                    selected === `user:${v.name}`
-                      ? 'var(--mantine-color-blue-light)'
-                      : undefined,
-                }}
-                onClick={() => onSelect(v.name, false)}
-              >
-                {chipFor(v.source.kind)}
-                <Text size="sm" style={{ flex: 1 }}>
-                  {v.name}
-                </Text>
-                <Tooltip
-                  label={
-                    inUse
-                      ? `In use — referenced in ${inUseCount} place${inUseCount === 1 ? '' : 's'}`
-                      : 'Remove variable'
-                  }
+        <Collapse expanded={userOpen}>
+          <Stack gap={2}>
+            {user.length === 0 && (
+              <Text size="sm" c="dimmed">
+                No user variables yet.
+              </Text>
+            )}
+            {user.map((v) => {
+              const inUseCount = userUsageCounts[v.name] ?? 0;
+              const inUse = inUseCount > 0;
+              return (
+                <Group
+                  key={v.name}
+                  gap="xs"
+                  wrap="nowrap"
+                  style={{
+                    cursor: 'pointer',
+                    padding: '4px 6px',
+                    borderRadius: 4,
+                    backgroundColor:
+                      selected === `user:${v.name}`
+                        ? 'var(--mantine-color-blue-light)'
+                        : undefined,
+                  }}
+                  onClick={() => onSelect(v.name, false)}
                 >
-                  <ActionIcon
-                    variant="subtle"
-                    color="red"
-                    size="sm"
-                    aria-label={`Remove ${v.name}`}
-                    disabled={inUse}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRequestRemove(v.name);
-                    }}
-                    data-testid={`vars-remove-${v.name}`}
+                  {chipFor(v.source.kind)}
+                  <Text size="sm" style={{ flex: 1 }}>
+                    {v.name}
+                  </Text>
+                  <Tooltip
+                    label={
+                      inUse
+                        ? `In use — referenced in ${inUseCount} place${inUseCount === 1 ? '' : 's'}`
+                        : 'Remove variable'
+                    }
                   >
-                    <IconTrash size={14} />
-                  </ActionIcon>
-                </Tooltip>
-              </Group>
-            );
-          })}
-        </Stack>
+                    <ActionIcon
+                      variant="subtle"
+                      color="red"
+                      size="sm"
+                      aria-label={`Remove ${v.name}`}
+                      disabled={inUse}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRequestRemove(v.name);
+                      }}
+                      data-testid={`vars-remove-${v.name}`}
+                    >
+                      <IconTrash size={14} />
+                    </ActionIcon>
+                  </Tooltip>
+                </Group>
+              );
+            })}
+          </Stack>
+        </Collapse>
+
       </Stack>
     </Card>
   );
@@ -232,6 +261,9 @@ interface GeneratorFieldsProps {
 }
 
 function GeneratorFields({ source, onChange }: GeneratorFieldsProps) {
+  const setParam = (key: string, value: unknown) =>
+    onChange({ ...source, params: { ...(source.params ?? {}), [key]: value } });
+
   return (
     <>
       <Select
@@ -246,7 +278,7 @@ function GeneratorFields({ source, onChange }: GeneratorFieldsProps) {
         ].map((s) => ({ value: s, label: s }))}
         value={source.strategy}
         onChange={(v) =>
-          v && onChange({ ...source, strategy: v as GeneratorStrategy })
+          v && onChange({ ...source, strategy: v as GeneratorStrategy, params: {} })
         }
         allowDeselect={false}
       />
@@ -262,19 +294,78 @@ function GeneratorFields({ source, onChange }: GeneratorFieldsProps) {
         }
         allowDeselect={false}
       />
-      <NumberInput
-        label="Literal value (when strategy = literal)"
-        value={Number(source.params?.value ?? 0)}
-        onChange={(v) =>
-          onChange({
-            ...source,
-            params: {
-              ...(source.params ?? {}),
-              value: typeof v === 'number' ? v : 0,
-            },
-          })
-        }
-      />
+
+      {source.strategy === 'literal' && (
+        <NumberInput
+          label="Value"
+          value={Number(source.params?.value ?? 0)}
+          onChange={(v) => setParam('value', typeof v === 'number' ? v : 0)}
+        />
+      )}
+
+      {source.strategy === 'incrementer' && (
+        <NumberInput
+          label="Start value"
+          value={Number(source.params?.start ?? 0)}
+          onChange={(v) => setParam('start', typeof v === 'number' ? v : 0)}
+        />
+      )}
+
+      {source.strategy === 'random-int' && (
+        <>
+          <TextInput
+            label="Min (inclusive)"
+            description="Number or {{VARIABLE}}"
+            value={String(source.params?.min ?? 0)}
+            onChange={(e) => setParam('min', e.currentTarget.value)}
+          />
+          <TextInput
+            label="Max (exclusive)"
+            description="Number or {{VARIABLE}}"
+            value={String(source.params?.max ?? 0)}
+            onChange={(e) => setParam('max', e.currentTarget.value)}
+          />
+        </>
+      )}
+
+      {source.strategy === 'random-string' && (
+        <>
+          <NumberInput
+            label="Length"
+            min={1}
+            value={Number(source.params?.length ?? 8)}
+            onChange={(v) => setParam('length', typeof v === 'number' ? v : 8)}
+          />
+          <Select
+            label="Charset"
+            data={['alpha', 'numeric', 'alphanumeric', 'hex'].map((s) => ({
+              value: s,
+              label: s,
+            }))}
+            value={(source.params?.charset as string) ?? 'alphanumeric'}
+            onChange={(v) => v && setParam('charset', v)}
+            allowDeselect={false}
+          />
+        </>
+      )}
+
+      {source.strategy === 'random-choice' && (
+        <TextInput
+          label="Options (comma-separated)"
+          description="e.g. apple,banana,cherry"
+          value={
+            Array.isArray(source.params?.options)
+              ? (source.params.options as string[]).join(',')
+              : ''
+          }
+          onChange={(e) =>
+            setParam(
+              'options',
+              e.currentTarget.value.split(',').map((s) => s.trim()).filter(Boolean),
+            )
+          }
+        />
+      )}
     </>
   );
 }
@@ -473,8 +564,14 @@ export function VariablesTab() {
     usages: UsageRef[];
   } | null>(null);
 
-  const system = listSystemVariables();
-  const user = draft?.variables ?? [];
+  const system = listSystemVariables(
+    draft ? { services: draft.services, serviceModel: draft.serviceModel as ServiceModel } : undefined,
+  );
+  const systemNames = new Set(system.map((v) => v.name));
+  // Filter out any user variable whose name duplicates a system variable —
+  // MSISDN is auto-provisioned as a system variable so it shouldn't also
+  // appear in the user list.
+  const user = (draft?.variables ?? []).filter((v) => !systemNames.has(v.name));
   const allByName = new Map<string, { isSystem: boolean }>();
   for (const v of system) allByName.set(v.name, { isSystem: true });
   for (const v of user) allByName.set(v.name, { isSystem: false });

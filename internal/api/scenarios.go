@@ -26,50 +26,53 @@ func mountScenarios(r chi.Router, s store.Store, dict template.Dictionary) {
 // every ScenarioInput field that is not promoted to its own column
 // (name, peerId, subscriberId are stored as columns).
 type scenarioBody struct {
-	Description    string          `json:"description,omitempty"`
-	SessionMode    string          `json:"sessionMode"`
-	ServiceModel   string          `json:"serviceModel"`
-	ServiceType    string          `json:"serviceType,omitempty"`
-	ServiceProfile string          `json:"serviceProfile,omitempty"`
-	Favourite      bool            `json:"favourite,omitempty"`
-	AvpTree        json.RawMessage `json:"avpTree"`
-	Services       json.RawMessage `json:"services"`
-	Variables      json.RawMessage `json:"variables"`
-	Steps          json.RawMessage `json:"steps"`
+	Description      string          `json:"description,omitempty"`
+	SessionMode      string          `json:"sessionMode"`
+	ServiceModel     string          `json:"serviceModel"`
+	ServiceType      string          `json:"serviceType,omitempty"`
+	ServiceProfile   string          `json:"serviceProfile,omitempty"`
+	Favourite        bool            `json:"favourite,omitempty"`
+	ServiceContextID string          `json:"serviceContextId,omitempty"`
+	AvpTree          json.RawMessage `json:"avpTree"`
+	Services         json.RawMessage `json:"services"`
+	Variables        json.RawMessage `json:"variables"`
+	Steps            json.RawMessage `json:"steps"`
 }
 
 // scenarioRequest is the decoded form of a ScenarioInput JSON body.
 type scenarioRequest struct {
-	Name           string          `json:"name"`
-	Description    string          `json:"description"`
-	SessionMode    string          `json:"sessionMode"`
-	ServiceModel   string          `json:"serviceModel"`
-	ServiceType    string          `json:"serviceType"`
-	ServiceProfile string          `json:"serviceProfile"`
-	Favourite      bool            `json:"favourite"`
-	SubscriberID   string          `json:"subscriberId"`
-	PeerID         string          `json:"peerId"`
-	AvpTree        json.RawMessage `json:"avpTree"`
-	Services       json.RawMessage `json:"services"`
-	Variables      json.RawMessage `json:"variables"`
-	Steps          json.RawMessage `json:"steps"`
+	Name             string          `json:"name"`
+	Description      string          `json:"description"`
+	SessionMode      string          `json:"sessionMode"`
+	ServiceModel     string          `json:"serviceModel"`
+	ServiceType      string          `json:"serviceType"`
+	ServiceProfile   string          `json:"serviceProfile"`
+	Favourite        bool            `json:"favourite"`
+	SubscriberID     string          `json:"subscriberId"`
+	PeerID           string          `json:"peerId"`
+	ServiceContextID string          `json:"serviceContextId"`
+	AvpTree          json.RawMessage `json:"avpTree"`
+	Services         json.RawMessage `json:"services"`
+	Variables        json.RawMessage `json:"variables"`
+	Steps            json.RawMessage `json:"steps"`
 }
 
 // scenarioSummaryResponse matches the OpenAPI ScenarioSummary shape.
 type scenarioSummaryResponse struct {
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	Description    string `json:"description,omitempty"`
-	ServiceType    string `json:"serviceType,omitempty"`
-	ServiceProfile string `json:"serviceProfile,omitempty"`
-	SessionMode    string `json:"sessionMode"`
-	ServiceModel   string `json:"serviceModel"`
-	Origin         string `json:"origin"`
-	Favourite      bool   `json:"favourite"`
-	SubscriberID   string `json:"subscriberId,omitempty"`
-	PeerID         string `json:"peerId,omitempty"`
-	StepCount      int    `json:"stepCount"`
-	UpdatedAt      string `json:"updatedAt"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Description      string `json:"description,omitempty"`
+	ServiceType      string `json:"serviceType,omitempty"`
+	ServiceProfile   string `json:"serviceProfile,omitempty"`
+	SessionMode      string `json:"sessionMode"`
+	ServiceModel     string `json:"serviceModel"`
+	Origin           string `json:"origin"`
+	Favourite        bool   `json:"favourite"`
+	SubscriberID     string `json:"subscriberId,omitempty"`
+	PeerID           string `json:"peerId,omitempty"`
+	ServiceContextID string `json:"serviceContextId,omitempty"`
+	StepCount        int    `json:"stepCount"`
+	UpdatedAt        string `json:"updatedAt"`
 }
 
 // scenarioFullResponse extends scenarioSummaryResponse with the full
@@ -119,9 +122,10 @@ func toSummaryResponse(sc store.Scenario) scenarioSummaryResponse {
 		ServiceModel:   b.ServiceModel,
 		Origin:         "user",
 		Favourite:      b.Favourite,
-		SubscriberID:   uuidToString(sc.SubscriberID),
-		PeerID:         uuidToString(sc.PeerID),
-		StepCount:      countJSONArray(b.Steps),
+		SubscriberID:     uuidToString(sc.SubscriberID),
+		PeerID:           uuidToString(sc.PeerID),
+		ServiceContextID: b.ServiceContextID,
+		StepCount:        countJSONArray(b.Steps),
 		UpdatedAt:      sc.UpdatedAt.Time.UTC().Format("2006-01-02T15:04:05Z07:00"),
 	}
 }
@@ -191,16 +195,17 @@ func enrichNodes(nodes []avpRichNode, dict template.Dictionary) {
 // JSONB body.
 func buildBody(req scenarioRequest) ([]byte, error) {
 	b := scenarioBody{
-		Description:    req.Description,
-		SessionMode:    req.SessionMode,
-		ServiceModel:   req.ServiceModel,
-		ServiceType:    req.ServiceType,
-		ServiceProfile: req.ServiceProfile,
-		Favourite:      req.Favourite,
-		AvpTree:        req.AvpTree,
-		Services:       req.Services,
-		Variables:      req.Variables,
-		Steps:          req.Steps,
+		Description:      req.Description,
+		SessionMode:      req.SessionMode,
+		ServiceModel:     req.ServiceModel,
+		ServiceType:      req.ServiceType,
+		ServiceProfile:   req.ServiceProfile,
+		Favourite:        req.Favourite,
+		ServiceContextID: req.ServiceContextID,
+		AvpTree:          req.AvpTree,
+		Services:         req.Services,
+		Variables:        req.Variables,
+		Steps:            req.Steps,
 	}
 	return json.Marshal(b)
 }

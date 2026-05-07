@@ -15,6 +15,22 @@ import (
 	"github.com/eddiecarpenter/ocs-testbench/internal/diameter"
 )
 
+// builderOwnedAVP lists the AVP codes that BuildCCRMessage adds from
+// CCR struct fields. ExtraAVPs carrying these codes are silently
+// dropped to prevent duplicate-AVP rejections from the OCS.
+var builderOwnedAVP = map[uint32]bool{
+	avp.SessionID:          true, // 263
+	avp.OriginHost:         true, // 264
+	avp.OriginRealm:        true, // 296
+	avp.DestinationRealm:   true, // 283
+	avp.DestinationHost:    true, // 293
+	avp.AuthApplicationID:  true, // 258
+	avp.ServiceContextID:   true, // 461
+	avp.CCRequestType:      true, // 416
+	avp.CCRequestNumber:    true, // 415
+	avp.EventTimestamp:     true, // 55
+}
+
 // BuildCCRMessage encodes a CCR onto a *diam.Message. The caller
 // provides the dictionary parser that should be used (typically
 // dict.Default after the loader has run); the output message
@@ -85,13 +101,18 @@ func BuildCCRMessage(parser *dict.Parser, req *CCR) (*diam.Message, error) {
 	m.NewAVP(avp.CCRequestNumber, avp.Mbit, 0, datatype.Unsigned32(req.CCRequestNumber))
 	m.NewAVP(avp.EventTimestamp, avp.Mbit, 0, datatype.Time(ts))
 
-	// Caller-supplied AVPs trail the canonical block. The encoder
-	// does not deduplicate against the canonical AVPs above —
-	// callers are responsible for not double-supplying Session-Id
-	// etc. via ExtraAVPs. The OCS will reject duplicates with a
-	// 5xxx anyway.
+	// Caller-supplied AVPs trail the canonical block. AVP codes
+	// that the builder owns natively (Session-Id, Origin-Host,
+	// Origin-Realm, Destination-Realm, Destination-Host,
+	// Auth-Application-Id, Service-Context-Id, CC-Request-Type,
+	// CC-Request-Number, Event-Timestamp) are filtered out of
+	// ExtraAVPs to prevent duplicates — the OCS would reject them
+	// with a 5xxx result-code.
 	for _, a := range req.ExtraAVPs {
 		if a == nil {
+			continue
+		}
+		if builderOwnedAVP[a.Code] {
 			continue
 		}
 		m.AddAVP(a)

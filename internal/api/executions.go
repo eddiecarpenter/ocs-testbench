@@ -324,10 +324,15 @@ func listExecutions(exec ExecutionEngine) http.HandlerFunc {
 			return
 		}
 
+		filterScenarioID := r.URL.Query().Get("scenarioId")
+
 		sessions := exec.List(r.Context())
-		items := make([]any, len(sessions))
-		for i, s := range sessions {
-			items[i] = executionSummaryJSON{
+		items := make([]any, 0, len(sessions))
+		for _, s := range sessions {
+			if filterScenarioID != "" && s.ScenarioID != filterScenarioID {
+				continue
+			}
+			items = append(items, executionSummaryJSON{
 				ID:                  s.SessionID,
 				ScenarioID:          s.ScenarioID,
 				ScenarioName:        s.ScenarioName,
@@ -336,7 +341,7 @@ func listExecutions(exec ExecutionEngine) http.HandlerFunc {
 				StartedAt:           s.StartedAt,
 				Repeats:             s.Repeats,
 				CompletedIterations: s.CompletedIterations,
-			}
+			})
 		}
 		respondJSON(w, http.StatusOK, executionPageResponse{
 			Items: items,

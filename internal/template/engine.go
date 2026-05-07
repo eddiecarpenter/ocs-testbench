@@ -280,15 +280,27 @@ func (e *Engine) buildServiceUnitPair(
 		return nil, err
 	}
 	// Cap USU to what the OCS actually granted in the previous exchange.
-	//   - granted == 0 → suppress USU (nothing was granted; nothing can be used).
-	//   - used > granted → cap USU to granted (cannot report more than was given).
-	// For MSCC blocks (RatingGroup > 0) look up RG<n>_GRANTED.
+	//   - key absent   → emit USU as-is (no prior CCA yet, or tests without state)
+	//   - granted == 0 → suppress USU (4xxx/5xxx response: nothing was granted)
+	//   - used > granted → cap USU to granted (cannot report more than was given)
+	// For MSCC blocks (RatingGroup > 0) look up the appropriate granted variable:
+	//   OCTET (DATA)   → RG<n>_GRANTED_UNITS (CC-Total-Octets)
+	//   TIME (VOICE)   → RG<n>_GRANTED        (CC-Time)
+	//   EVENT / other  → RG<n>_GRANTED        (CC-Service-Specific-Units)
 	// For root service model (RatingGroup == 0) look up the root-level
 	// RESULT_CODE: a non-2xxx code means no quota was granted at all.
 	if emitUSU {
 		if block.RatingGroup > 0 {
-			key := fmt.Sprintf("RG%d_GRANTED", block.RatingGroup)
+			var key string
+			if unitType == UnitTypeOctet {
+				key = fmt.Sprintf("RG%d_GRANTED_UNITS", block.RatingGroup)
+			} else {
+				key = fmt.Sprintf("RG%d_GRANTED", block.RatingGroup)
+			}
 			if grantedRaw, ok := values[key]; ok {
+				// Key present: OCS responded with an explicit grant value.
+				// granted == 0 → the exchange was denied (4xxx/5xxx), suppress USU.
+				// used > granted → cap USU to the actual grant.
 				grantedN, gOk := toUint64(grantedRaw)
 				if gOk {
 					if grantedN == 0 {
@@ -298,6 +310,9 @@ func (e *Engine) buildServiceUnitPair(
 					}
 				}
 			}
+			// Key absent: grant variables are set by autoUpdateVarsFromCCA after
+			// each CCA. Absence means no CCA was processed yet (e.g. first-time
+			// TERMINATE, or a test without prior exchange). Emit USU as-is.
 		} else {
 			// Root service model: suppress USU if the previous CCA was a failure.
 			if rcRaw, ok := values["RESULT_CODE"]; ok {

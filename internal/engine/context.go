@@ -43,6 +43,12 @@ type SessionContext struct {
 	// CCR for this session. Set at session creation from the scenario
 	// definition; defaults to "32251@3gpp.org" when the scenario omits it.
 	ServiceContextID string
+	// DestRealm is the Destination-Realm AVP sent in every CCR. Defaults
+	// to the peer's OriginRealm when empty.
+	DestRealm string
+	// DestHost is the Destination-Host AVP sent in every CCR. When empty
+	// the AVP is omitted (OCS routes by realm alone).
+	DestHost string
 	// Vars is the live substitution map carried across steps. It is
 	// pre-seeded with CC_REQUEST_NUMBER = 0 at creation and updated by
 	// extractions and derived-value evaluations during execution.

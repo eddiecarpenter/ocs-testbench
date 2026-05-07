@@ -144,23 +144,14 @@ export function mergeVariables(existing: Variable[], additions: Variable[]): Var
 }
 
 /**
- * The system-mandatory AVPs that appear at the top of every avpTree.
- * All are locked (no delete). Leaf values reference engine-seeded system
- * variables (ORIGIN_HOST, ORIGIN_REALM, DEST_REALM, SERVICE_CONTEXT_ID)
- * or literal values (Auth-Application-Id = 4).
- *
- * Session-Id (263) is NOT in this list — it is purely engine-generated
- * and shown only as an informational row above the tree.
+ * AVPs that the CCR builder owns natively (Origin-Host, Origin-Realm,
+ * Destination-Realm, Destination-Host, Service-Context-Id, Session-Id,
+ * Auth-Application-Id, CC-Request-Type/Number, Event-Timestamp) are NOT
+ * included in the avpTree. The builder sets them from SessionContext fields
+ * and filters duplicates from ExtraAVPs, so including them here would
+ * produce no-ops for new scenarios and be silently dropped for old ones.
  */
-const SYSTEM_AVPS: AvpNode[] = [
-  { name: 'Origin-Host',        code: 264, locked: true, valueRef: 'ORIGIN_HOST' },
-  { name: 'Origin-Realm',       code: 296, locked: true, valueRef: 'ORIGIN_REALM' },
-  { name: 'Destination-Realm',  code: 283, locked: true, valueRef: 'DEST_REALM' },
-  { name: 'Service-Context-Id', code: 461, locked: true, valueRef: 'SERVICE_CONTEXT_ID' },
-];
-
 const BASE_AVP_TREE: AvpNode[] = [
-  ...SYSTEM_AVPS,
   {
     name: 'Subscription-Id',
     code: 443,
@@ -242,6 +233,7 @@ export function toScenarioInput(s: Scenario): ScenarioInput {
     favourite: s.favourite ?? false,
     subscriberId: s.subscriberId ?? '',
     peerId: s.peerId ?? '',
+    serviceContextId: s.serviceContextId || undefined,
     avpTree: s.avpTree,
     services: s.services,
     variables: s.variables,

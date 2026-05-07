@@ -3,7 +3,7 @@
  * derived data — currently variable usage. Pure functions, easy
  * to test, no dependency on React or the store.
  */
-import type { AvpNode, Scenario } from './types';
+import type { AvpNode, Scenario, Service, ServiceModel } from './types';
 
 export interface UsageRef {
   /** Where the reference was found. */
@@ -163,8 +163,10 @@ export interface VariableOptionGroup {
  */
 export function buildVariableOptions(
   userVariables: { name: string }[],
+  context?: { services: Service[]; serviceModel: ServiceModel },
 ): { options: VariableOptionGroup[]; hasAny: boolean } {
-  const systemNames = listSystemVariables().map((v) => v.name);
+  const systemVars = listSystemVariables(context);
+  const systemNames = systemVars.map((v) => v.name);
   const systemSet = new Set(systemNames);
   const userNames = userVariables
     .map((v) => v.name)
@@ -187,6 +189,10 @@ export function buildVariableOptions(
  * `scenario.variables` per the OpenAPI contract. The Variables tab
  * surfaces them for completeness so the user knows what names the
  * runtime will populate.
+ *
+ * When `context` is supplied the generic RGn_XXX placeholders are
+ * replaced with concrete per-service entries (RG1_XXX, RG2_XXX …
+ * for multi-mscc; RG_XXX for single-mscc; omitted for root).
  */
 export interface SystemVariable {
   name: string;
@@ -194,8 +200,30 @@ export interface SystemVariable {
   description: string;
 }
 
-export function listSystemVariables(): SystemVariable[] {
-  return [
+/** Per-RG suffix definitions shared by listSystemVariables and buildVariableOptions. */
+const RG_SUFFIXES: Array<{ suffix: string; description: string }> = [
+  { suffix: 'GRANTED',       description: 'Granted-Service-Unit (time, seconds) for this rating group — set from CCA.' },
+  { suffix: 'GRANTED_UNITS', description: 'Granted-Service-Unit (total octets) for this rating group — set from CCA.' },
+  { suffix: 'VALIDITY',      description: 'Validity-Time (seconds) granted for this rating group — set from CCA.' },
+  { suffix: 'RESULT_CODE',   description: 'Per-MSCC Result-Code for this rating group (0 = absent) — set from CCA.' },
+  { suffix: 'FUI_ACTION',    description: 'Per-MSCC Final-Unit-Action for this rating group (-1 = absent, 0 = TERMINATE) — set from CCA.' },
+];
+
+function rgSystemVars(
+  prefix: string,
+  serviceId: string,
+): SystemVariable[] {
+  return RG_SUFFIXES.map(({ suffix, description }) => ({
+    name: `${prefix}${suffix}`,
+    kind: 'generator' as const,
+    description: `[Service ${serviceId}] ${description}`,
+  }));
+}
+
+export function listSystemVariables(
+  context?: { services: Service[]; serviceModel: ServiceModel },
+): SystemVariable[] {
+  const base: SystemVariable[] = [
     {
       name: 'SESSION_ID',
       kind: 'generator',
@@ -229,8 +257,7 @@ export function listSystemVariables(): SystemVariable[] {
     {
       name: 'SERVICE_CONTEXT_ID',
       kind: 'bound',
-      description:
-        'Service-Context-Id (RFC 4006 §5.1.1.4) — defaults to 32251@3gpp.org.',
+      description: 'Service-Context-Id (RFC 4006 §5.1.1.4) — defaults to 32251@3gpp.org.',
     },
     {
       name: 'AUTH_APP_ID',
@@ -252,17 +279,11 @@ export function listSystemVariables(): SystemVariable[] {
       kind: 'bound',
       description: 'Calling-party address — auto-set from subscriber MSISDN.',
     },
-
-    // — Accumulation variables — updated by the engine after each send —
-
     {
       name: 'TOTAL_USU',
       kind: 'generator',
-      description: 'Cumulative Used-Service-Unit total for the session — sum of USU_TOTAL across all UPDATE and TERMINATE steps sent so far.',
+      description: 'Cumulative Used-Service-Unit total — sum across all UPDATE and TERMINATE steps.',
     },
-
-    // — CCA auto-variables — written by the engine after each send —
-
     {
       name: 'RESULT_CODE',
       kind: 'generator',
@@ -273,30 +294,21 @@ export function listSystemVariables(): SystemVariable[] {
       kind: 'generator',
       description: 'Root-level Final-Unit-Action from the last CCA (-1 = absent, 0 = TERMINATE).',
     },
-    {
-      name: 'RGn_GRANTED',
-      kind: 'generator',
-      description: 'Granted-Service-Unit (time, seconds) for rating group n — e.g. RG1_GRANTED.',
-    },
-    {
-      name: 'RGn_GRANTED_OCTETS',
-      kind: 'generator',
-      description: 'Granted-Service-Unit (total octets) for rating group n — e.g. RG1_GRANTED_OCTETS.',
-    },
-    {
-      name: 'RGn_VALIDITY',
-      kind: 'generator',
-      description: 'Validity-Time (seconds) granted for rating group n — e.g. RG1_VALIDITY.',
-    },
-    {
-      name: 'RGn_RESULT_CODE',
-      kind: 'generator',
-      description: 'Per-MSCC Result-Code for rating group n — e.g. RG1_RESULT_CODE (0 = absent).',
-    },
-    {
-      name: 'RGn_FUI_ACTION',
-      kind: 'generator',
-      description: 'Per-MSCC Final-Unit-Action for rating group n — e.g. RG1_FUI_ACTION (-1 = absent, 0 = TERMINATE).',
-    },
   ];
+
+  if (!context || context.serviceModel === 'root') return base;
+
+  const perRg: SystemVariable[] = [];
+  if (context.serviceModel === 'single-mscc') {
+    // One MSCC, no number prefix.
+    perRg.push(...rgSystemVars('RG_', context.services[0]?.id ?? ''));
+  } else {
+    // multi-mscc — one concrete set per service, keyed by 1-based position
+    // (RG1 = first service, RG2 = second …) to match the engine's CCA indexing.
+    context.services.forEach((_, i) => {
+      perRg.push(...rgSystemVars(`RG${i + 1}_`, String(i + 1)));
+    });
+  }
+
+  return [...base, ...perRg];
 }

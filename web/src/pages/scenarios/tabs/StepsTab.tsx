@@ -58,6 +58,7 @@ import type {
   RequestStep,
   RequestType,
   ScenarioStep,
+  ServiceModel,
   SessionMode,
   VarValue,
 } from '../types';
@@ -246,14 +247,18 @@ interface StepEditorProps {
   index: number;
   sessionMode: SessionMode;
   variableNames: string[];
+  context?: Parameters<typeof listSystemVariables>[0];
   onChange: (step: ScenarioStep) => void;
 }
 
 /** Build a zero-value test variable map from scenario + system variable names. */
-function buildTestVars(variableNames: string[]): Record<string, unknown> {
+function buildTestVars(
+  variableNames: string[],
+  context?: Parameters<typeof listSystemVariables>[0],
+): Record<string, unknown> {
   const vars: Record<string, unknown> = {};
   // Seed system CCA auto-variables with representative values.
-  for (const sv of listSystemVariables()) {
+  for (const sv of listSystemVariables(context)) {
     vars[sv.name] = sv.name.includes('RESULT') ? 2001
       : sv.name.includes('FUI') ? -1
       : sv.name.includes('GRANTED') || sv.name.includes('VALIDITY') ? 0
@@ -271,9 +276,10 @@ function StepEditor({
   index,
   sessionMode,
   variableNames,
+  context,
   onChange,
 }: StepEditorProps) {
-  const testVars = buildTestVars(variableNames);
+  const testVars = buildTestVars(variableNames, context);
   return (
     <Stack gap="md">
       <Title order={5}>Step {index + 1}</Title>
@@ -651,6 +657,7 @@ export function StepsTab() {
             index={effectiveIndex}
             sessionMode={sessionMode}
             variableNames={variableNames}
+            context={draft ? { services: draft.services, serviceModel: draft.serviceModel as ServiceModel } : undefined}
             onChange={(s) => updateStep(effectiveIndex, s)}
           />
         ) : (

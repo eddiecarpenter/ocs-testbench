@@ -63,6 +63,7 @@ export interface ScenarioDraftState {
   setServiceModel: (serviceModel: Scenario['serviceModel']) => void;
   setSubscriberId: (subscriberId: string | undefined) => void;
   setPeerId: (peerId: string | undefined) => void;
+  setServiceContextId: (serviceContextId: string | undefined) => void;
   setFavourite: (favourite: boolean) => void;
 
   // ------------------------------------------------------------------
@@ -173,6 +174,8 @@ export const useScenarioDraftStore = create<ScenarioDraftState>((set, get) => ({
     commit(set, get, (d) => ({ ...d, subscriberId: subscriberId ?? '' })),
   setPeerId: (peerId) =>
     commit(set, get, (d) => ({ ...d, peerId: peerId ?? '' })),
+  setServiceContextId: (serviceContextId) =>
+    commit(set, get, (d) => ({ ...d, serviceContextId: serviceContextId || undefined })),
   setFavourite: (favourite) => commit(set, get, (d) => ({ ...d, favourite })),
 
   setSteps: (steps) => commit(set, get, (d) => ({ ...d, steps })),

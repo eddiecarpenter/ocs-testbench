@@ -25,7 +25,7 @@ export function App() {
       <MantineProvider theme={theme} defaultColorScheme="auto">
         <QueryClientProvider client={queryClient}>
           <SseProvider>
-            <Notifications position="top-right" />
+            <Notifications position="top-right" pauseResetOnHover="notification" />
             <GlobalPeerToasts />
             <Routes>
             <Route element={<AppShell />}>

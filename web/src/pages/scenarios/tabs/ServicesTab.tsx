@@ -35,6 +35,7 @@ import {
   IconTrash,
 } from '@tabler/icons-react';
 
+import { provisionVariables } from '../provisionVariables';
 import { useScenarioDraftStore } from '../scenarioDraftStore';
 import {
   buildVariableOptions,
@@ -156,6 +157,7 @@ function ServiceEditor({
 export function ServicesTab() {
   const draft = useScenarioDraftStore((s) => s.draft);
   const setServices = useScenarioDraftStore((s) => s.setServices);
+  const setVariables = useScenarioDraftStore((s) => s.setVariables);
   const setServiceModel = useScenarioDraftStore((s) => s.setServiceModel);
 
   if (!draft) return null;
@@ -163,7 +165,7 @@ export function ServicesTab() {
   const { serviceType, serviceModel, services } = draft;
   const unitType = deriveUnitType(serviceType);
   const { options: variableOptions, hasAny: hasAnyVariable } =
-    buildVariableOptions(draft.variables);
+    buildVariableOptions(draft.variables, { services, serviceModel });
 
   function handleSegment(value: string) {
     const next = value as ServiceModel;
@@ -194,20 +196,26 @@ export function ServicesTab() {
       if (services.length >= 1 && services[0].id !== 'root') {
         setServices(services);
       } else {
-        setServices([
+        // Seed two services using position-based variable names (RG1_, RG2_)
+        // to match provisionVariables and the engine's CCA indexing.
+        const seeded = [
           {
             id: '100',
-            ratingGroup: 'RG100_RATING_GROUP',
-            requestedUnits: 'RG100_RSU_TOTAL',
-            usedUnits: 'RG100_USU_TOTAL',
+            ratingGroup: 'RG1_RATING_GROUP',
+            requestedUnits: 'RG1_UNITS_REQ',
+            usedUnits: 'RG1_UNITS_USED',
           },
           {
             id: '200',
-            ratingGroup: 'RG200_RATING_GROUP',
-            requestedUnits: 'RG200_RSU_TOTAL',
-            usedUnits: 'RG200_USU_TOTAL',
+            ratingGroup: 'RG2_RATING_GROUP',
+            requestedUnits: 'RG2_UNITS_REQ',
+            usedUnits: 'RG2_UNITS_USED',
           },
-        ]);
+        ];
+        setServices(seeded);
+        if (draft) {
+          setVariables(provisionVariables({ ...draft, services: seeded }));
+        }
       }
     }
   }
@@ -306,16 +314,22 @@ export function ServicesTab() {
               <Button
                 variant="default"
                 leftSection={<IconPlus size={14} />}
-                onClick={() =>
-                  setServices([
-                    ...services,
-                    {
-                      id: String((services.length + 1) * 100),
-                      ratingGroup: `RG${(services.length + 1) * 100}_RATING_GROUP`,
-                      requestedUnits: `RG${(services.length + 1) * 100}_RSU_TOTAL`,
-                    },
-                  ])
-                }
+                onClick={() => {
+                  // pos is 1-based position; id is the Diameter service identifier.
+                  const pos = services.length + 1;
+                  const id = String(pos * 100);
+                  const newSvc: Service = {
+                    id,
+                    ratingGroup: `RG${pos}_RATING_GROUP`,
+                    requestedUnits: `RG${pos}_UNITS_REQ`,
+                    usedUnits: `RG${pos}_UNITS_USED`,
+                  };
+                  const nextServices = [...services, newSvc];
+                  setServices(nextServices);
+                  if (draft) {
+                    setVariables(provisionVariables({ ...draft, services: nextServices }));
+                  }
+                }}
                 data-testid="services-add"
               >
                 Add service

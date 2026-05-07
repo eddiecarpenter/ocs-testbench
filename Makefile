@@ -7,8 +7,10 @@
 .PHONY: build vet test test-integration test-all generate clean
 
 # build — compile every package; the canonical pre-commit gate.
+# -a forces a full rebuild so that changes to go:embed targets (web/dist)
+# are always picked up by the Go build cache.
 build:
-	go build ./...
+	go build -a -o ocs-testbench ./cmd/ocs-testbench/ && go build ./...
 
 # vet — static analysis; runs in CI alongside the build.
 vet:
