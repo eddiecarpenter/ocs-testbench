@@ -31,7 +31,7 @@ import {
   IconSun,
   IconTrash,
 } from '@tabler/icons-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import {
   type CustomDictionary,
@@ -465,8 +465,11 @@ function DictModal({ opened, onClose, title, existing }: DictModalProps) {
     },
   });
 
-  // Re-seed when existing changes (edit different row)
-  const handleOpen = () => {
+  // Re-seed the form when the modal opens or switches to a different row.
+  // Cannot use Modal's onTransitionEnd — it bubbles from every child CSS
+  // transition (focus rings etc.) and would reset the form on every blur.
+  useEffect(() => {
+    if (!opened) return;
     form.setValues({
       name: existing?.name ?? '',
       description: existing?.description ?? '',
@@ -475,7 +478,8 @@ function DictModal({ opened, onClose, title, existing }: DictModalProps) {
     });
     form.resetDirty();
     setConfirmDelete(false);
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opened, existing?.id]);
 
   const handleSubmit = form.onSubmit(async (values) => {
     try {
@@ -511,7 +515,6 @@ function DictModal({ opened, onClose, title, existing }: DictModalProps) {
       onClose={onClose}
       title={title}
       size="xl"
-      onTransitionEnd={handleOpen}
     >
       <form onSubmit={handleSubmit}>
         <Stack gap="md">
