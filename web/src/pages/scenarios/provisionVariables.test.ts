@@ -2,7 +2,7 @@
  * Tests for the auto-provisioning naming convention.
  *
  * Covers AC-32 from Feature #77 — names are flat for `root` /
- * `single-mscc` and `RG<rg>_…` for `multi-mscc`.
+ * `single-mscc` and `RG<pos>_…` (1-based position) for `multi-mscc`.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -53,35 +53,35 @@ describe('provisionVariables', () => {
         {
           id: '100',
           ratingGroup: 'RATING_GROUP',
-          requestedUnits: 'RSU_TOTAL',
-          usedUnits: 'USU_TOTAL',
+          requestedUnits: 'UNITS_REQ',
+          usedUnits: 'UNITS_USED',
         },
       ],
     });
     const next = provisionVariables(s);
     const names = next.map((v) => v.name);
     expect(names).toEqual(
-      expect.arrayContaining(['RATING_GROUP', 'RSU_TOTAL', 'USU_TOTAL']),
+      expect.arrayContaining(['RATING_GROUP', 'UNITS_REQ', 'UNITS_USED']),
     );
     expect(names.some((n) => n.startsWith('RG'))).toBe(false);
   });
 
-  it('uses RG<rg>_ prefix for every multi-mscc service', () => {
+  it('uses RG<pos>_ prefix (1-based position) for every multi-mscc service', () => {
     const s = baseScenario({
       serviceType: 'DATA',
       serviceModel: 'multi-mscc',
       services: [
         {
           id: '100',
-          ratingGroup: 'RG100_RATING_GROUP',
-          requestedUnits: 'RG100_RSU_TOTAL',
-          usedUnits: 'RG100_USU_TOTAL',
+          ratingGroup: 'RG1_RATING_GROUP',
+          requestedUnits: 'RG1_UNITS_REQ',
+          usedUnits: 'RG1_UNITS_USED',
         },
         {
           id: '200',
-          ratingGroup: 'RG200_RATING_GROUP',
-          requestedUnits: 'RG200_RSU_TOTAL',
-          usedUnits: 'RG200_USU_TOTAL',
+          ratingGroup: 'RG2_RATING_GROUP',
+          requestedUnits: 'RG2_UNITS_REQ',
+          usedUnits: 'RG2_UNITS_USED',
         },
       ],
     });
@@ -89,12 +89,12 @@ describe('provisionVariables', () => {
     const names = next.map((v) => v.name);
     expect(names).toEqual(
       expect.arrayContaining([
-        'RG100_RATING_GROUP',
-        'RG100_RSU_TOTAL',
-        'RG100_USU_TOTAL',
-        'RG200_RATING_GROUP',
-        'RG200_RSU_TOTAL',
-        'RG200_USU_TOTAL',
+        'RG1_RATING_GROUP',
+        'RG1_UNITS_REQ',
+        'RG1_UNITS_USED',
+        'RG2_RATING_GROUP',
+        'RG2_UNITS_REQ',
+        'RG2_UNITS_USED',
       ]),
     );
   });
