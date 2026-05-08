@@ -324,8 +324,14 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 			// Native window mode: launch the Wails window on the main OS thread.
 			// lc.Run (signal handling + shutdown) moves to a goroutine so the
 			// main thread is free for the Cocoa event loop.
+			//
+			// A derived cancellable context is used for lc.Run so that when
+			// wails.Run returns (window closed, Cmd+Q, runtime.Quit) we can
+			// unblock lc.Run immediately — otherwise the signal handler goroutine
+			// waits forever and the process hangs requiring a force-kill.
+			lcCtx, lcCancel := context.WithCancel(ctx)
 			lcErrCh := make(chan error, 1)
-			go func() { lcErrCh <- lc.Run(ctx) }()
+			go func() { lcErrCh <- lc.Run(lcCtx) }()
 
 			app := newWailsApp()
 			wailsErr := wails.Run(&options.App{
@@ -353,7 +359,9 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 				},
 			})
 
-			// Window closed — drain lifecycle.
+			// Window closed — cancel the lifecycle context so lc.Run unblocks,
+			// then drain the channel before returning.
+			lcCancel()
 			if lcErr := <-lcErrCh; lcErr != nil && !errors.Is(lcErr, context.Canceled) {
 				if wailsErr == nil {
 					return lcErr
