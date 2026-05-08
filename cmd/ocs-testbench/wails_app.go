@@ -20,14 +20,18 @@ func newWailsApp() *wailsApp { return &wailsApp{} }
 func (a *wailsApp) startup(ctx context.Context) { a.ctx = ctx }
 
 // buildMenu returns the macOS menu bar:
-//   - Application menu — About (via Mac.About), separator, Quit.
+//   - Application menu — Preferences…, separator, Quit.
 //   - Edit menu — standard clipboard items so WKWebView's responder chain
 //     routes Cmd+C/V/X/A through the OS accessibility layer.
+//   - View menu — Reload.
 func (a *wailsApp) buildMenu() *menu.Menu {
 	m := menu.NewMenu()
 
 	// Application menu (first entry = the process name on macOS).
 	appSub := m.AddSubmenu("OCS Testbench")
+	appSub.AddText("Preferences…", keys.CmdOrCtrl(","), func(_ *menu.CallbackData) {
+		runtime.WindowExecJS(a.ctx, "window.location.href='/settings'")
+	})
 	appSub.AddSeparator()
 	appSub.AddText("Quit OCS Testbench", keys.CmdOrCtrl("q"), func(_ *menu.CallbackData) {
 		runtime.Quit(a.ctx)
@@ -46,6 +50,12 @@ func (a *wailsApp) buildMenu() *menu.Menu {
 	editSub.AddText("Paste", keys.CmdOrCtrl("v"), nil)
 	editSub.AddSeparator()
 	editSub.AddText("Select All", keys.CmdOrCtrl("a"), nil)
+
+	// View menu.
+	viewSub := m.AddSubmenu("View")
+	viewSub.AddText("Reload", keys.CmdOrCtrl("r"), func(_ *menu.CallbackData) {
+		runtime.WindowReload(a.ctx)
+	})
 
 	return m
 }
