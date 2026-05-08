@@ -85,15 +85,15 @@ function build3GPPChildren(serviceType: ServiceType): AvpNode[] {
 function buildHuaweiChildren(serviceType: ServiceType): AvpNode[] {
   switch (serviceType) {
     case 'VOICE':
-      return [{ name: 'IN_INFORMATION',  code: 20300, vendorId: 2011, locked: true }];
+      return [{ name: 'IN-Information',  code: 20300, vendorId: 2011, locked: true }];
     case 'DATA':
       return [{ name: 'PS-Information',  code: 874,   vendorId: 10415, locked: true }];
     case 'SMS':
-      return [{ name: 'SMS_INFORMATION', code: 20400, vendorId: 2011, locked: true }];
+      return [{ name: 'SMS-Information', code: 20327, vendorId: 2011, locked: true }];
     case 'USSD1_EVENT':
     case 'USSD1_SESSION':
     case 'USSD2_SESSION':
-      return [{ name: 'DCD_INFORMATION', code: 2115,  vendorId: 2011, locked: true }];
+      return [{ name: 'DCD-Information', code: 20337, vendorId: 2011, locked: true }];
     default:
       return [];
   }
