@@ -1087,7 +1087,16 @@ func sm3GPPServiceInfoAvps(serviceType string) []avpNodeJSON {
 func smHuaweiServiceInfoAvps(serviceType string) []avpNodeJSON {
 	switch strings.ToUpper(serviceType) {
 	case "VOICE":
-		return []avpNodeJSON{{Name: "IN-Information", Code: 20300, VendorID: 2011}}
+		return []avpNodeJSON{{
+			Name:     "IN-Information",
+			Code:     20300,
+			VendorID: 2011,
+			Children: []avpNodeJSON{
+				{Name: "Calling-Party-Address", Code: 20336, VendorID: 2011, ValueRef: "CALLING_PARTY_ADDRESS"},
+				{Name: "Called-Party-Address", Code: 20337, VendorID: 2011, ValueRef: "CALLED_PARTY_ADDRESS"},
+				{Name: "Charge-Flow-Type", Code: 20339, VendorID: 2011, ValueRef: "0"},
+			},
+		}}
 	case "DATA":
 		return []avpNodeJSON{{Name: "PS-Information", VendorID: 10415}}
 	case "SMS":

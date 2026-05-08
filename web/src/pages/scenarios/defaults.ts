@@ -85,7 +85,11 @@ function build3GPPChildren(serviceType: ServiceType): AvpNode[] {
 function buildHuaweiChildren(serviceType: ServiceType): AvpNode[] {
   switch (serviceType) {
     case 'VOICE':
-      return [{ name: 'IN-Information',  code: 20300, vendorId: 2011, locked: true }];
+      return [{ name: 'IN-Information', code: 20300, vendorId: 2011, locked: true, children: [
+        { name: 'Calling-Party-Address', code: 20336, vendorId: 2011, valueRef: 'CALLING_PARTY_ADDRESS' },
+        { name: 'Called-Party-Address',  code: 20337, vendorId: 2011, valueRef: 'CALLED_PARTY_ADDRESS' },
+        { name: 'Charge-Flow-Type',      code: 20339, vendorId: 2011, value: '0' },
+      ]}];
     case 'DATA':
       return [{ name: 'PS-Information',  code: 874,   vendorId: 10415, locked: true }];
     case 'SMS':
