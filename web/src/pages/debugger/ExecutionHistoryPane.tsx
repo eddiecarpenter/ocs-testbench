@@ -87,19 +87,30 @@ export function ExecutionHistoryPane() {
               Waiting for first step…
             </Text>
           )}
-          {steps.map((step, i) => (
-            <HistoryRow
-              key={i}
-              step={step}
-              index={i}
-              isSelected={
-                historicalIndex !== null ? historicalIndex === i : cursor === i
-              }
-              onClick={() => {
-                if (isStepCompleted(step)) viewHistorical(i);
-              }}
-            />
-          ))}
+          {steps.map((step, i) => {
+            const completed = isStepCompleted(step);
+            // Clickable if: completed (view historical) OR pending while in historical
+            // view (return to live step editor).
+            const clickable = completed || (!completed && historicalIndex !== null);
+            return (
+              <HistoryRow
+                key={i}
+                step={step}
+                index={i}
+                isSelected={
+                  historicalIndex !== null ? historicalIndex === i : cursor === i
+                }
+                clickable={clickable}
+                onClick={() => {
+                  if (completed) {
+                    viewHistorical(historicalIndex === i ? null : i);
+                  } else if (historicalIndex !== null) {
+                    viewHistorical(null);
+                  }
+                }}
+              />
+            );
+          })}
           {sleepCountdown && (
             <SleepCountdown
               totalSec={sleepCountdown.totalSec}
@@ -117,10 +128,11 @@ interface HistoryRowProps {
   step: StepRecord;
   index: number;
   isSelected: boolean;
+  clickable: boolean;
   onClick: () => void;
 }
 
-function HistoryRow({ step, index, isSelected, onClick }: HistoryRowProps) {
+function HistoryRow({ step, index, isSelected, clickable, onClick }: HistoryRowProps) {
   const completed = isStepCompleted(step);
   const chipLabel =
     step.kind === 'request' && step.requestType
@@ -137,13 +149,13 @@ function HistoryRow({ step, index, isSelected, onClick }: HistoryRowProps) {
   return (
     <UnstyledButton
       onClick={onClick}
-      disabled={!completed}
+      disabled={!clickable}
       data-testid={`debugger-history-row-${index}`}
       style={{
         padding: '6px 8px',
         borderRadius: 4,
         background,
-        cursor: completed ? 'pointer' : 'default',
+        cursor: clickable ? 'pointer' : 'default',
         opacity: step.state === 'pending' ? 0.5 : 1,
       }}
     >
