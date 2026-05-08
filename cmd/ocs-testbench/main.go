@@ -52,6 +52,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	wails "github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -130,12 +131,26 @@ func main() {
 }
 
 // resolveConfigPath returns the config path to hand to baseconfig.Load.
-// CLI flag value takes precedence over the in-tree default; baseconfig.Load
-// itself overrides either with CONFIG_FILE when that env var is set, so
-// the operational precedence is CONFIG_FILE > flag > default.
+//
+// Precedence (highest → lowest):
+//  1. CONFIG_FILE env var (handled inside baseconfig.Load itself)
+//  2. CLI -config flag
+//  3. File next to the binary — covers macOS .app bundles where the CWD is
+//     not the repository root (e.g. Contents/MacOS/config.yaml).
+//  4. In-tree default "cmd/ocs-testbench/config.yaml" — works when running
+//     from the repository root during development.
 func resolveConfigPath(flagValue string) string {
 	if flagValue != "" {
 		return flagValue
+	}
+	// Check for a config.yaml next to the running binary. os.Executable
+	// returns the real path of the executable even when called from inside
+	// a macOS .app bundle (Contents/MacOS/<binary>).
+	if exe, err := os.Executable(); err == nil {
+		adjacent := filepath.Join(filepath.Dir(exe), "config.yaml")
+		if _, err := os.Stat(adjacent); err == nil {
+			return adjacent
+		}
 	}
 	return defaultConfigPath
 }

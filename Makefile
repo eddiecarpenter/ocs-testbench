@@ -16,8 +16,12 @@ build:
 # Requires: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 # The frontend SPA is built from web/ as part of this step. The bundle
 # lands in cmd/ocs-testbench/build/bin/OCS Testbench.app.
+# config.yaml is copied next to the binary so the app finds it without
+# CONFIG_FILE when launched from Finder.
+APP_BIN=cmd/ocs-testbench/build/bin/ocs-testbench.app/Contents/MacOS
 build-desktop:
 	cd cmd/ocs-testbench && wails build -clean -skipbindings
+	cp cmd/ocs-testbench/config.yaml "$(APP_BIN)/config.yaml"
 
 # vet — static analysis; runs in CI alongside the build.
 vet:
