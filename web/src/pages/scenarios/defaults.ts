@@ -86,9 +86,22 @@ function buildHuaweiChildren(serviceType: ServiceType): AvpNode[] {
   switch (serviceType) {
     case 'VOICE':
       return [{ name: 'IN-Information', code: 20300, vendorId: 2011, locked: true, children: [
-        { name: 'Calling-Party-Address', code: 20336, vendorId: 2011, valueRef: 'CALLING_PARTY_ADDRESS' },
-        { name: 'Called-Party-Address',  code: 20337, vendorId: 2011, valueRef: 'CALLED_PARTY_ADDRESS' },
-        { name: 'Charge-Flow-Type',      code: 20339, vendorId: 2011, value: '0' },
+        { name: 'Calling-Party-Address',            code: 20336, vendorId: 2011, valueRef: 'CALLING_PARTY_ADDRESS' },
+        { name: 'Called-Party-Address',             code: 20337, vendorId: 2011, valueRef: 'CALLED_PARTY_ADDRESS' },
+        { name: 'Connect-Called-Number',            code: 20373, vendorId: 2011, valueRef: 'CALLED_PARTY_ADDRESS' },
+        { name: 'Called-Vlr-Number',                code: 20305, vendorId: 2011, valueRef: 'CALLED_VLR_NUMBER' },
+        { name: 'Called-CellID-Or-SAI',             code: 20306, vendorId: 2011, valueRef: 'CALLED_CELLID_OR_SAI' },
+        { name: 'MSC-Address',                      code: 20322, vendorId: 2011, valueRef: 'MSC_ADDRESS' },
+        { name: 'Time-Zone',                        code: 20324, vendorId: 2011, valueRef: 'TIME_ZONE' },
+        { name: 'Charge-Flow-Type',                 code: 20339, vendorId: 2011, valueRef: 'CHARGE_FLOW_TYPE' },
+        { name: 'Call-Reference-Number',            code: 20321, vendorId: 2011, valueRef: 'CALL_REFERENCE_NUMBER' },
+        { name: 'Calling-Parties-Category',         code: 20301, vendorId: 2011, valueRef: 'CALLING_PARTIES_CATEGORY' },
+        { name: 'Access-Network-Type',              code: 20804, vendorId: 2011, valueRef: 'ACCESS_NETWORK_TYPE' },
+        { name: 'Called-Msc-Address',               code: 21172, vendorId: 2011, valueRef: 'MSC_ADDRESS' },
+        { name: 'Called-Party-Address-Nature',      code: 21163, vendorId: 2011, valueRef: 'CALLED_PARTY_ADDRESS_NATURE' },
+        { name: 'Address-Of-Restricted-Indicator',  code: 21121, vendorId: 2011, valueRef: 'ADDRESS_OF_RESTRICTED_INDICATOR' },
+        { name: 'Service-Key',                      code: 20806, vendorId: 2011, valueRef: 'SERVICE_KEY' },
+        { name: 'New-SSP-Time',                     code: 22992, vendorId: 2011, valueRef: 'NEW_SSP_TIME' },
       ]}];
     case 'DATA':
       return [{ name: 'PS-Information',  code: 874,   vendorId: 10415, locked: true }];
