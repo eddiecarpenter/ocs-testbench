@@ -9,6 +9,7 @@ import { SseProvider } from './api/sse/SseProvider';
 import { ErrorProvider } from './context/error/ErrorProvider';
 import { theme } from './theme/theme';
 import { AppShell } from './layout/AppShell';
+import { AboutPage } from './pages/about/AboutPage';
 import { ScenariosListPage } from './pages/scenarios/ScenariosPage';
 import { DashboardPage } from './pages/dashboard/DashboardPage';
 import { DebuggerPage } from './pages/debugger/DebuggerPage';
@@ -38,6 +39,7 @@ export function App() {
               <Route path="executions" element={<ExecutionsPage />} />
               <Route path="executions/:id" element={<DebuggerPage />} />
               <Route path="settings" element={<SettingsPage />} />
+              <Route path="about" element={<AboutPage />} />
             </Route>
           </Routes>
           </SseProvider>

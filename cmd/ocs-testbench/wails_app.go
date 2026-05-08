@@ -29,6 +29,10 @@ func (a *wailsApp) buildMenu() *menu.Menu {
 
 	// Application menu (first entry = the process name on macOS).
 	appSub := m.AddSubmenu("OCS Testbench")
+	appSub.AddText("About OCS Testbench", nil, func(_ *menu.CallbackData) {
+		runtime.WindowExecJS(a.ctx, "window.location.href='/about'")
+	})
+	appSub.AddSeparator()
 	appSub.AddText("Preferences…", keys.CmdOrCtrl(","), func(_ *menu.CallbackData) {
 		runtime.WindowExecJS(a.ctx, "window.location.href='/settings'")
 	})
