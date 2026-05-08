@@ -54,7 +54,7 @@ func (a *wailsApp) buildMenu() *menu.Menu {
 	// View menu.
 	viewSub := m.AddSubmenu("View")
 	viewSub.AddText("Reload", keys.CmdOrCtrl("r"), func(_ *menu.CallbackData) {
-		runtime.WindowReload(a.ctx)
+		runtime.WindowExecJS(a.ctx, "window.location.reload()")
 	})
 
 	return m
