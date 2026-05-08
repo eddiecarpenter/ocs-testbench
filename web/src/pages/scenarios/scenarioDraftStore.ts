@@ -18,7 +18,7 @@ import {
   defaultSessionMode,
   defaultStepsForMode,
   defaultVariablesForServiceType,
-  mergeVariables,
+  upsertVariables,
   replaceServiceInfoNode,
 } from './defaults';
 import { renameUsages } from './selectors';
@@ -154,13 +154,14 @@ export const useScenarioDraftStore = create<ScenarioDraftState>((set, get) => ({
       serviceType,
       sessionMode: defaultSessionMode(serviceType),
       avpTree: replaceServiceInfoNode(d.avpTree, serviceType, d.serviceProfile as ServiceProfile | undefined),
-      variables: mergeVariables(d.variables, defaultVariablesForServiceType(serviceType as ServiceType)),
+      variables: upsertVariables(d.variables, defaultVariablesForServiceType(serviceType as ServiceType, d.serviceProfile as ServiceProfile | undefined)),
     })),
   setServiceProfile: (serviceProfile) =>
     commit(set, get, (d) => ({
       ...d,
       serviceProfile,
       avpTree: replaceServiceInfoNode(d.avpTree, d.serviceType, serviceProfile as ServiceProfile),
+      variables: upsertVariables(d.variables, defaultVariablesForServiceType(d.serviceType as ServiceType, serviceProfile as ServiceProfile)),
     })),
   setSessionMode: (sessionMode) =>
     commit(set, get, (d) => ({

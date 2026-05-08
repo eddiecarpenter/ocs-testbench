@@ -86,22 +86,24 @@ function buildHuaweiChildren(serviceType: ServiceType): AvpNode[] {
   switch (serviceType) {
     case 'VOICE':
       return [{ name: 'IN-Information', code: 20300, vendorId: 2011, locked: true, children: [
+        // --- dynamic: user configures these per scenario ---
         { name: 'Calling-Party-Address',            code: 20336, vendorId: 2011, valueRef: 'CALLING_PARTY_ADDRESS' },
         { name: 'Called-Party-Address',             code: 20337, vendorId: 2011, valueRef: 'CALLED_PARTY_ADDRESS' },
         { name: 'Connect-Called-Number',            code: 20373, vendorId: 2011, valueRef: 'CALLED_PARTY_ADDRESS' },
-        { name: 'Called-Vlr-Number',                code: 20305, vendorId: 2011, valueRef: 'CALLED_VLR_NUMBER' },
-        { name: 'Called-CellID-Or-SAI',             code: 20306, vendorId: 2011, valueRef: 'CALLED_CELLID_OR_SAI' },
-        { name: 'MSC-Address',                      code: 20322, vendorId: 2011, valueRef: 'MSC_ADDRESS' },
-        { name: 'Time-Zone',                        code: 20324, vendorId: 2011, valueRef: 'TIME_ZONE' },
         { name: 'Charge-Flow-Type',                 code: 20339, vendorId: 2011, valueRef: 'CHARGE_FLOW_TYPE' },
-        { name: 'Call-Reference-Number',            code: 20321, vendorId: 2011, valueRef: 'CALL_REFERENCE_NUMBER' },
-        { name: 'Calling-Parties-Category',         code: 20301, vendorId: 2011, valueRef: 'CALLING_PARTIES_CATEGORY' },
-        { name: 'Access-Network-Type',              code: 20804, vendorId: 2011, valueRef: 'ACCESS_NETWORK_TYPE' },
-        { name: 'Called-Msc-Address',               code: 21172, vendorId: 2011, valueRef: 'MSC_ADDRESS' },
-        { name: 'Called-Party-Address-Nature',      code: 21163, vendorId: 2011, valueRef: 'CALLED_PARTY_ADDRESS_NATURE' },
-        { name: 'Address-Of-Restricted-Indicator',  code: 21121, vendorId: 2011, valueRef: 'ADDRESS_OF_RESTRICTED_INDICATOR' },
-        { name: 'Service-Key',                      code: 20806, vendorId: 2011, valueRef: 'SERVICE_KEY' },
-        { name: 'New-SSP-Time',                     code: 22992, vendorId: 2011, valueRef: 'NEW_SSP_TIME' },
+        // --- static: literal defaults, edit inline as needed ---
+        { name: 'Called-Vlr-Number',                code: 20305, vendorId: 2011, valueRef: '27812022024' },
+        { name: 'Called-CellID-Or-SAI',             code: 20306, vendorId: 2011, valueRef: '655020010965535' },
+        { name: 'MSC-Address',                      code: 20322, vendorId: 2011, valueRef: '27812020002' },
+        { name: 'Time-Zone',                        code: 20324, vendorId: 2011, valueRef: '32' },
+        { name: 'Call-Reference-Number',            code: 20321, vendorId: 2011, valueRef: 'A7ED8D101D' },
+        { name: 'Calling-Parties-Category',         code: 20301, vendorId: 2011, valueRef: '165' },
+        { name: 'Access-Network-Type',              code: 20804, vendorId: 2011, valueRef: '200' },
+        { name: 'Called-Msc-Address',               code: 21172, vendorId: 2011, valueRef: '27812020002' },
+        { name: 'Called-Party-Address-Nature',      code: 21163, vendorId: 2011, valueRef: '4' },
+        { name: 'Address-Of-Restricted-Indicator',  code: 21121, vendorId: 2011, valueRef: '0' },
+        { name: 'Service-Key',                      code: 20806, vendorId: 2011, valueRef: '91' },
+        { name: 'New-SSP-Time',                     code: 22992, vendorId: 2011, valueRef: '2026-05-07T15:07:23+02:00' },
       ]}];
     case 'DATA':
       return [{ name: 'PS-Information',  code: 874,   vendorId: 10415, locked: true }];
@@ -135,14 +137,42 @@ export function replaceServiceInfoNode(
   return tree;
 }
 
-/** Variables required by the Service-Information AVP for the given serviceType. */
-export function defaultVariablesForServiceType(serviceType: ServiceType): Variable[] {
+/** Variables required by the Service-Information AVP for the given serviceType + profile. */
+export function defaultVariablesForServiceType(
+  serviceType: ServiceType,
+  serviceProfile?: ServiceProfile,
+): Variable[] {
   if (serviceType === 'VOICE') {
+    if (serviceProfile === 'HUAWEI') {
+      return [
+        {
+          name: 'CALLING_PARTY_ADDRESS',
+          description: 'Calling-party address (A-party, E.164 or SIP URI).',
+          source: { kind: 'generator', strategy: 'literal', refresh: 'once', params: { value: '27815107352' } },
+        },
+        {
+          name: 'CALLED_PARTY_ADDRESS',
+          description: 'Called-party address (B-party, E.164 or SIP URI).',
+          source: { kind: 'generator', strategy: 'literal', refresh: 'once', params: { value: '27707900001' } },
+        },
+        {
+          name: 'CHARGE_FLOW_TYPE',
+          description: 'Charge-Flow-Type AVP (0 = MO charge, 1 = MT charge).',
+          source: { kind: 'generator', strategy: 'literal', refresh: 'once', params: { value: 1 } },
+        },
+      ];
+    }
+    // 3GPP VOICE
     return [
       {
         name: 'ROLE_OF_NODE',
         description: 'Role-Of-Node AVP (0 = Originating, 1 = Terminating).',
         source: { kind: 'generator', strategy: 'literal', refresh: 'once', params: { value: 0 } },
+      },
+      {
+        name: 'CALLING_PARTY_ADDRESS',
+        description: 'Calling-party address (A-party, E.164 or SIP URI).',
+        source: { kind: 'generator', strategy: 'literal', refresh: 'once', params: { value: '' } },
       },
       {
         name: 'CALLED_PARTY_ADDRESS',
@@ -158,6 +188,22 @@ export function defaultVariablesForServiceType(serviceType: ServiceType): Variab
 export function mergeVariables(existing: Variable[], additions: Variable[]): Variable[] {
   const known = new Set(existing.map((v) => v.name));
   return [...existing, ...additions.filter((v) => !known.has(v.name))];
+}
+
+/**
+ * Upsert `additions` into `existing`: update variables whose name already
+ * exists AND add any that are new. Used when changing service profile so that
+ * profile-specific defaults (e.g. CALLING_PARTY_ADDRESS) are refreshed even
+ * if they were already present from a previous profile.
+ */
+export function upsertVariables(existing: Variable[], additions: Variable[]): Variable[] {
+  const addMap = new Map(additions.map((v) => [v.name, v]));
+  const result = existing.map((v) => addMap.get(v.name) ?? v);
+  const existingNames = new Set(existing.map((v) => v.name));
+  for (const v of additions) {
+    if (!existingNames.has(v.name)) result.push(v);
+  }
+  return result;
 }
 
 /**
@@ -233,7 +279,7 @@ export function makeNewScenarioDraft(): Scenario {
     updatedAt: new Date().toISOString(),
     avpTree: [...BASE_AVP_TREE, serviceInfoNode],
     services: [DEFAULT_SERVICE],
-    variables: mergeVariables(BASE_VARIABLES, defaultVariablesForServiceType(serviceType)),
+    variables: mergeVariables(BASE_VARIABLES, defaultVariablesForServiceType(serviceType, serviceProfile)),
     steps: defaultStepsForMode('session'),
   };
 }

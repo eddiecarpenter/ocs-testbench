@@ -1092,22 +1092,24 @@ func smHuaweiServiceInfoAvps(serviceType string) []avpNodeJSON {
 			Code:     20300,
 			VendorID: 2011,
 			Children: []avpNodeJSON{
+				// dynamic — user configures per scenario
 				{Name: "Calling-Party-Address",           Code: 20336, VendorID: 2011, ValueRef: "CALLING_PARTY_ADDRESS"},
 				{Name: "Called-Party-Address",            Code: 20337, VendorID: 2011, ValueRef: "CALLED_PARTY_ADDRESS"},
 				{Name: "Connect-Called-Number",           Code: 20373, VendorID: 2011, ValueRef: "CALLED_PARTY_ADDRESS"},
-				{Name: "Called-Vlr-Number",               Code: 20305, VendorID: 2011, ValueRef: "CALLED_VLR_NUMBER"},
-				{Name: "Called-CellID-Or-SAI",            Code: 20306, VendorID: 2011, ValueRef: "CALLED_CELLID_OR_SAI"},
-				{Name: "MSC-Address",                     Code: 20322, VendorID: 2011, ValueRef: "MSC_ADDRESS"},
-				{Name: "Time-Zone",                       Code: 20324, VendorID: 2011, ValueRef: "TIME_ZONE"},
 				{Name: "Charge-Flow-Type",                Code: 20339, VendorID: 2011, ValueRef: "CHARGE_FLOW_TYPE"},
-				{Name: "Call-Reference-Number",           Code: 20321, VendorID: 2011, ValueRef: "CALL_REFERENCE_NUMBER"},
-				{Name: "Calling-Parties-Category",        Code: 20301, VendorID: 2011, ValueRef: "CALLING_PARTIES_CATEGORY"},
-				{Name: "Access-Network-Type",             Code: 20804, VendorID: 2011, ValueRef: "ACCESS_NETWORK_TYPE"},
-				{Name: "Called-Msc-Address",              Code: 21172, VendorID: 2011, ValueRef: "MSC_ADDRESS"},
-				{Name: "Called-Party-Address-Nature",     Code: 21163, VendorID: 2011, ValueRef: "CALLED_PARTY_ADDRESS_NATURE"},
-				{Name: "Address-Of-Restricted-Indicator", Code: 21121, VendorID: 2011, ValueRef: "ADDRESS_OF_RESTRICTED_INDICATOR"},
-				{Name: "Service-Key",                     Code: 20806, VendorID: 2011, ValueRef: "SERVICE_KEY"},
-				{Name: "New-SSP-Time",                    Code: 22992, VendorID: 2011, ValueRef: "NEW_SSP_TIME"},
+				// static — literal defaults, edit in the AVP tree if needed
+				{Name: "Called-Vlr-Number",               Code: 20305, VendorID: 2011, ValueRef: "27812022024"},
+				{Name: "Called-CellID-Or-SAI",            Code: 20306, VendorID: 2011, ValueRef: "655020010965535"},
+				{Name: "MSC-Address",                     Code: 20322, VendorID: 2011, ValueRef: "27812020002"},
+				{Name: "Time-Zone",                       Code: 20324, VendorID: 2011, ValueRef: "32"},
+				{Name: "Call-Reference-Number",           Code: 20321, VendorID: 2011, ValueRef: "A7ED8D101D"},
+				{Name: "Calling-Parties-Category",        Code: 20301, VendorID: 2011, ValueRef: "165"},
+				{Name: "Access-Network-Type",             Code: 20804, VendorID: 2011, ValueRef: "200"},
+				{Name: "Called-Msc-Address",              Code: 21172, VendorID: 2011, ValueRef: "27812020002"},
+				{Name: "Called-Party-Address-Nature",     Code: 21163, VendorID: 2011, ValueRef: "4"},
+				{Name: "Address-Of-Restricted-Indicator", Code: 21121, VendorID: 2011, ValueRef: "0"},
+				{Name: "Service-Key",                     Code: 20806, VendorID: 2011, ValueRef: "91"},
+				{Name: "New-SSP-Time",                    Code: 22992, VendorID: 2011, ValueRef: "2026-05-07T15:07:23+02:00"},
 			},
 		}}
 	case "DATA":
@@ -1154,17 +1156,47 @@ func smConvertAvpNode(n avpNodeJSON) template.AVPNode {
 	if len(n.Children) > 0 {
 		node.AVPs = smConvertAvpTree(n.Children)
 	} else if n.ValueRef != "" {
-		// Pure numeric literals are passed through directly so that
-		// Enumerated AVPs like Subscription-Id-Type can be given a
-		// literal value (e.g. "0" for END_USER_E164) without needing a
-		// named variable.  Non-numeric refs are wrapped as {{TOKEN}}.
-		if _, err := strconv.ParseFloat(n.ValueRef, 64); err == nil {
-			node.Value = n.ValueRef
-		} else {
+		// Variable references are UPPER_SNAKE_CASE identifiers — uppercase
+		// ASCII letters and underscores, with at least one underscore, OR
+		// purely alphabetic uppercase (e.g. MSISDN). Everything else
+		// (numbers, hex strings, timestamps, phone numbers, …) is a literal
+		// value and is passed through unchanged.
+		if smIsVariableName(n.ValueRef) {
 			node.Value = "{{" + n.ValueRef + "}}"
+		} else {
+			node.Value = n.ValueRef
 		}
 	}
 	return node
+}
+
+// smIsVariableName reports whether s is an UPPER_SNAKE_CASE variable name
+// rather than a literal value string.  Variable names:
+//   - start with an uppercase ASCII letter
+//   - contain only uppercase ASCII letters, digits, and underscores
+//   - either contain at least one underscore (e.g. CALLING_PARTY_ADDRESS)
+//     or contain no digits at all (e.g. MSISDN)
+//
+// This lets hex strings (A7ED8D101D), phone numbers (27815107352), and
+// arbitrary text (Thu May 07 …) pass through as literals.
+func smIsVariableName(s string) bool {
+	if len(s) == 0 || s[0] < 'A' || s[0] > 'Z' {
+		return false
+	}
+	hasUnderscore, hasDigit := false, false
+	for _, c := range s {
+		switch {
+		case c >= 'A' && c <= 'Z':
+			// ok
+		case c >= '0' && c <= '9':
+			hasDigit = true
+		case c == '_':
+			hasUnderscore = true
+		default:
+			return false // space, lowercase, punctuation → literal
+		}
+	}
+	return hasUnderscore || !hasDigit
 }
 
 func smConvertServices(services []serviceJSON, values map[string]any) []template.MSCCTemplateBlock {

@@ -35,7 +35,7 @@ server:
 frontend:
   # Open the default browser automatically when the server starts —
   # gated by the top-level `headless` flag.
-  auto_open_browser: false
+  auto_open_browser: true
   # Path on disk to the frontend build output. Used at compile time
   # by go:embed; runtime serving uses the embedded filesystem.
   embedded_assets_path: web/dist
