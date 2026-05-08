@@ -32,6 +32,9 @@ func (a *wailsApp) buildMenu() *menu.Menu {
 	appSub.AddText("About OCS Testbench", nil, func(_ *menu.CallbackData) {
 		runtime.WindowExecJS(a.ctx, "window.location.href='/about'")
 	})
+	appSub.AddText("Check for Updates…", nil, func(_ *menu.CallbackData) {
+		runtime.BrowserOpenURL(a.ctx, "https://github.com/eddiecarpenter/ocs-testbench/releases")
+	})
 	appSub.AddSeparator()
 	appSub.AddText("Preferences…", keys.CmdOrCtrl(","), func(_ *menu.CallbackData) {
 		runtime.WindowExecJS(a.ctx, "window.location.href='/settings'")
