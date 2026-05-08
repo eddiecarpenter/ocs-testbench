@@ -562,6 +562,113 @@ func TestEngine_Render_PresenceRules_Terminate(t *testing.T) {
 	assert.NotNil(t, findChildAVP(msccAVP, avp.UsedServiceUnit), "USU must be present for TERMINATE")
 }
 
+// TestEngine_Render_ZeroGrant_SuppressesUSU verifies that when the
+// position-based GRANTED_UNITS variable is present and equals 0 (the OCS
+// granted nothing in the previous exchange), the USU AVP is omitted even
+// though a non-zero USU placeholder value is supplied.
+//
+// This is the regression test for two bugs:
+//  1. autoUpdateVarsFromCCA wrote "RG1_GRANTED_UNITS" (position-based) but
+//     buildServiceUnitPair looked up "RG<ratingGroupValue>_GRANTED_UNITS"
+//     (value-based) — key was never found, so USU was emitted as-is.
+//  2. Services with no Rating-Group configured (block.RatingGroup == 0) fell
+//     into the root-service-model branch which only checks RESULT_CODE, not
+//     the per-block granted variable — USU was emitted even on zero grant.
+func TestEngine_Render_ZeroGrant_SuppressesUSU(t *testing.T) {
+	d := newEngineDict2(map[string]AVPMetadata{})
+	// Rating-Group 100 — deliberately does NOT equal the position index (1).
+	// This exposed the old naming mismatch.
+	mscc := []MSCCTemplateBlock{
+		{RatingGroup: 100, Requested: "{{REQ}}", Used: "{{USED}}"},
+	}
+	values := map[string]any{
+		"CC_REQUEST_TYPE":   uint32(2), // UPDATE
+		"REQ":               "512",
+		"USED":              "256",      // a non-zero USU placeholder
+		"RG1_GRANTED_UNITS": int64(0),  // position-based: OCS granted nothing
+	}
+
+	e := NewEngine()
+	avps, err := e.Render(context.Background(), EngineInput{
+		MSCC: mscc, Values: values, Dictionary: d,
+		ServiceModel: ServiceModelMultiMSCC, UnitType: UnitTypeOctet,
+	})
+	require.NoError(t, err)
+
+	msccAVP := findAVP(avps, avp.MultipleServicesCreditControl)
+	require.NotNil(t, msccAVP)
+	// Zero grant → USU must be suppressed entirely.
+	assert.Nil(t, findChildAVP(msccAVP, avp.UsedServiceUnit),
+		"USU must be absent when OCS granted 0 units (explicit RG)")
+}
+
+// TestEngine_Render_ZeroGrant_NoRatingGroup_SuppressesUSU covers the case
+// where a single-MSCC service has no Rating-Group configured
+// (block.RatingGroup == 0). The old code used block.RatingGroup > 0 as the
+// MSCC discriminator, so services without an explicit RG fell into the
+// root-model path and bypassed the per-block grant check entirely.
+func TestEngine_Render_ZeroGrant_NoRatingGroup_SuppressesUSU(t *testing.T) {
+	d := newEngineDict2(map[string]AVPMetadata{})
+	// RatingGroup deliberately 0 (not set) — single-MSCC voice scenario.
+	mscc := []MSCCTemplateBlock{
+		{RatingGroup: 0, Requested: "{{REQ}}", Used: "{{USED}}"},
+	}
+	values := map[string]any{
+		"CC_REQUEST_TYPE": uint32(2), // UPDATE
+		"REQ":             "60",
+		"USED":            "30",         // non-zero USU
+		"RESULT_CODE":     int64(2001),  // success — root check would pass this through
+		"RG1_GRANTED":     int64(0),     // position-based: OCS granted nothing
+	}
+
+	e := NewEngine()
+	avps, err := e.Render(context.Background(), EngineInput{
+		MSCC: mscc, Values: values, Dictionary: d,
+		ServiceModel: ServiceModelSingleMSCC, UnitType: UnitTypeTime,
+	})
+	require.NoError(t, err)
+
+	msccAVP := findAVP(avps, avp.MultipleServicesCreditControl)
+	require.NotNil(t, msccAVP)
+	// Despite RESULT_CODE=2001 (which the old root-model path would pass),
+	// USU must be suppressed because RG1_GRANTED == 0.
+	assert.Nil(t, findChildAVP(msccAVP, avp.UsedServiceUnit),
+		"USU must be absent when OCS granted 0 units (no explicit RG)")
+}
+
+// TestEngine_Render_NonZeroGrant_CapsUSU verifies that when the OCS granted
+// fewer units than the reported USU, the USU is capped to the grant value.
+func TestEngine_Render_NonZeroGrant_CapsUSU(t *testing.T) {
+	d := newEngineDict2(map[string]AVPMetadata{})
+	mscc := []MSCCTemplateBlock{
+		{RatingGroup: 100, Requested: "{{REQ}}", Used: "{{USED}}"},
+	}
+	values := map[string]any{
+		"CC_REQUEST_TYPE":   uint32(2),    // UPDATE
+		"REQ":               "512",
+		"USED":              "1000",       // exceeds the grant
+		"RG1_GRANTED_UNITS": int64(300),  // position-based grant
+	}
+
+	e := NewEngine()
+	avps, err := e.Render(context.Background(), EngineInput{
+		MSCC: mscc, Values: values, Dictionary: d,
+		ServiceModel: ServiceModelMultiMSCC, UnitType: UnitTypeOctet,
+	})
+	require.NoError(t, err)
+
+	msccAVP := findAVP(avps, avp.MultipleServicesCreditControl)
+	require.NotNil(t, msccAVP)
+	usu := findChildAVP(msccAVP, avp.UsedServiceUnit)
+	require.NotNil(t, usu, "USU must be present when grant > 0")
+	usuGrouped, ok := usu.Data.(*diam.GroupedAVP)
+	require.True(t, ok)
+	require.Len(t, usuGrouped.AVP, 1)
+	// USU must be capped to the granted amount, not the raw USED value.
+	assert.Equal(t, datatype.Unsigned64(300), usuGrouped.AVP[0].Data,
+		"USU must be capped to grant when used > granted")
+}
+
 // ---- unit type encoding tests -----------------------------------
 
 // TestEngine_Render_UnitType_Octet verifies CC-Total-Octets inner AVP

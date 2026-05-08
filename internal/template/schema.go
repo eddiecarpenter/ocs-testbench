@@ -92,9 +92,12 @@ type MSCCTemplateBlock struct {
 	// Zero omits the Rating-Group AVP from the MSCC block.
 	RatingGroup uint32 `json:"ratingGroup,omitempty"`
 
-	// ServiceIdentifier is the Service-Identifier value (or
-	// placeholder reference). Zero omits the AVP.
-	ServiceIdentifier uint32 `json:"serviceIdentifier,omitempty"`
+	// ServiceIdentifier is the Service-Identifier value.
+	// HasServiceIdentifier must be true for the AVP to be emitted —
+	// this lets callers explicitly set zero (which Huawei requires)
+	// without conflating it with "not configured".
+	ServiceIdentifier    uint32 `json:"serviceIdentifier,omitempty"`
+	HasServiceIdentifier bool   `json:"-"`
 
 	// Requested is a placeholder reference resolving to the
 	// Requested-Service-Unit quantity. May be empty when no RSU is

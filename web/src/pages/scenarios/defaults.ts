@@ -129,7 +129,7 @@ export function defaultVariablesForServiceType(serviceType: ServiceType): Variab
       },
       {
         name: 'CALLED_PARTY_ADDRESS',
-        description: 'Called-party E164 number (raw digits, no +).',
+        description: 'Called-party address (E.164 with optional +, SIP URI, etc.).',
         source: { kind: 'generator', strategy: 'literal', refresh: 'once', params: { value: '' } },
       },
     ];

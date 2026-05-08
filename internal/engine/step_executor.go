@@ -614,6 +614,15 @@ func autoUpdateVarsFromCCA(vars map[string]any, cca *messaging.CCA) {
 		}
 	}
 
+	// Root service model: no MSCC blocks in the CCA, so capture the
+	// top-level Granted-Service-Unit into RG1_GRANTED / RG1_GRANTED_UNITS.
+	// This lets buildServiceUnitPair use the same cap/suppress logic as
+	// the MSCC path rather than relying on RESULT_CODE alone.
+	if len(cca.MSCC) == 0 {
+		vars["RG1_GRANTED"] = int64(cca.GrantedTime)
+		vars["RG1_GRANTED_UNITS"] = int64(cca.GrantedTotalOctets)
+	}
+
 	// Per-MSCC auto-provisioned variables — keyed by 1-based position in the
 	// CCA response (RG1 = first block, RG2 = second, …). OCS implementations
 	// mirror back MSCC blocks in request order, so position is stable and more
@@ -621,9 +630,12 @@ func autoUpdateVarsFromCCA(vars map[string]any, cca *messaging.CCA) {
 	for i, block := range cca.MSCC {
 		prefix := fmt.Sprintf("RG%d", i+1)
 		vars[prefix+"_GRANTED"] = int64(block.GrantedTime)
-		if block.GrantedTotalOctets > 0 {
-			vars[prefix+"_GRANTED_UNITS"] = int64(block.GrantedTotalOctets)
-		}
+		// Always write GRANTED_UNITS, even when the OCS granted nothing (0).
+		// Omitting the key on a zero-grant response left the variable absent,
+		// so the template engine's USU-suppression check saw "key absent" and
+		// emitted USU as-is rather than suppressing it. Storing 0 explicitly
+		// lets the cap logic fire correctly on the next request.
+		vars[prefix+"_GRANTED_UNITS"] = int64(block.GrantedTotalOctets)
 		if block.ValidityTime > 0 {
 			vars[prefix+"_VALIDITY"] = int64(block.ValidityTime)
 		}

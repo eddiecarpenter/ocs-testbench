@@ -69,6 +69,10 @@ func DecodeCCAMessage(m *diam.Message) (*CCA, error) {
 			continue
 		}
 		switch a.Code {
+		case avp.GrantedServiceUnit:
+			if g, ok := a.Data.(*diam.GroupedAVP); ok {
+				cca.GrantedTime, cca.GrantedTotalOctets = readGrantedUnits(g)
+			}
 		case avp.ValidityTime:
 			if v, ok := a.Data.(datatype.Unsigned32); ok {
 				cca.ValidityTime = uint32(v)

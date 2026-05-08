@@ -6,6 +6,7 @@
  * one source of truth prevents the two layers drifting.
  */
 import type {
+  Service,
   ServiceModel,
   ServiceType,
   SessionMode,
@@ -70,6 +71,7 @@ export function validateScenario(input: {
   serviceType: ServiceType | undefined;
   serviceModel: ServiceModel;
   sessionMode: SessionMode;
+  services: Service[];
   steps: { kind: string; requestType?: string }[];
 }): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
@@ -80,6 +82,20 @@ export function validateScenario(input: {
     issues.push({
       path: '/serviceModel',
       message: cell.hint ?? 'serviceModel × serviceType combination not allowed',
+    });
+  }
+
+  // Rating-Group is mandatory for MSCC service models. The OCS uses it to
+  // identify the quota block in the CCA, and the engine uses it to correlate
+  // granted units with the correct MSCC block.
+  if (input.serviceModel === 'single-mscc' || input.serviceModel === 'multi-mscc') {
+    input.services.forEach((svc, i) => {
+      if (!svc.ratingGroup) {
+        issues.push({
+          path: `/services/${i}/ratingGroup`,
+          message: `Service ${i + 1}: Rating-Group is required for ${input.serviceModel} scenarios`,
+        });
+      }
     });
   }
 

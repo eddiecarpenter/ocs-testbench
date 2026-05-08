@@ -229,6 +229,21 @@ func (m *SessionManager) Start(ctx context.Context, scenarioID string, mode stri
 		return StartInfo{}, fmt.Errorf("session manager: parse steps: %w", err)
 	}
 
+	// Validate that every service in an MSCC scenario has a Rating-Group.
+	// Rating-Group is mandatory for single-mscc and multi-mscc service models:
+	// the OCS uses it to identify the quota block in the CCA, and the engine
+	// uses it to correlate granted units with the correct MSCC block.
+	if body.ServiceModel == "single-mscc" || body.ServiceModel == "multi-mscc" {
+		for i, svc := range services {
+			if svc.RatingGroup == "" {
+				return StartInfo{}, fmt.Errorf(
+					"session manager: service %d (%q) is missing a required Rating-Group — set a rating group in the scenario's Charging tab",
+					i+1, svc.ID,
+				)
+			}
+		}
+	}
+
 	peerName, originHost, originRealm, destHost, destRealm, err := m.loadPeerInfo(ctx, scRow.PeerID)
 	if err != nil {
 		return StartInfo{}, fmt.Errorf("session manager: load peer: %w", err)
@@ -277,6 +292,22 @@ func (m *SessionManager) Start(ctx context.Context, scenarioID string, mode stri
 	}
 	sc.Vars["SESSION_ID"] = sc.SessionID
 	sc.Vars["SERVICE_CONTEXT_ID"] = svcCtxID
+
+	// Pre-seed per-MSCC granted variables to 0 for every service slot.
+	// Without this, a CCA that carries no MSCC block (some OCS
+	// implementations respond to the INITIAL with only a root Result-Code
+	// and no Granted-Service-Unit inside an MSCC group) leaves RGn_GRANTED*
+	// absent from sc.Vars. The template engine's USU cap/suppress logic
+	// treats an absent key as "no prior CCA → emit USU as-is", which lets
+	// randomly-seeded USU variables through uncapped.
+	// Pre-seeding to 0 means the first CCA to arrive — even one with no
+	// MSCC blocks — results in "granted = 0 → suppress USU", which is the
+	// correct behaviour when the OCS has not yet allocated any quota.
+	for i := range baseInput.MSCC {
+		prefix := fmt.Sprintf("RG%d", i+1)
+		sc.Vars[prefix+"_GRANTED"] = int64(0)
+		sc.Vars[prefix+"_GRANTED_UNITS"] = int64(0)
+	}
 
 	stepExec := engine.NewStepExecutor(m.tmpl, baseInput)
 	stepExec.Refreshers = smBuildRefreshers(variables)
@@ -1114,10 +1145,14 @@ func smConvertServices(services []serviceJSON, values map[string]any) []template
 		}
 		if s.ServiceIdentifier != "" {
 			block.ServiceIdentifier = smResolveUint32(s.ServiceIdentifier, values)
+			block.HasServiceIdentifier = true
 		}
-		if block.ServiceIdentifier == 0 {
+		if !block.HasServiceIdentifier {
+			// Fallback: for MSCC models the service ID is often a plain
+			// integer that doubles as the Service-Identifier.
 			if n, err := strconv.ParseUint(s.ID, 10, 32); err == nil {
 				block.ServiceIdentifier = uint32(n)
+				block.HasServiceIdentifier = true
 			}
 		}
 		out[i] = block

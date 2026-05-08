@@ -296,10 +296,10 @@ function GeneratorFields({ source, onChange }: GeneratorFieldsProps) {
       />
 
       {source.strategy === 'literal' && (
-        <NumberInput
+        <TextInput
           label="Value"
-          value={Number(source.params?.value ?? 0)}
-          onChange={(v) => setParam('value', typeof v === 'number' ? v : 0)}
+          value={String(source.params?.value ?? '')}
+          onChange={(e) => setParam('value', e.currentTarget.value)}
         />
       )}
 
