@@ -9,6 +9,7 @@ import { SseProvider } from './api/sse/SseProvider';
 import { ErrorProvider } from './context/error/ErrorProvider';
 import { theme } from './theme/theme';
 import { AppShell } from './layout/AppShell';
+import { AppSpotlight } from './components/AppSpotlight';
 import { AboutPage } from './pages/about/AboutPage';
 import { ScenariosListPage } from './pages/scenarios/ScenariosPage';
 import { DashboardPage } from './pages/dashboard/DashboardPage';
@@ -27,6 +28,7 @@ export function App() {
         <QueryClientProvider client={queryClient}>
           <SseProvider>
             <Notifications position="top-right" pauseResetOnHover="notification" />
+            <AppSpotlight />
             <GlobalPeerToasts />
             <Routes>
             <Route element={<AppShell />}>

@@ -244,7 +244,7 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 
 	dictAdapter := tmpl.NewDictAdapter(dict.Default)
 	execEngine := api.NewSessionManager(s, dmgr, behaviour, dictAdapter)
-	apiRouter := api.Router(s, dmgr, execEngine, dictAdapter, dict.Default)
+	apiRouter := api.Router(s, dmgr, execEngine, dictAdapter, dict.Default, Version)
 
 	// Mount the API router at /api. All routes within api.Router are
 	// relative to the router's root; the Mount prefix adds /api.

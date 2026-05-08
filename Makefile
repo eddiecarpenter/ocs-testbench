@@ -6,11 +6,16 @@
 
 .PHONY: build build-desktop vet test test-integration test-all generate clean
 
+# Version — derived from the nearest git tag. Falls back to "dev" when
+# there are no tags (fresh clone) or git is unavailable (CI sandbox).
+VERSION := $(shell git describe --tags --always 2>/dev/null || echo dev)
+LDFLAGS := -X main.Version=$(VERSION)
+
 # build — compile every package for headless/server deployment.
 # -a forces a full rebuild so that changes to go:embed targets (web/dist)
 # are always picked up by the Go build cache.
 build:
-	go build -a -o ocs-testbench ./cmd/ocs-testbench/ && go build ./...
+	go build -a -ldflags "$(LDFLAGS)" -o ocs-testbench ./cmd/ocs-testbench/ && go build ./...
 
 # build-desktop — produce a macOS .app bundle via the Wails toolchain.
 # Requires: go install github.com/wailsapp/wails/v2/cmd/wails@latest
@@ -20,7 +25,7 @@ build:
 # CONFIG_FILE when launched from Finder.
 APP_BIN=cmd/ocs-testbench/build/bin/ocs-testbench.app/Contents/MacOS
 build-desktop:
-	cd cmd/ocs-testbench && wails build -clean -skipbindings
+	cd cmd/ocs-testbench && wails build -clean -skipbindings -ldflags "$(LDFLAGS)"
 	cp cmd/ocs-testbench/config.yaml "$(APP_BIN)/config.yaml"
 
 # vet — static analysis; runs in CI alongside the build.

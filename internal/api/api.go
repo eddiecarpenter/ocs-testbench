@@ -59,7 +59,7 @@ type PeerManager interface {
 // The caller is responsible for mounting the returned router onto an
 // outer chi.Router (typically in cmd/ocs-testbench/main.go) under the
 // /api prefix.
-func Router(s store.Store, mgr PeerManager, exec ExecutionEngine, dictArg template.Dictionary, parser *dict.Parser) chi.Router {
+func Router(s store.Store, mgr PeerManager, exec ExecutionEngine, dictArg template.Dictionary, parser *dict.Parser, version string) chi.Router {
 	r := chi.NewRouter()
 
 	// Middleware stack — innermost to outermost:
@@ -88,6 +88,7 @@ func Router(s store.Store, mgr PeerManager, exec ExecutionEngine, dictArg templa
 		mountMetrics(v1, exec)
 		mountExpressions(v1)
 		mountSSE(v1, s, mgr, exec)
+		mountVersion(v1, version)
 	})
 
 	return r

@@ -26,6 +26,8 @@ import {
 } from '@tabler/icons-react';
 import { NavLink as RouterLink, Outlet, useLocation } from 'react-router';
 
+import { spotlight } from '../components/AppSpotlight';
+
 type NavEntry = {
   label: string;
   to: string;
@@ -116,7 +118,7 @@ export function AppShell() {
 
           <Group gap="sm" wrap="nowrap">
             <TextInput
-              placeholder="Search..."
+              placeholder="Go to…"
               leftSection={<IconSearch size={14} />}
               rightSection={
                 <Badge size="xs" variant="default" radius="sm">
@@ -127,6 +129,9 @@ export function AppShell() {
               w={260}
               size="sm"
               visibleFrom="sm"
+              readOnly
+              onClick={() => spotlight.open()}
+              styles={{ input: { cursor: 'pointer' } }}
             />
             <ThemeToggle />
             <ActionIcon variant="subtle" color="gray" size="lg" aria-label="Help">

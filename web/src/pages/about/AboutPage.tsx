@@ -5,6 +5,7 @@ import {
   Card,
   Divider,
   Group,
+  Skeleton,
   Stack,
   Text,
   Title,
@@ -14,6 +15,8 @@ import {
   IconCircleCheck,
   IconRouter,
 } from '@tabler/icons-react';
+
+import { useVersion } from '../../api/resources/version';
 
 const TECH_STACK = [
   'Diameter Gy (RFC 4006)',
@@ -27,6 +30,8 @@ const TECH_STACK = [
  * from the macOS menu bar. Intentionally minimal: identity, purpose, stack.
  */
 export function AboutPage() {
+  const { data: versionInfo, isLoading } = useVersion();
+
   return (
     <Stack gap="lg" p="md" maw={560}>
       {/* ── Identity ─────────────────────────────────────────── */}
@@ -47,9 +52,18 @@ export function AboutPage() {
           <Text size="sm" c="dimmed">
             Diameter Gy Credit-Control testing tool
           </Text>
-          <Badge variant="light" color="brand" radius="sm" mt={2} w="fit-content">
-            Charging Trigger Function (CTF)
-          </Badge>
+          <Group gap="xs" mt={2}>
+            <Badge variant="light" color="brand" radius="sm" w="fit-content">
+              Charging Trigger Function (CTF)
+            </Badge>
+            {isLoading ? (
+              <Skeleton height={20} width={60} radius="sm" />
+            ) : (
+              <Badge variant="outline" color="gray" radius="sm" w="fit-content">
+                {versionInfo?.version ?? 'dev'}
+              </Badge>
+            )}
+          </Group>
         </Stack>
       </Group>
 

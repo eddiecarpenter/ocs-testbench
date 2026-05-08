@@ -41,7 +41,7 @@ func (f *fakePeerManagerWithChannel) Subscribe() <-chan diameter.StateEvent {
 func TestPeerSSE_ContentTypeTextEventStream(t *testing.T) {
 	s := store.NewTestStore()
 	mgr := newFakePeerManagerWithChannel()
-	r := api.Router(s, mgr, nil, nil, nil)
+	r := api.Router(s, mgr, nil, nil, nil, "test")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -67,7 +67,7 @@ func TestPeerSSE_EmitsEventOnStateChange(t *testing.T) {
 	peerIDStr := api.UUIDStr(peer.ID)
 
 	mgr := newFakePeerManagerWithChannel("ocs-01")
-	r := api.Router(s, mgr, nil, nil, nil)
+	r := api.Router(s, mgr, nil, nil, nil, "test")
 
 	// Use a real HTTP server so we can read the response body as a
 	// streaming reader.
@@ -155,7 +155,7 @@ func TestExecutionSSE_ContentTypeTextEventStream(t *testing.T) {
 			return ch, nil
 		},
 	}
-	r := api.Router(s, nil, execEngine, nil, nil)
+	r := api.Router(s, nil, execEngine, nil, nil, "test")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -181,7 +181,7 @@ func TestExecutionSSE_EmitsEventOnProgress(t *testing.T) {
 			return evtChan, nil
 		},
 	}
-	r := api.Router(s, nil, execEngine, nil, nil)
+	r := api.Router(s, nil, execEngine, nil, nil, "test")
 
 	srv := httptest.NewServer(r)
 	defer srv.Close()
@@ -261,7 +261,7 @@ func TestExecutionSSE_NotFound_Returns404(t *testing.T) {
 			return nil, api.ErrSessionNotFound
 		},
 	}
-	r := api.Router(s, nil, execEngine, nil, nil)
+	r := api.Router(s, nil, execEngine, nil, nil, "test")
 
 	req := httptest.NewRequest(http.MethodGet,
 		"/v1/events/executions/no-such-session", nil)
@@ -285,7 +285,7 @@ func TestExecutionSSE_ClientDisconnect_HandlerExitsCleanly(t *testing.T) {
 			return make(chan api.ExecutionEvent), nil
 		},
 	}
-	r := api.Router(s, nil, execEngine, nil, nil)
+	r := api.Router(s, nil, execEngine, nil, nil, "test")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately to simulate instant disconnect
@@ -312,7 +312,7 @@ func TestExecutionSSE_ClientDisconnect_HandlerExitsCleanly(t *testing.T) {
 // /events/executions/{id} returns 503 when no engine is wired.
 func TestExecutionSSE_NilEngine_Returns503(t *testing.T) {
 	s := store.NewTestStore()
-	r := api.Router(s, nil, nil, nil, nil)
+	r := api.Router(s, nil, nil, nil, nil, "test")
 
 	req := httptest.NewRequest(http.MethodGet,
 		"/v1/events/executions/some-session", nil)
@@ -328,7 +328,7 @@ func TestExecutionSSE_NilEngine_Returns503(t *testing.T) {
 func TestPeerSSE_ClientDisconnect_HandlerExitsCleanly(t *testing.T) {
 	s := store.NewTestStore()
 	mgr := newFakePeerManagerWithChannel()
-	r := api.Router(s, mgr, nil, nil, nil)
+	r := api.Router(s, mgr, nil, nil, nil, "test")
 
 	// Cancel the request context to simulate a client disconnect.
 	ctx, cancel := context.WithCancel(context.Background())
