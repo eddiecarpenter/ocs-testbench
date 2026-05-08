@@ -306,6 +306,9 @@ export function createExecutionStore(executionId: string): ExecutionStore {
         }
         case 'step.sleeping': {
           // Engine is sleeping between iterations — start the countdown.
+          // Ignore if we're already paused/interrupted so a late-arriving
+          // sleep event from the previous iteration can't restart the timer.
+          if (cur.state !== 'running') return;
           set(() => ({
             sleepCountdown: {
               totalSec: event.data.delaySec,
@@ -340,6 +343,7 @@ export function createExecutionStore(executionId: string): ExecutionStore {
           set(() => ({
             state: reduceTransition(cur.state, 'paused'),
             cursor: event.data.atStepIndex,
+            sleepCountdown: null,
           }));
           return;
         }
@@ -515,7 +519,7 @@ export function createExecutionStore(executionId: string): ExecutionStore {
     },
     async interrupt() {
       const cur = get();
-      set(() => ({ state: reduceTransition(cur.state, 'paused') }));
+      set(() => ({ state: reduceTransition(cur.state, 'paused'), sleepCountdown: null }));
       await ApiService.post<void>(
         `/executions/${encodeURIComponent(cur.executionId)}/interrupt`,
       );

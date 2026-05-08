@@ -91,8 +91,14 @@ export function DebuggerTopBar({ execution, onBack }: DebuggerTopBarProps) {
                 Subscriber: {execution.subscriberMsisdn}
               </Text>
             )}
-            <Badge variant="light" color="grape" size="sm">
-              {modeLabel(execution.mode)}
+            <Badge
+              variant="light"
+              color={execution.mode === 'continuous' && state === 'paused' ? 'orange' : 'grape'}
+              size="sm"
+            >
+              {execution.mode === 'continuous' && state === 'paused'
+                ? 'Interrupted'
+                : modeLabel(execution.mode)}
             </Badge>
             <Badge
               variant="filled"

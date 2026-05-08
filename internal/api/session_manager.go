@@ -409,8 +409,17 @@ func (m *SessionManager) runContinuous(ctx context.Context, rec *sessionRecord, 
 
 	switch {
 	case errors.Is(err, engine.ErrExecutionInterrupted):
-		// Interrupted — stay in StatePaused (set by orchestrator); do NOT
-		// broadcast completed. The UI will reflect the paused state via SSE.
+		// Interrupted — set rec.state so that Detail() returns "paused".
+		// (The orchestrator sets sc.State but not the session-level rec.state.)
+		rec.state = engine.StatePaused
+		// If interrupted between iterations (stepIdx past end of the step
+		// list), wrap back to 0 and clear prevResult so the template engine
+		// starts a fresh session (new Session-Id, CC-Request-Number = 0).
+		if rec.stepIdx >= len(rec.steps) {
+			rec.stepIdx = 0
+			rec.prevResult = nil
+			rec.sc.ResetForNewIteration()
+		}
 		rec.mu.Unlock()
 		rec.broadcast(ExecutionEvent{
 			Type:      "progress",
@@ -574,14 +583,19 @@ func (m *SessionManager) Skip(_ context.Context, sessionID string) error {
 	return nil
 }
 
-// Step implements ExecutionEngine (interactive mode only).
+// Step implements ExecutionEngine. Works for interactive sessions and for
+// continuous sessions that have been interrupted (StatePaused). Stepping a
+// paused continuous session sends the next CCR and leaves the session paused
+// so the user can inspect the result and choose to continue or resume.
 func (m *SessionManager) Step(ctx context.Context, sessionID string, overrides map[string]any) (ExecutionStepResult, error) {
 	rec, err := m.getSession(sessionID)
 	if err != nil {
 		return ExecutionStepResult{}, err
 	}
 
-	if rec.sc.Mode != engine.ModeInteractive {
+	// Allow stepping on interactive sessions OR on continuous sessions that
+	// were interrupted and are now paused.
+	if rec.sc.Mode != engine.ModeInteractive && rec.state != engine.StatePaused {
 		return ExecutionStepResult{}, ErrInvalidState
 	}
 

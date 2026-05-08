@@ -182,6 +182,10 @@ func (o *Orchestrator) RunContinuous(
 			sc.State = StateCompleted
 			return nil
 		}
+		// Reset Diameter session state (Session-Id, CC-Request-Number) before
+		// the next iteration so every pass starts a fresh Diameter session.
+		prevResult = nil
+		sc.ResetForNewIteration()
 	}
 }
 
