@@ -53,6 +53,11 @@ import (
 	"net/http"
 	"os"
 
+	wails "github.com/wailsapp/wails/v2"
+	"github.com/wailsapp/wails/v2/pkg/options"
+	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/mac"
+
 	"github.com/fiorix/go-diameter/v4/diam/dict"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -289,10 +294,57 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 		return server.Shutdown(shutCtx)
 	})
 
-	if cfg.Frontend.AutoOpenBrowser && !cfg.Headless {
+	if !cfg.Headless {
 		url := browserURL(ln.Addr().String())
-		if err := openBrowser(url); err != nil {
-			logging.Warn("auto-open browser failed; continuing", "url", url, "err", err)
+
+		if cfg.Frontend.AutoOpenBrowser {
+			// Browser mode: open the operator's default browser and block on the
+			// lifecycle signal handler. AutoOpenBrowser=true opts out of the
+			// native Wails window so the full browser tooling (DevTools,
+			// extensions, multiple tabs) is available.
+			if err := openBrowser(url); err != nil {
+				logging.Warn("auto-open browser failed; continuing", "url", url, "err", err)
+			}
+		} else {
+			// Native window mode: launch the Wails window on the main OS thread.
+			// lc.Run (signal handling + shutdown) moves to a goroutine so the
+			// main thread is free for the Cocoa event loop.
+			lcErrCh := make(chan error, 1)
+			go func() { lcErrCh <- lc.Run(ctx) }()
+
+			app := newWailsApp()
+			wailsErr := wails.Run(&options.App{
+				Title:                    "OCS Testbench",
+				Width:                    1400,
+				Height:                   900,
+				MinWidth:                 900,
+				MinHeight:                600,
+				Menu:                     app.buildMenu(),
+				OnStartup:                app.startup,
+				EnableDefaultContextMenu: true,
+				// Route all webview requests through our existing chi router so
+				// the SPA and all API endpoints (including SSE) share one handler.
+				// The HTTP server continues to run on cfg.Server.Addr for external
+				// REST clients — both paths coexist independently.
+				AssetServer: &assetserver.Options{
+					Handler: router,
+				},
+				Mac: &mac.Options{
+					TitleBar: mac.TitleBarDefault(),
+					About: &mac.AboutInfo{
+						Title:   "OCS Testbench",
+						Message: "Diameter Gy Credit-Control testing tool",
+					},
+				},
+			})
+
+			// Window closed — drain lifecycle.
+			if lcErr := <-lcErrCh; lcErr != nil && !errors.Is(lcErr, context.Canceled) {
+				if wailsErr == nil {
+					return lcErr
+				}
+			}
+			return wailsErr
 		}
 	}
 

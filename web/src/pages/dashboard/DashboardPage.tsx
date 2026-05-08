@@ -11,12 +11,15 @@ import {
   Title,
 } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
+import { useQueryClient } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
+import { useEffect } from 'react';
 
 import { useDashboardKpis } from '../../api/resources/dashboard';
 import { useExecutions } from '../../api/resources/executions';
-import { useResponseTimeSeries } from '../../api/resources/metrics';
+import { metricsKeys, useResponseTimeSeries } from '../../api/resources/metrics';
 import { usePeers } from '../../api/resources/peers';
+import { appConfig } from '../../config/app';
 import { KpiCard } from './KpiCard';
 import { toKpiStats } from './kpis';
 import { PeerStatusCard } from './PeerStatusCard';
@@ -59,11 +62,40 @@ function CardSkeleton({ height, children }: { height: number; children?: ReactNo
   );
 }
 
+/**
+ * Subscribes to the SSE stream of the first currently-running execution and
+ * invalidates the response-time metrics query on every step event. This keeps
+ * the chart live without polling — silent when nothing is running.
+ */
+function useMetricsRefreshFromSse(runningExecutionId: string | undefined) {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!runningExecutionId) return;
+    const url = `${appConfig.apiBaseUrl}/events/executions/${encodeURIComponent(runningExecutionId)}`;
+    const es = new EventSource(url);
+    es.addEventListener('execution.progress', (ev: MessageEvent) => {
+      try {
+        const raw = JSON.parse(ev.data as string) as { state?: string };
+        // Refresh after each completed step or when the run finishes.
+        if (raw.state === 'running' || raw.state === 'completed' || raw.state === 'success') {
+          void queryClient.invalidateQueries({ queryKey: metricsKeys.all });
+        }
+      } catch { /* malformed — ignore */ }
+    });
+    return () => es.close();
+  }, [runningExecutionId, queryClient]);
+}
+
 export function DashboardPage() {
   const kpis = useDashboardKpis();
   const peers = usePeers();
   const executions = useExecutions({ limit: 5 });
   const responseTime = useResponseTimeSeries({ window: 'PT1H' });
+
+  const runningId = executions.data?.items.find(
+    (e) => e.state === 'running',
+  )?.id;
+  useMetricsRefreshFromSse(runningId);
 
   return (
     <Stack gap="lg" p="md">

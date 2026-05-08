@@ -1396,8 +1396,8 @@ func (m *SessionManager) ResponseTimeSeries(_ context.Context, window string) (R
 		return ResponseTimeSeries{}, fmt.Errorf("invalid window %q: %w", window, err)
 	}
 
-	// Choose a bucket size that gives ~12 data points.
-	bucketDur := windowDur / 12
+	// Choose a bucket size that gives ~60 data points (1-minute resolution).
+	bucketDur := windowDur / 60
 	if bucketDur < time.Minute {
 		bucketDur = time.Minute
 	}

@@ -4,13 +4,20 @@
 # on any developer machine (no Docker required); targets with the tag
 # require Docker so testcontainers-go can stand up a Postgres image.
 
-.PHONY: build vet test test-integration test-all generate clean
+.PHONY: build build-desktop vet test test-integration test-all generate clean
 
-# build — compile every package; the canonical pre-commit gate.
+# build — compile every package for headless/server deployment.
 # -a forces a full rebuild so that changes to go:embed targets (web/dist)
 # are always picked up by the Go build cache.
 build:
 	go build -a -o ocs-testbench ./cmd/ocs-testbench/ && go build ./...
+
+# build-desktop — produce a macOS .app bundle via the Wails toolchain.
+# Requires: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+# The frontend SPA is built from web/ as part of this step. The bundle
+# lands in cmd/ocs-testbench/build/bin/OCS Testbench.app.
+build-desktop:
+	cd cmd/ocs-testbench && wails build -clean -skipbindings
 
 # vet — static analysis; runs in CI alongside the build.
 vet:

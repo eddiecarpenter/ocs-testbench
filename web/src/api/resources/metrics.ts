@@ -30,5 +30,6 @@ export function useResponseTimeSeries(params: ResponseTimeParams = {}) {
   return useQuery({
     queryKey: metricsKeys.responseTime(params),
     queryFn: ({ signal }) => getResponseTimeSeries(params, signal),
+    // No polling — DashboardPage drives invalidation via SSE events.
   });
 }
