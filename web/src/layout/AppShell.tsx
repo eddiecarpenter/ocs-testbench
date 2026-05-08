@@ -14,7 +14,7 @@ import {
 } from '@mantine/core';
 import {
   IconDashboard,
-  IconHelp,
+  IconInfoCircle,
   IconLayoutGrid,
   IconMoon,
   IconPlayerPlay,
@@ -134,8 +134,15 @@ export function AppShell() {
               styles={{ input: { cursor: 'pointer' } }}
             />
             <ThemeToggle />
-            <ActionIcon variant="subtle" color="gray" size="lg" aria-label="Help">
-              <IconHelp size={18} />
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              size="lg"
+              aria-label="About"
+              component={RouterLink}
+              to="/about"
+            >
+              <IconInfoCircle size={18} />
             </ActionIcon>
           </Group>
         </Group>
