@@ -375,6 +375,15 @@ func (pc *PeerConnection) run(ctx context.Context) {
 		pc.muLife.Lock()
 		pc.activeConn = c
 		pc.muLife.Unlock()
+		// Pre-arm the close-notifier channel before emitting StateConnected.
+		// go-diameter's notifyClientGone only closes closeNotifyc when it is
+		// non-nil; if a subscriber closes the connection immediately upon
+		// receiving StateConnected, c.serve() can exit before waitForDrop
+		// calls CloseNotify(), leaving closeNotifyc nil and the goroutine
+		// hanging until the context is cancelled.
+		if cn, ok := c.(diam.CloseNotifier); ok {
+			_ = cn.CloseNotify()
+		}
 		pc.transitionTo(diameter.StateConnected, "CER/CEA OK")
 		backoff = pc.backoffInitial
 
