@@ -38,7 +38,7 @@ jobs:
         if: steps.config.outputs.skip != 'true'
         id: add
         env:
-          GH_TOKEN: ${{ secrets.GOOSE_AGENT_PAT }}
+          GH_TOKEN: ${{ secrets.PROJECT_PAT }}
         run: |
           ISSUE_NODE_ID="${{ github.event.issue.node_id }}"
           PROJECT_ID="${{ vars.AGENTIC_PROJECT_ID }}"
@@ -82,13 +82,15 @@ jobs:
           STATUS=""
           for LABEL in $(echo "${LABELS}" | jq -r '.[]'); do
             case "${LABEL}" in
-              backlog)          STATUS="Backlog"; break ;;
-              scoping)          STATUS="Scoping"; break ;;
-              scheduled)        STATUS="Scheduled"; break ;;
-              in-design)        STATUS="In Design"; break ;;
-              in-development)   STATUS="In Development"; break ;;
-              in-review)        STATUS="In Review"; break ;;
-              done)             STATUS="Done"; break ;;
+              backlog)              STATUS="Backlog"; break ;;
+              scoping)              STATUS="Scoping"; break ;;
+              in-design)            STATUS="In Design"; break ;;
+              in-development)       STATUS="In Development"; break ;;
+              in-verification)      STATUS="In Verification"; break ;;
+              compliance-verified)  STATUS="In Review"; break ;;
+              in-review)            STATUS="In Review"; break ;;
+              needs-human-review)   STATUS="Needs Human Review"; break ;;
+              done)                 STATUS="Done"; break ;;
             esac
           done
 
@@ -109,7 +111,7 @@ jobs:
         if: steps.config.outputs.skip != 'true' && steps.add.outputs.item_id && steps.map.outputs.skip != 'true'
         id: field
         env:
-          GH_TOKEN: ${{ secrets.GOOSE_AGENT_PAT }}
+          GH_TOKEN: ${{ secrets.PROJECT_PAT }}
         run: |
           PROJECT_ID="${{ vars.AGENTIC_PROJECT_ID }}"
           TARGET_STATUS="${{ steps.map.outputs.status }}"
@@ -164,7 +166,7 @@ jobs:
       - name: Update project status
         if: steps.config.outputs.skip != 'true' && steps.add.outputs.item_id && steps.map.outputs.skip != 'true' && steps.field.outputs.field_id
         env:
-          GH_TOKEN: ${{ secrets.GOOSE_AGENT_PAT }}
+          GH_TOKEN: ${{ secrets.PROJECT_PAT }}
         run: |
           PROJECT_ID="${{ vars.AGENTIC_PROJECT_ID }}"
           ITEM_ID="${{ steps.add.outputs.item_id }}"
