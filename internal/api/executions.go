@@ -77,6 +77,19 @@ type ExecutionEngine interface {
 	// the session is not paused in continuous mode.
 	RunToEnd(ctx context.Context, sessionID string) error
 
+	// ApplyContextOverride writes variables into the execution's live context.
+	// Changes are permanent for the remainder of the run — every subsequent
+	// step sees the updated values. Requires the session to be paused.
+	// Returns ErrSessionNotFound or ErrInvalidState.
+	ApplyContextOverride(ctx context.Context, sessionID string, variables map[string]any) error
+
+	// ApplyPayloadOverride stages one-shot variables for the next step only.
+	// The override values are merged into the step's overrides at
+	// highest-precedence and cleared immediately after the step executes.
+	// Requires the session to be paused. Returns ErrSessionNotFound or
+	// ErrInvalidState.
+	ApplyPayloadOverride(ctx context.Context, sessionID string, variables map[string]any) error
+
 	// List returns a summary of all known sessions (active, completed,
 	// terminated, error). The slice is a snapshot; ordering is undefined.
 	List(ctx context.Context) []ExecutionSummary
