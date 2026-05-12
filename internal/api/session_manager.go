@@ -2,10 +2,12 @@ package api
 
 import (
 	"context"
+	crand "crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"sort"
 	"strconv"
 	"strings"
@@ -64,6 +66,7 @@ type variableSrcJSON struct {
 	Field    string         `json:"field,omitempty"`
 	Strategy string         `json:"strategy,omitempty"`
 	Params   map[string]any `json:"params,omitempty"`
+	Refresh  string         `json:"refresh,omitempty"` // "per-send" → re-randomize before every CCR
 }
 
 // peerIdentityBody is the minimal subset of the peer body needed for
@@ -71,6 +74,8 @@ type variableSrcJSON struct {
 type peerIdentityBody struct {
 	OriginHost  string `json:"originHost"`
 	OriginRealm string `json:"originRealm"`
+	DestHost    string `json:"destHost"`
+	DestRealm   string `json:"destRealm"`
 }
 
 // — Session record —
@@ -224,7 +229,22 @@ func (m *SessionManager) Start(ctx context.Context, scenarioID string, mode stri
 		return StartInfo{}, fmt.Errorf("session manager: parse steps: %w", err)
 	}
 
-	peerName, originHost, originRealm, err := m.loadPeerInfo(ctx, scRow.PeerID)
+	// Validate that every service in an MSCC scenario has a Rating-Group.
+	// Rating-Group is mandatory for single-mscc and multi-mscc service models:
+	// the OCS uses it to identify the quota block in the CCA, and the engine
+	// uses it to correlate granted units with the correct MSCC block.
+	if body.ServiceModel == "single-mscc" || body.ServiceModel == "multi-mscc" {
+		for i, svc := range services {
+			if svc.RatingGroup == "" {
+				return StartInfo{}, fmt.Errorf(
+					"session manager: service %d (%q) is missing a required Rating-Group — set a rating group in the scenario's Charging tab",
+					i+1, svc.ID,
+				)
+			}
+		}
+	}
+
+	peerName, originHost, originRealm, destHost, destRealm, err := m.loadPeerInfo(ctx, scRow.PeerID)
 	if err != nil {
 		return StartInfo{}, fmt.Errorf("session manager: load peer: %w", err)
 	}
@@ -244,7 +264,7 @@ func (m *SessionManager) Start(ctx context.Context, scenarioID string, mode stri
 		}
 	}
 
-	values := smResolveVariables(variables, sub, originHost, originRealm)
+	values := smResolveVariables(variables, sub, originHost, originRealm, destHost, destRealm)
 
 	baseInput := template.EngineInput{
 		Tree:         smConvertAvpTree(avpNodes),
@@ -265,13 +285,32 @@ func (m *SessionManager) Start(ctx context.Context, scenarioID string, mode stri
 		svcCtxID = "32251@3gpp.org"
 	}
 	sc.ServiceContextID = svcCtxID
+	sc.DestRealm = destRealm
+	sc.DestHost = destHost
 	for k, v := range values {
 		sc.Vars[k] = v
 	}
 	sc.Vars["SESSION_ID"] = sc.SessionID
 	sc.Vars["SERVICE_CONTEXT_ID"] = svcCtxID
 
+	// Pre-seed per-MSCC granted variables to 0 for every service slot.
+	// Without this, a CCA that carries no MSCC block (some OCS
+	// implementations respond to the INITIAL with only a root Result-Code
+	// and no Granted-Service-Unit inside an MSCC group) leaves RGn_GRANTED*
+	// absent from sc.Vars. The template engine's USU cap/suppress logic
+	// treats an absent key as "no prior CCA → emit USU as-is", which lets
+	// randomly-seeded USU variables through uncapped.
+	// Pre-seeding to 0 means the first CCA to arrive — even one with no
+	// MSCC blocks — results in "granted = 0 → suppress USU", which is the
+	// correct behaviour when the OCS has not yet allocated any quota.
+	for i := range baseInput.MSCC {
+		prefix := fmt.Sprintf("RG%d", i+1)
+		sc.Vars[prefix+"_GRANTED"] = int64(0)
+		sc.Vars[prefix+"_GRANTED_UNITS"] = int64(0)
+	}
+
 	stepExec := engine.NewStepExecutor(m.tmpl, baseInput)
+	stepExec.Refreshers = smBuildRefreshers(variables)
 	orc := engine.NewOrchestrator(stepExec)
 
 	sessionID := uuid.New().String()
@@ -370,8 +409,17 @@ func (m *SessionManager) runContinuous(ctx context.Context, rec *sessionRecord, 
 
 	switch {
 	case errors.Is(err, engine.ErrExecutionInterrupted):
-		// Interrupted — stay in StatePaused (set by orchestrator); do NOT
-		// broadcast completed. The UI will reflect the paused state via SSE.
+		// Interrupted — set rec.state so that Detail() returns "paused".
+		// (The orchestrator sets sc.State but not the session-level rec.state.)
+		rec.state = engine.StatePaused
+		// If interrupted between iterations (stepIdx past end of the step
+		// list), wrap back to 0 and clear prevResult so the template engine
+		// starts a fresh session (new Session-Id, CC-Request-Number = 0).
+		if rec.stepIdx >= len(rec.steps) {
+			rec.stepIdx = 0
+			rec.prevResult = nil
+			rec.sc.ResetForNewIteration()
+		}
 		rec.mu.Unlock()
 		rec.broadcast(ExecutionEvent{
 			Type:      "progress",
@@ -535,14 +583,19 @@ func (m *SessionManager) Skip(_ context.Context, sessionID string) error {
 	return nil
 }
 
-// Step implements ExecutionEngine (interactive mode only).
+// Step implements ExecutionEngine. Works for interactive sessions and for
+// continuous sessions that have been interrupted (StatePaused). Stepping a
+// paused continuous session sends the next CCR and leaves the session paused
+// so the user can inspect the result and choose to continue or resume.
 func (m *SessionManager) Step(ctx context.Context, sessionID string, overrides map[string]any) (ExecutionStepResult, error) {
 	rec, err := m.getSession(sessionID)
 	if err != nil {
 		return ExecutionStepResult{}, err
 	}
 
-	if rec.sc.Mode != engine.ModeInteractive {
+	// Allow stepping on interactive sessions OR on continuous sessions that
+	// were interrupted and are now paused.
+	if rec.sc.Mode != engine.ModeInteractive && rec.state != engine.StatePaused {
 		return ExecutionStepResult{}, ErrInvalidState
 	}
 
@@ -737,17 +790,21 @@ func (m *SessionManager) getSession(sessionID string) (*sessionRecord, error) {
 	return rec, nil
 }
 
-func (m *SessionManager) loadPeerInfo(ctx context.Context, peerID pgtype.UUID) (name, originHost, originRealm string, err error) {
+func (m *SessionManager) loadPeerInfo(ctx context.Context, peerID pgtype.UUID) (name, originHost, originRealm, destHost, destRealm string, err error) {
 	if !peerID.Valid {
-		return "", "", "", fmt.Errorf("scenario has no peer assigned")
+		return "", "", "", "", "", fmt.Errorf("scenario has no peer assigned")
 	}
 	peer, err := m.store.GetPeer(ctx, peerID)
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", "", "", err
 	}
 	var body peerIdentityBody
 	_ = json.Unmarshal(peer.Body, &body)
-	return peer.Name, body.OriginHost, body.OriginRealm, nil
+	dr := body.DestRealm
+	if dr == "" {
+		dr = body.OriginRealm
+	}
+	return peer.Name, body.OriginHost, body.OriginRealm, body.DestHost, dr, nil
 }
 
 func parseScenarioUUID(s string) (pgtype.UUID, error) {
@@ -764,13 +821,15 @@ func parseScenarioUUID(s string) (pgtype.UUID, error) {
 func smResolveVariables(
 	vars []variableJSON,
 	sub *store.Subscriber,
-	originHost, originRealm string,
+	originHost, originRealm, destHost, destRealm string,
 ) map[string]any {
 	vals := make(map[string]any, len(vars)+12)
 	vals["ORIGIN_HOST"] = originHost
 	vals["ORIGIN_REALM"] = originRealm
-	// Destination-Realm defaults to the peer's own realm (same domain).
-	vals["DEST_REALM"] = originRealm
+	vals["DEST_REALM"] = destRealm
+	if destHost != "" {
+		vals["DEST_HOST"] = destHost
+	}
 	// Auth-Application-Id is always 4 (Diameter Credit-Control / Gy).
 	vals["AUTH_APP_ID"] = uint32(4)
 	// END_USER_E164 (0) — constant for MSISDN-based Subscription-Id-Type AVP.
@@ -781,8 +840,10 @@ func smResolveVariables(
 		if sub.Imei.Valid {
 			vals["IMEI"] = sub.Imei.String
 		}
-		// Auto-seed IMS calling-party from subscriber MSISDN so VOICE scenarios
-		// get a valid SIP URI without requiring an explicit variable definition.
+		// Auto-seed CALLING_PARTY_ADDRESS from subscriber MSISDN so MO VOICE
+		// scenarios work without an explicit variable definition. MT scenarios
+		// override this by defining CALLING_PARTY_ADDRESS as a user variable
+		// (remote party number) and setting CALLED_PARTY_ADDRESS to the MSISDN.
 		vals["CALLING_PARTY_ADDRESS"] = sub.Msisdn
 	}
 	for _, v := range vars {
@@ -796,6 +857,30 @@ func smResolveVariables(
 	return vals
 }
 
+// smResolveIntParam resolves a generator param value that may be either a
+// plain number or a {{VAR}} placeholder referencing another variable. The
+// vals map must already contain the referenced variable's value (i.e. the
+// bound / literal variables are resolved before generator ones).
+func smResolveIntParam(raw any, vals map[string]any) (int64, bool) {
+	// Plain number — fast path.
+	if n, ok := toInt64Param(raw); ok {
+		return n, true
+	}
+	// String — check for {{VAR}} placeholder.
+	s, ok := raw.(string)
+	if !ok {
+		return 0, false
+	}
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "{{") && strings.HasSuffix(s, "}}") {
+		varName := s[2 : len(s)-2]
+		if v, ok := vals[varName]; ok {
+			return toInt64Param(v)
+		}
+	}
+	return 0, false
+}
+
 func smResolveGenerator(vals map[string]any, name string, src variableSrcJSON) {
 	switch src.Strategy {
 	case "literal":
@@ -804,7 +889,122 @@ func smResolveGenerator(vals map[string]any, name string, src variableSrcJSON) {
 		}
 	case "uuid":
 		vals[name] = uuid.New().String()
+	case "random-int":
+		min, max := int64(0), int64(math.MaxInt32)
+		if src.Params != nil {
+			if v, ok := smResolveIntParam(src.Params["min"], vals); ok {
+				min = v
+			}
+			if v, ok := smResolveIntParam(src.Params["max"], vals); ok {
+				max = v
+			}
+		}
+		if max <= min {
+			max = min + 1
+		}
+		n, _ := cryptoRandInt64(max - min)
+		vals[name] = min + n
+	case "random-string":
+		length := 8
+		charset := "alphanumeric"
+		if src.Params != nil {
+			if v, ok := src.Params["length"]; ok {
+				if n, ok := toInt64Param(v); ok && n > 0 {
+					length = int(n)
+				}
+			}
+			if v, ok := src.Params["charset"].(string); ok && v != "" {
+				charset = v
+			}
+		}
+		vals[name] = smRandomString(length, charset)
+	case "random-choice":
+		if src.Params != nil {
+			if raw, ok := src.Params["options"]; ok {
+				if options, ok := raw.([]any); ok && len(options) > 0 {
+					n, _ := cryptoRandInt64(int64(len(options)))
+					vals[name] = fmt.Sprintf("%v", options[n])
+				}
+			}
+		}
+	case "incrementer":
+		start := int64(0)
+		if src.Params != nil {
+			if v, ok := toInt64Param(src.Params["start"]); ok {
+				start = v
+			}
+		}
+		vals[name] = start
 	}
+}
+
+// smBuildRefreshers returns a slice of functions, one per generator variable
+// that carries refresh:"per-send". Each function re-randomizes that variable
+// in the provided vars map when called — the StepExecutor invokes all of them
+// before derived-value evaluation on every CCR send.
+func smBuildRefreshers(vars []variableJSON) []func(map[string]any) {
+	var refreshers []func(map[string]any)
+	for _, v := range vars {
+		if v.Source.Kind != "generator" || v.Source.Refresh != "per-send" {
+			continue
+		}
+		name := v.Name // capture by value
+		src := v.Source
+		refreshers = append(refreshers, func(vals map[string]any) {
+			smResolveGenerator(vals, name, src)
+		})
+	}
+	return refreshers
+}
+
+// cryptoRandInt64 returns a cryptographically random int64 in [0, n).
+func cryptoRandInt64(n int64) (int64, error) {
+	if n <= 0 {
+		return 0, nil
+	}
+	big, err := crand.Int(crand.Reader, big.NewInt(n))
+	if err != nil {
+		return 0, err
+	}
+	return big.Int64(), nil
+}
+
+// toInt64Param coerces a JSON-decoded value (typically float64) to int64.
+func toInt64Param(v any) (int64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return int64(n), true
+	case int64:
+		return n, true
+	case int:
+		return int64(n), true
+	case json.Number:
+		i, err := n.Int64()
+		return i, err == nil
+	}
+	return 0, false
+}
+
+// smRandomString generates a random string of the given length using the
+// named charset: "alpha", "numeric", "alphanumeric", or "hex".
+func smRandomString(length int, charset string) string {
+	var chars []byte
+	switch charset {
+	case "alpha":
+		chars = []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	case "numeric":
+		chars = []byte("0123456789")
+	case "hex":
+		chars = []byte("0123456789abcdef")
+	default: // alphanumeric
+		chars = []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+	}
+	out := make([]byte, length)
+	for i := range out {
+		n, _ := cryptoRandInt64(int64(len(chars)))
+		out[i] = chars[n]
+	}
+	return string(out)
 }
 
 func smResolveBound(vals map[string]any, name string, src variableSrcJSON, sub *store.Subscriber, originHost, originRealm string) {
@@ -833,15 +1033,17 @@ func smResolveBound(vals map[string]any, name string, src variableSrcJSON, sub *
 	}
 }
 
-// smDeriveUnitType returns the Diameter unit type implied by the service type.
+// smDeriveUnitType returns the template.UnitType constant implied by the
+// service type. Values must match the constants defined in the template
+// package (UnitTypeOctet="OCTET", UnitTypeTime="TIME", UnitTypeUnits="UNITS").
 func smDeriveUnitType(serviceType string) string {
 	switch strings.ToUpper(serviceType) {
 	case "VOICE", "USSD2_SESSION":
-		return "TIME"
+		return string(template.UnitTypeTime) // "TIME"
 	case "DATA":
-		return "VOLUME"
+		return string(template.UnitTypeOctet) // "OCTET"
 	default: // SMS, USSD1_EVENT, USSD1_SESSION
-		return "EVENT"
+		return string(template.UnitTypeUnits) // "UNITS"
 	}
 }
 
@@ -885,13 +1087,37 @@ func sm3GPPServiceInfoAvps(serviceType string) []avpNodeJSON {
 func smHuaweiServiceInfoAvps(serviceType string) []avpNodeJSON {
 	switch strings.ToUpper(serviceType) {
 	case "VOICE":
-		return []avpNodeJSON{{Name: "IN_INFORMATION", VendorID: 2011}}
+		return []avpNodeJSON{{
+			Name:     "IN-Information",
+			Code:     20300,
+			VendorID: 2011,
+			Children: []avpNodeJSON{
+				// dynamic — user configures per scenario
+				{Name: "Calling-Party-Address", Code: 20336, VendorID: 2011, ValueRef: "CALLING_PARTY_ADDRESS"},
+				{Name: "Called-Party-Address", Code: 20337, VendorID: 2011, ValueRef: "CALLED_PARTY_ADDRESS"},
+				{Name: "Connect-Called-Number", Code: 20373, VendorID: 2011, ValueRef: "CALLED_PARTY_ADDRESS"},
+				{Name: "Charge-Flow-Type", Code: 20339, VendorID: 2011, ValueRef: "CHARGE_FLOW_TYPE"},
+				// static — literal defaults, edit in the AVP tree if needed
+				{Name: "Called-Vlr-Number", Code: 20305, VendorID: 2011, ValueRef: "27812022024"},
+				{Name: "Called-CellID-Or-SAI", Code: 20306, VendorID: 2011, ValueRef: "655020010965535"},
+				{Name: "MSC-Address", Code: 20322, VendorID: 2011, ValueRef: "27812020002"},
+				{Name: "Time-Zone", Code: 20324, VendorID: 2011, ValueRef: "32"},
+				{Name: "Call-Reference-Number", Code: 20321, VendorID: 2011, ValueRef: "A7ED8D101D"},
+				{Name: "Calling-Parties-Category", Code: 20301, VendorID: 2011, ValueRef: "165"},
+				{Name: "Access-Network-Type", Code: 20804, VendorID: 2011, ValueRef: "200"},
+				{Name: "Called-Msc-Address", Code: 21172, VendorID: 2011, ValueRef: "27812020002"},
+				{Name: "Called-Party-Address-Nature", Code: 21163, VendorID: 2011, ValueRef: "4"},
+				{Name: "Address-Of-Restricted-Indicator", Code: 21121, VendorID: 2011, ValueRef: "0"},
+				{Name: "Service-Key", Code: 20806, VendorID: 2011, ValueRef: "91"},
+				{Name: "New-SSP-Time", Code: 22992, VendorID: 2011, ValueRef: "2026-05-07T15:07:23+02:00"},
+			},
+		}}
 	case "DATA":
 		return []avpNodeJSON{{Name: "PS-Information", VendorID: 10415}}
 	case "SMS":
-		return []avpNodeJSON{{Name: "SMS_INFORMATION", VendorID: 2011}}
+		return []avpNodeJSON{{Name: "SMS-Information", Code: 20327, VendorID: 2011}}
 	case "USSD1_EVENT", "USSD1_SESSION", "USSD2_SESSION":
-		return []avpNodeJSON{{Name: "DCD_INFORMATION", VendorID: 2011}}
+		return []avpNodeJSON{{Name: "DCD-Information", Code: 20337, VendorID: 2011}}
 	default:
 		return nil
 	}
@@ -924,22 +1150,53 @@ func smConvertAvpTree(nodes []avpNodeJSON) []template.AVPNode {
 func smConvertAvpNode(n avpNodeJSON) template.AVPNode {
 	node := template.AVPNode{
 		Name:     n.Name,
+		Code:     n.Code,
 		VendorID: n.VendorID,
 	}
 	if len(n.Children) > 0 {
 		node.AVPs = smConvertAvpTree(n.Children)
 	} else if n.ValueRef != "" {
-		// Pure numeric literals are passed through directly so that
-		// Enumerated AVPs like Subscription-Id-Type can be given a
-		// literal value (e.g. "0" for END_USER_E164) without needing a
-		// named variable.  Non-numeric refs are wrapped as {{TOKEN}}.
-		if _, err := strconv.ParseFloat(n.ValueRef, 64); err == nil {
-			node.Value = n.ValueRef
-		} else {
+		// Variable references are UPPER_SNAKE_CASE identifiers — uppercase
+		// ASCII letters and underscores, with at least one underscore, OR
+		// purely alphabetic uppercase (e.g. MSISDN). Everything else
+		// (numbers, hex strings, timestamps, phone numbers, …) is a literal
+		// value and is passed through unchanged.
+		if smIsVariableName(n.ValueRef) {
 			node.Value = "{{" + n.ValueRef + "}}"
+		} else {
+			node.Value = n.ValueRef
 		}
 	}
 	return node
+}
+
+// smIsVariableName reports whether s is an UPPER_SNAKE_CASE variable name
+// rather than a literal value string.  Variable names:
+//   - start with an uppercase ASCII letter
+//   - contain only uppercase ASCII letters, digits, and underscores
+//   - either contain at least one underscore (e.g. CALLING_PARTY_ADDRESS)
+//     or contain no digits at all (e.g. MSISDN)
+//
+// This lets hex strings (A7ED8D101D), phone numbers (27815107352), and
+// arbitrary text (Thu May 07 …) pass through as literals.
+func smIsVariableName(s string) bool {
+	if len(s) == 0 || s[0] < 'A' || s[0] > 'Z' {
+		return false
+	}
+	hasUnderscore, hasDigit := false, false
+	for _, c := range s {
+		switch {
+		case c >= 'A' && c <= 'Z':
+			// ok
+		case c >= '0' && c <= '9':
+			hasDigit = true
+		case c == '_':
+			hasUnderscore = true
+		default:
+			return false // space, lowercase, punctuation → literal
+		}
+	}
+	return hasUnderscore || !hasDigit
 }
 
 func smConvertServices(services []serviceJSON, values map[string]any) []template.MSCCTemplateBlock {
@@ -956,10 +1213,14 @@ func smConvertServices(services []serviceJSON, values map[string]any) []template
 		}
 		if s.ServiceIdentifier != "" {
 			block.ServiceIdentifier = smResolveUint32(s.ServiceIdentifier, values)
+			block.HasServiceIdentifier = true
 		}
-		if block.ServiceIdentifier == 0 {
+		if !block.HasServiceIdentifier {
+			// Fallback: for MSCC models the service ID is often a plain
+			// integer that doubles as the Service-Identifier.
 			if n, err := strconv.ParseUint(s.ID, 10, 32); err == nil {
 				block.ServiceIdentifier = uint32(n)
+				block.HasServiceIdentifier = true
 			}
 		}
 		out[i] = block
@@ -1189,8 +1450,8 @@ func (m *SessionManager) ResponseTimeSeries(_ context.Context, window string) (R
 		return ResponseTimeSeries{}, fmt.Errorf("invalid window %q: %w", window, err)
 	}
 
-	// Choose a bucket size that gives ~12 data points.
-	bucketDur := windowDur / 12
+	// Choose a bucket size that gives ~60 data points (1-minute resolution).
+	bucketDur := windowDur / 60
 	if bucketDur < time.Minute {
 		bucketDur = time.Minute
 	}

@@ -43,6 +43,12 @@ type SessionContext struct {
 	// CCR for this session. Set at session creation from the scenario
 	// definition; defaults to "32251@3gpp.org" when the scenario omits it.
 	ServiceContextID string
+	// DestRealm is the Destination-Realm AVP sent in every CCR. Defaults
+	// to the peer's OriginRealm when empty.
+	DestRealm string
+	// DestHost is the Destination-Host AVP sent in every CCR. When empty
+	// the AVP is omitted (OCS routes by realm alone).
+	DestHost string
 	// Vars is the live substitution map carried across steps. It is
 	// pre-seeded with CC_REQUEST_NUMBER = 0 at creation and updated by
 	// extractions and derived-value evaluations during execution.
@@ -85,6 +91,39 @@ func NewSessionContext(peerName, originHost string, s messaging.Sender, mode Exe
 		Vars:            map[string]any{"CC_REQUEST_NUMBER": uint32(0)},
 		sender:          newMeasuredSender(s, peerName),
 	}
+}
+
+// ResetForNewIteration resets the Diameter protocol state (Session-Id and
+// CC-Request-Number) for the start of a new session iteration. The peer
+// binding, user variables, and metrics accumulator are left intact.
+// Call this before executing the first step of a new iteration so the OCS
+// sees a fresh Session-Id and CC-Request-Number = 0.
+func (sc *SessionContext) ResetForNewIteration() {
+	// Extract the originHost prefix from the existing Session-Id
+	// (format: "<originHost>;<hi32>;<lo32>").
+	originHost := sc.SessionID
+	if i := len(sc.PeerName); i > 0 {
+		// Prefer the origin-host embedded at the start of the existing ID.
+		if j := indexByte(sc.SessionID, ';'); j >= 0 {
+			originHost = sc.SessionID[:j]
+		}
+	}
+	id := uuid.New()
+	hi32 := binary.BigEndian.Uint32(id[0:4])
+	lo32 := binary.BigEndian.Uint32(id[4:8])
+	sc.SessionID = fmt.Sprintf("%s;%d;%d", originHost, hi32, lo32)
+	sc.CCRequestNumber = 0
+	sc.Vars["CC_REQUEST_NUMBER"] = uint32(0)
+}
+
+// indexByte returns the index of the first occurrence of b in s, or -1.
+func indexByte(s string, b byte) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == b {
+			return i
+		}
+	}
+	return -1
 }
 
 // Send delegates to the session's MeasuredSender, capturing metrics for the

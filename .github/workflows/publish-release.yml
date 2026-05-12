@@ -1,121 +1,163 @@
-# publish-release.yml — Example release workflows
+# publish-release.yml — Cross-platform release builder for OCS Testbench.
 #
-# Copy the relevant example to .github/workflows/publish-release.yml in your
-# repo and adapt it. You own this file — it is not managed or synced by the
-# ai-native-delivery framework.
-#
-# How the release chain works:
-#
-#   tag push
+# Release chain:
+#   git tag v1.2.3 && git push origin v1.2.3
 #     ↓
-#   Your workflow (this file) — creates the GitHub release
+#   This workflow — builds all platform artefacts, creates the GitHub release.
 #     ↓
-#   on: release: types: [published]
+#   on: release: types: [published]   (release.yml, framework-managed)
 #     ↓
-#   Framework release.yml — generates AI notes, updates the release body
+#   Framework generates AI release notes and updates the release body.
 #
-# The framework only updates release notes. It does not create releases,
-# build artefacts, or publish to registries — that is entirely your concern.
-
-# ============================================================================
-# EXAMPLE A — No build artefacts (framework repos, docs repos, etc.)
-# ============================================================================
-# Triggered by tag push. Creates a stub GitHub release, which triggers the
-# framework to generate and update the AI release notes.
+# Artefacts produced:
+#   ocs-testbench-darwin-arm64.zip  — macOS .app bundle (Apple Silicon)
+#   ocs-testbench-darwin-amd64.zip  — macOS .app bundle (Intel)
+#   ocs-testbench-windows-amd64.zip — Windows .exe (Wails / WebView2)
+#   ocs-testbench-linux-amd64.tar.gz — headless server binary (no WebKitGTK)
+#
+# macOS note: bundles are ad-hoc signed by Wails. On first launch Gatekeeper
+# may prompt; right-click → Open to bypass. Notarisation can be added later.
 
 name: Publish Release
 
 on:
   push:
     tags:
-      - 'v*'
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+
+permissions:
+  contents: write
 
 jobs:
-  publish:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+  # ── Per-platform builds ────────────────────────────────────────────────────
+  build:
+    name: Build — ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name:     macOS arm64
+            os:       macos-latest      # Apple Silicon runner
+            artifact: ocs-testbench-darwin-arm64.zip
+            wails:    true
+
+          - name:     macOS amd64
+            os:       macos-13          # last Intel runner
+            artifact: ocs-testbench-darwin-amd64.zip
+            wails:    true
+
+          - name:     Windows amd64
+            os:       windows-latest
+            artifact: ocs-testbench-windows-amd64.zip
+            wails:    true
+
+          - name:     Linux amd64
+            os:       ubuntu-latest
+            artifact: ocs-testbench-linux-amd64.tar.gz
+            wails:    false
+
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@v4
+        with:
+          # .ai/ is the agentic framework submodule — not needed for builds.
+          submodules: false
 
-      - name: Create GitHub release
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # ── Wails desktop builds (macOS + Windows) ──────────────────────────────
+
+      - name: Install Wails CLI
+        if: matrix.wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+
+      - name: Build desktop bundle
+        if: matrix.wails
+        shell: bash
+        working-directory: cmd/ocs-testbench
+        run: |
+          wails build -clean -skipbindings \
+            -ldflags "-X main.Version=${{ github.ref_name }}"
+
+      # Ship a default config.yaml inside the .app so it opens from Finder
+      # without needing CONFIG_FILE set (resolveConfigPath looks next to binary).
+      - name: Bundle config.yaml into .app (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cp cmd/ocs-testbench/config.yaml \
+            "cmd/ocs-testbench/build/bin/ocs-testbench.app/Contents/MacOS/config.yaml"
+
+      # ── Linux headless server binary ────────────────────────────────────────
+
+      - name: Build server binary (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          go build \
+            -ldflags "-X main.Version=${{ github.ref_name }}" \
+            -o ocs-testbench \
+            ./cmd/ocs-testbench/
+
+      # ── Package artefacts ───────────────────────────────────────────────────
+
+      - name: Package — macOS (.app → zip)
+        if: runner.os == 'macOS'
+        run: |
+          cd cmd/ocs-testbench/build/bin
+          zip -r "${{ github.workspace }}/${{ matrix.artifact }}" ocs-testbench.app
+
+      - name: Package — Windows (.exe → zip)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive `
+            -Path "cmd\ocs-testbench\build\bin\OCS Testbench.exe" `
+            -DestinationPath "${{ matrix.artifact }}"
+
+      - name: Package — Linux (binary → tar.gz)
+        if: runner.os == 'Linux'
+        run: tar -czf "${{ matrix.artifact }}" ocs-testbench
+
+      - name: Upload artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error
+
+  # ── Create GitHub release ──────────────────────────────────────────────────
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all build artefacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create release and upload artefacts
         run: |
           gh release create "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
             --title "Release ${{ github.ref_name }}" \
-            --notes "Generating release notes…"
+            --notes "Generating release notes…" \
+            ocs-testbench-darwin-arm64.zip \
+            ocs-testbench-darwin-amd64.zip \
+            ocs-testbench-windows-amd64.zip \
+            ocs-testbench-linux-amd64.tar.gz
         env:
           GH_TOKEN: ${{ github.token }}
-
-
-# ============================================================================
-# EXAMPLE B — Go project using GoReleaser
-# ============================================================================
-# GoReleaser triggers on tag push, builds all platform targets, and creates
-# the GitHub release with artefacts. The framework then triggers on
-# release: published and updates the release body with AI notes.
-# No changes to .goreleaser.yml required.
-
-# name: Publish Release
-#
-# on:
-#   push:
-#     tags:
-#       - 'v*'
-#
-# jobs:
-#   goreleaser:
-#     runs-on: ubuntu-latest
-#     permissions:
-#       contents: write
-#     steps:
-#       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-#         with:
-#           fetch-depth: 0
-#
-#       - uses: actions/setup-go@v5
-#         with:
-#           go-version: stable
-#
-#       - name: Run GoReleaser
-#         uses: goreleaser/goreleaser-action@v6
-#         with:
-#           args: release --clean
-#         env:
-#           GITHUB_TOKEN: ${{ github.token }}
-
-
-# ============================================================================
-# EXAMPLE C — Generic build with artefact upload
-# ============================================================================
-# Build your artefacts, create the release, upload. The framework then
-# updates the release body with AI notes.
-
-# name: Publish Release
-#
-# on:
-#   push:
-#     tags:
-#       - 'v*'
-#
-# jobs:
-#   publish:
-#     runs-on: ubuntu-latest
-#     permissions:
-#       contents: write
-#     steps:
-#       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-#
-#       - name: Build
-#         run: |
-#           mkdir -p dist
-#           # your build command here
-#
-#       - name: Create release and upload artefacts
-#         run: |
-#           gh release create "${{ github.ref_name }}" \
-#             --title "Release ${{ github.ref_name }}" \
-#             --notes "Generating release notes…" \
-#             dist/*
-#         env:
-#           GH_TOKEN: ${{ github.token }}

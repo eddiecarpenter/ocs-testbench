@@ -14,7 +14,7 @@ import {
 } from '@mantine/core';
 import {
   IconDashboard,
-  IconHelp,
+  IconInfoCircle,
   IconLayoutGrid,
   IconMoon,
   IconPlayerPlay,
@@ -25,6 +25,8 @@ import {
   IconUsers,
 } from '@tabler/icons-react';
 import { NavLink as RouterLink, Outlet, useLocation } from 'react-router';
+
+import { spotlight } from '@mantine/spotlight';
 
 type NavEntry = {
   label: string;
@@ -116,7 +118,7 @@ export function AppShell() {
 
           <Group gap="sm" wrap="nowrap">
             <TextInput
-              placeholder="Search..."
+              placeholder="Go to…"
               leftSection={<IconSearch size={14} />}
               rightSection={
                 <Badge size="xs" variant="default" radius="sm">
@@ -127,10 +129,20 @@ export function AppShell() {
               w={260}
               size="sm"
               visibleFrom="sm"
+              readOnly
+              onClick={() => spotlight.open()}
+              styles={{ input: { cursor: 'pointer' } }}
             />
             <ThemeToggle />
-            <ActionIcon variant="subtle" color="gray" size="lg" aria-label="Help">
-              <IconHelp size={18} />
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              size="lg"
+              aria-label="About"
+              component={RouterLink}
+              to="/about"
+            >
+              <IconInfoCircle size={18} />
             </ActionIcon>
           </Group>
         </Group>

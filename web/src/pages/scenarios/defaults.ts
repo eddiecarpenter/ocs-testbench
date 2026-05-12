@@ -85,15 +85,34 @@ function build3GPPChildren(serviceType: ServiceType): AvpNode[] {
 function buildHuaweiChildren(serviceType: ServiceType): AvpNode[] {
   switch (serviceType) {
     case 'VOICE':
-      return [{ name: 'IN_INFORMATION',  code: 20300, vendorId: 2011, locked: true }];
+      return [{ name: 'IN-Information', code: 20300, vendorId: 2011, locked: true, children: [
+        // --- dynamic: user configures these per scenario ---
+        { name: 'Calling-Party-Address',            code: 20336, vendorId: 2011, valueRef: 'CALLING_PARTY_ADDRESS' },
+        { name: 'Called-Party-Address',             code: 20337, vendorId: 2011, valueRef: 'CALLED_PARTY_ADDRESS' },
+        { name: 'Connect-Called-Number',            code: 20373, vendorId: 2011, valueRef: 'CALLED_PARTY_ADDRESS' },
+        { name: 'Charge-Flow-Type',                 code: 20339, vendorId: 2011, valueRef: 'CHARGE_FLOW_TYPE' },
+        // --- static: literal defaults, edit inline as needed ---
+        { name: 'Called-Vlr-Number',                code: 20305, vendorId: 2011, valueRef: '27812022024' },
+        { name: 'Called-CellID-Or-SAI',             code: 20306, vendorId: 2011, valueRef: '655020010965535' },
+        { name: 'MSC-Address',                      code: 20322, vendorId: 2011, valueRef: '27812020002' },
+        { name: 'Time-Zone',                        code: 20324, vendorId: 2011, valueRef: '32' },
+        { name: 'Call-Reference-Number',            code: 20321, vendorId: 2011, valueRef: 'A7ED8D101D' },
+        { name: 'Calling-Parties-Category',         code: 20301, vendorId: 2011, valueRef: '165' },
+        { name: 'Access-Network-Type',              code: 20804, vendorId: 2011, valueRef: '200' },
+        { name: 'Called-Msc-Address',               code: 21172, vendorId: 2011, valueRef: '27812020002' },
+        { name: 'Called-Party-Address-Nature',      code: 21163, vendorId: 2011, valueRef: '4' },
+        { name: 'Address-Of-Restricted-Indicator',  code: 21121, vendorId: 2011, valueRef: '0' },
+        { name: 'Service-Key',                      code: 20806, vendorId: 2011, valueRef: '91' },
+        { name: 'New-SSP-Time',                     code: 22992, vendorId: 2011, valueRef: '2026-05-07T15:07:23+02:00' },
+      ]}];
     case 'DATA':
       return [{ name: 'PS-Information',  code: 874,   vendorId: 10415, locked: true }];
     case 'SMS':
-      return [{ name: 'SMS_INFORMATION', code: 20400, vendorId: 2011, locked: true }];
+      return [{ name: 'SMS-Information', code: 20327, vendorId: 2011, locked: true }];
     case 'USSD1_EVENT':
     case 'USSD1_SESSION':
     case 'USSD2_SESSION':
-      return [{ name: 'DCD_INFORMATION', code: 2115,  vendorId: 2011, locked: true }];
+      return [{ name: 'DCD-Information', code: 20337, vendorId: 2011, locked: true }];
     default:
       return [];
   }
@@ -118,9 +137,32 @@ export function replaceServiceInfoNode(
   return tree;
 }
 
-/** Variables required by the Service-Information AVP for the given serviceType. */
-export function defaultVariablesForServiceType(serviceType: ServiceType): Variable[] {
+/** Variables required by the Service-Information AVP for the given serviceType + profile. */
+export function defaultVariablesForServiceType(
+  serviceType: ServiceType,
+  serviceProfile?: ServiceProfile,
+): Variable[] {
   if (serviceType === 'VOICE') {
+    if (serviceProfile === 'HUAWEI') {
+      return [
+        {
+          name: 'CALLING_PARTY_ADDRESS',
+          description: 'Calling-party address (A-party, E.164 or SIP URI).',
+          source: { kind: 'generator', strategy: 'literal', refresh: 'once', params: { value: '27815107352' } },
+        },
+        {
+          name: 'CALLED_PARTY_ADDRESS',
+          description: 'Called-party address (B-party, E.164 or SIP URI).',
+          source: { kind: 'generator', strategy: 'literal', refresh: 'once', params: { value: '27707900001' } },
+        },
+        {
+          name: 'CHARGE_FLOW_TYPE',
+          description: 'Charge-Flow-Type AVP (0 = MO charge, 1 = MT charge).',
+          source: { kind: 'generator', strategy: 'literal', refresh: 'once', params: { value: 1 } },
+        },
+      ];
+    }
+    // 3GPP VOICE
     return [
       {
         name: 'ROLE_OF_NODE',
@@ -128,8 +170,13 @@ export function defaultVariablesForServiceType(serviceType: ServiceType): Variab
         source: { kind: 'generator', strategy: 'literal', refresh: 'once', params: { value: 0 } },
       },
       {
+        name: 'CALLING_PARTY_ADDRESS',
+        description: 'Calling-party address (A-party, E.164 or SIP URI).',
+        source: { kind: 'generator', strategy: 'literal', refresh: 'once', params: { value: '' } },
+      },
+      {
         name: 'CALLED_PARTY_ADDRESS',
-        description: 'Called-party E164 number (raw digits, no +).',
+        description: 'Called-party address (E.164 with optional +, SIP URI, etc.).',
         source: { kind: 'generator', strategy: 'literal', refresh: 'once', params: { value: '' } },
       },
     ];
@@ -144,23 +191,30 @@ export function mergeVariables(existing: Variable[], additions: Variable[]): Var
 }
 
 /**
- * The system-mandatory AVPs that appear at the top of every avpTree.
- * All are locked (no delete). Leaf values reference engine-seeded system
- * variables (ORIGIN_HOST, ORIGIN_REALM, DEST_REALM, SERVICE_CONTEXT_ID)
- * or literal values (Auth-Application-Id = 4).
- *
- * Session-Id (263) is NOT in this list — it is purely engine-generated
- * and shown only as an informational row above the tree.
+ * Upsert `additions` into `existing`: update variables whose name already
+ * exists AND add any that are new. Used when changing service profile so that
+ * profile-specific defaults (e.g. CALLING_PARTY_ADDRESS) are refreshed even
+ * if they were already present from a previous profile.
  */
-const SYSTEM_AVPS: AvpNode[] = [
-  { name: 'Origin-Host',        code: 264, locked: true, valueRef: 'ORIGIN_HOST' },
-  { name: 'Origin-Realm',       code: 296, locked: true, valueRef: 'ORIGIN_REALM' },
-  { name: 'Destination-Realm',  code: 283, locked: true, valueRef: 'DEST_REALM' },
-  { name: 'Service-Context-Id', code: 461, locked: true, valueRef: 'SERVICE_CONTEXT_ID' },
-];
+export function upsertVariables(existing: Variable[], additions: Variable[]): Variable[] {
+  const addMap = new Map(additions.map((v) => [v.name, v]));
+  const result = existing.map((v) => addMap.get(v.name) ?? v);
+  const existingNames = new Set(existing.map((v) => v.name));
+  for (const v of additions) {
+    if (!existingNames.has(v.name)) result.push(v);
+  }
+  return result;
+}
 
+/**
+ * AVPs that the CCR builder owns natively (Origin-Host, Origin-Realm,
+ * Destination-Realm, Destination-Host, Service-Context-Id, Session-Id,
+ * Auth-Application-Id, CC-Request-Type/Number, Event-Timestamp) are NOT
+ * included in the avpTree. The builder sets them from SessionContext fields
+ * and filters duplicates from ExtraAVPs, so including them here would
+ * produce no-ops for new scenarios and be silently dropped for old ones.
+ */
 const BASE_AVP_TREE: AvpNode[] = [
-  ...SYSTEM_AVPS,
   {
     name: 'Subscription-Id',
     code: 443,
@@ -225,7 +279,7 @@ export function makeNewScenarioDraft(): Scenario {
     updatedAt: new Date().toISOString(),
     avpTree: [...BASE_AVP_TREE, serviceInfoNode],
     services: [DEFAULT_SERVICE],
-    variables: mergeVariables(BASE_VARIABLES, defaultVariablesForServiceType(serviceType)),
+    variables: mergeVariables(BASE_VARIABLES, defaultVariablesForServiceType(serviceType, serviceProfile)),
     steps: defaultStepsForMode('session'),
   };
 }
@@ -242,6 +296,7 @@ export function toScenarioInput(s: Scenario): ScenarioInput {
     favourite: s.favourite ?? false,
     subscriberId: s.subscriberId ?? '',
     peerId: s.peerId ?? '',
+    serviceContextId: s.serviceContextId || undefined,
     avpTree: s.avpTree,
     services: s.services,
     variables: s.variables,

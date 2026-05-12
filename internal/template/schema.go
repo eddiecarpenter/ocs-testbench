@@ -60,6 +60,12 @@ type AVPNode struct {
 	// (e.g. "Origin-Host", "Service-Information"). Required.
 	Name string `json:"name"`
 
+	// Code is the AVP code. When non-zero and the Name is not found in
+	// the loaded dictionary, the engine uses Code directly instead of
+	// failing. This allows vendor-specific AVPs that are absent from the
+	// built-in dictionary to be encoded as long as their code is known.
+	Code uint32 `json:"code,omitempty"`
+
 	// VendorID is the Vendor-Id for this AVP and is inherited by
 	// descendant nodes that do not declare their own VendorID.
 	// Zero means "no vendor" (IETF base AVPs).
@@ -86,9 +92,12 @@ type MSCCTemplateBlock struct {
 	// Zero omits the Rating-Group AVP from the MSCC block.
 	RatingGroup uint32 `json:"ratingGroup,omitempty"`
 
-	// ServiceIdentifier is the Service-Identifier value (or
-	// placeholder reference). Zero omits the AVP.
-	ServiceIdentifier uint32 `json:"serviceIdentifier,omitempty"`
+	// ServiceIdentifier is the Service-Identifier value.
+	// HasServiceIdentifier must be true for the AVP to be emitted —
+	// this lets callers explicitly set zero (which Huawei requires)
+	// without conflating it with "not configured".
+	ServiceIdentifier    uint32 `json:"serviceIdentifier,omitempty"`
+	HasServiceIdentifier bool   `json:"-"`
 
 	// Requested is a placeholder reference resolving to the
 	// Requested-Service-Unit quantity. May be empty when no RSU is

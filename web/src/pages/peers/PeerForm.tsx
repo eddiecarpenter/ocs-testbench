@@ -38,6 +38,8 @@ const EMPTY: PeerInput = {
   port: 3868,
   originHost: '',
   originRealm: '',
+  destHost: '',
+  destRealm: '',
   transport: 'TCP',
   watchdogIntervalSeconds: 30,
   autoConnect: true,
@@ -50,6 +52,8 @@ function fromPeer(peer: Peer): PeerInput {
     port: peer.port,
     originHost: peer.originHost,
     originRealm: peer.originRealm,
+    destHost: peer.destHost ?? '',
+    destRealm: peer.destRealm ?? '',
     transport: peer.transport,
     watchdogIntervalSeconds: peer.watchdogIntervalSeconds,
     autoConnect: peer.autoConnect,
@@ -174,20 +178,40 @@ export function PeerForm({
             key={form.key('name')}
             {...form.getInputProps('name')}
           />
-          <TextInput
-            label="Origin-Host"
-            placeholder="ctf-06.test.local"
-            required
-            key={form.key('originHost')}
-            {...form.getInputProps('originHost')}
-          />
-          <TextInput
-            label="Origin-Realm"
-            placeholder="test.local"
-            required
-            key={form.key('originRealm')}
-            {...form.getInputProps('originRealm')}
-          />
+          <Group grow align="flex-start">
+            <TextInput
+              label="Origin-Host"
+              placeholder="ctf-06.test.local"
+              description="Sent in CER and every CCR as Origin-Host."
+              required
+              key={form.key('originHost')}
+              {...form.getInputProps('originHost')}
+            />
+            <TextInput
+              label="Origin-Realm"
+              placeholder="test.local"
+              description="Sent in CER and every CCR as Origin-Realm."
+              required
+              key={form.key('originRealm')}
+              {...form.getInputProps('originRealm')}
+            />
+          </Group>
+          <Group grow align="flex-start">
+            <TextInput
+              label="Destination-Host"
+              placeholder="ocs.carrier.com"
+              description="Optional. Sent as Destination-Host AVP. Leave blank to route by realm only."
+              key={form.key('destHost')}
+              {...form.getInputProps('destHost')}
+            />
+            <TextInput
+              label="Destination-Realm"
+              placeholder="carrier.com"
+              description="Sent as Destination-Realm AVP. Defaults to Origin-Realm when blank."
+              key={form.key('destRealm')}
+              {...form.getInputProps('destRealm')}
+            />
+          </Group>
         </Stack>
 
         <Divider />

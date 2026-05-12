@@ -82,7 +82,7 @@ func newPeerControlFixture(t *testing.T) *peerControlFixture {
 	require.NoError(t, err)
 
 	mgr := newFakePeerManager("ocs-01")
-	r := api.Router(s, mgr, nil, nil)
+	r := api.Router(s, mgr, nil, nil, nil, "test")
 	return &peerControlFixture{
 		s:      s,
 		mgr:    mgr,
@@ -167,7 +167,7 @@ func TestPeerControl_Status_UnregisteredInManager_ReturnsStoppedState(t *testing
 
 	// Manager has no peers registered.
 	mgr := newFakePeerManager() // no "unregistered-peer" in states
-	r := api.Router(s, mgr, nil, nil)
+	r := api.Router(s, mgr, nil, nil, nil, "test")
 
 	req := httptest.NewRequest(http.MethodGet,
 		fmt.Sprintf("/v1/peers/%s/status", api.UUIDStr(peer.ID)), nil)
@@ -188,7 +188,7 @@ func TestPeerControl_NilManager_Returns503(t *testing.T) {
 	peer, err := s.InsertPeer(ctx, "test-peer", []byte(`{}`))
 	require.NoError(t, err)
 
-	r := api.Router(s, nil, nil, nil) // no manager
+	r := api.Router(s, nil, nil, nil, nil, "test") // no manager
 
 	for _, path := range []string{
 		fmt.Sprintf("/v1/peers/%s/connect", api.UUIDStr(peer.ID)),

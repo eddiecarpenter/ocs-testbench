@@ -6,6 +6,7 @@ import {
   type Execution,
   type ExecutionPage,
   type ExecutionSummary,
+  type ListExecutionsParams,
 } from '../resources/executions';
 import { peerKeys, type Peer } from '../resources/peers';
 import type { SseEvent } from './events';
@@ -30,9 +31,7 @@ export function applyEventToCache(
       return;
 
     case 'execution.created':
-      // New row → refetch the list; detail queries for unknown ids aren't
-      // mounted yet so no detail cache to seed.
-      queryClient.invalidateQueries({ queryKey: executionKeys.all });
+      applyExecutionCreated(queryClient, event.data);
       return;
 
     case 'dashboard.kpi':
@@ -82,6 +81,35 @@ function applyExecutionProgress(
       return { ...prev, items };
     },
   );
+}
+
+function applyExecutionCreated(
+  queryClient: QueryClient,
+  summary: ExecutionSummary,
+): void {
+  // Walk every cached list query and only prepend the new summary where the
+  // query's scenarioId filter matches (or is absent, meaning "show all").
+  // Key shape: ['executions', 'list', ListExecutionsParams]
+  const entries = queryClient.getQueriesData<ExecutionPage>({
+    queryKey: executionKeys.all,
+  });
+
+  for (const [key, prev] of entries) {
+    if (!prev || !Array.isArray(prev.items)) continue;
+    if (prev.items.some((e) => e.id === summary.id)) continue;
+
+    // key[2] is the params object when this is a list query; detail queries
+    // have a string id at key[2] and are skipped below.
+    const params = key[2] as ListExecutionsParams | string | undefined;
+    if (typeof params === 'string') continue; // detail cache — skip
+    if (params?.scenarioId && params.scenarioId !== summary.scenarioId) continue;
+
+    queryClient.setQueryData<ExecutionPage>(key, {
+      ...prev,
+      items: [summary, ...prev.items],
+      page: { ...prev.page, total: prev.page.total + 1 },
+    });
+  }
 }
 
 /** Strip an `Execution` back down to its `ExecutionSummary` fields. */

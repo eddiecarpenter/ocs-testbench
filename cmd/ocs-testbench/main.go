@@ -52,6 +52,12 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
+
+	wails "github.com/wailsapp/wails/v2"
+	"github.com/wailsapp/wails/v2/pkg/options"
+	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/mac"
 
 	"github.com/fiorix/go-diameter/v4/diam/dict"
 	"github.com/go-chi/chi/v5"
@@ -125,12 +131,26 @@ func main() {
 }
 
 // resolveConfigPath returns the config path to hand to baseconfig.Load.
-// CLI flag value takes precedence over the in-tree default; baseconfig.Load
-// itself overrides either with CONFIG_FILE when that env var is set, so
-// the operational precedence is CONFIG_FILE > flag > default.
+//
+// Precedence (highest → lowest):
+//  1. CONFIG_FILE env var (handled inside baseconfig.Load itself)
+//  2. CLI -config flag
+//  3. File next to the binary — covers macOS .app bundles where the CWD is
+//     not the repository root (e.g. Contents/MacOS/config.yaml).
+//  4. In-tree default "cmd/ocs-testbench/config.yaml" — works when running
+//     from the repository root during development.
 func resolveConfigPath(flagValue string) string {
 	if flagValue != "" {
 		return flagValue
+	}
+	// Check for a config.yaml next to the running binary. os.Executable
+	// returns the real path of the executable even when called from inside
+	// a macOS .app bundle (Contents/MacOS/<binary>).
+	if exe, err := os.Executable(); err == nil {
+		adjacent := filepath.Join(filepath.Dir(exe), "config.yaml")
+		if _, err := os.Stat(adjacent); err == nil {
+			return adjacent
+		}
 	}
 	return defaultConfigPath
 }
@@ -224,7 +244,7 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 
 	dictAdapter := tmpl.NewDictAdapter(dict.Default)
 	execEngine := api.NewSessionManager(s, dmgr, behaviour, dictAdapter)
-	apiRouter := api.Router(s, dmgr, execEngine, dictAdapter)
+	apiRouter := api.Router(s, dmgr, execEngine, dictAdapter, dict.Default, Version)
 
 	// Mount the API router at /api. All routes within api.Router are
 	// relative to the router's root; the Mount prefix adds /api.
@@ -289,10 +309,65 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 		return server.Shutdown(shutCtx)
 	})
 
-	if cfg.Frontend.AutoOpenBrowser && !cfg.Headless {
+	if !cfg.Headless {
 		url := browserURL(ln.Addr().String())
-		if err := openBrowser(url); err != nil {
-			logging.Warn("auto-open browser failed; continuing", "url", url, "err", err)
+
+		if cfg.Frontend.AutoOpenBrowser {
+			// Browser mode: open the operator's default browser and block on the
+			// lifecycle signal handler. AutoOpenBrowser=true opts out of the
+			// native Wails window so the full browser tooling (DevTools,
+			// extensions, multiple tabs) is available.
+			if err := openBrowser(url); err != nil {
+				logging.Warn("auto-open browser failed; continuing", "url", url, "err", err)
+			}
+		} else {
+			// Native window mode: launch the Wails window on the main OS thread.
+			// lc.Run (signal handling + shutdown) moves to a goroutine so the
+			// main thread is free for the Cocoa event loop.
+			//
+			// A derived cancellable context is used for lc.Run so that when
+			// wails.Run returns (window closed, Cmd+Q, runtime.Quit) we can
+			// unblock lc.Run immediately — otherwise the signal handler goroutine
+			// waits forever and the process hangs requiring a force-kill.
+			lcCtx, lcCancel := context.WithCancel(ctx)
+			lcErrCh := make(chan error, 1)
+			go func() { lcErrCh <- lc.Run(lcCtx) }()
+
+			app := newWailsApp()
+			wailsErr := wails.Run(&options.App{
+				Title:                    "OCS Testbench",
+				Width:                    1400,
+				Height:                   900,
+				MinWidth:                 900,
+				MinHeight:                600,
+				Menu:                     app.buildMenu(),
+				OnStartup:                app.startup,
+				EnableDefaultContextMenu: true,
+				// Route all webview requests through our existing chi router so
+				// the SPA and all API endpoints (including SSE) share one handler.
+				// The HTTP server continues to run on cfg.Server.Addr for external
+				// REST clients — both paths coexist independently.
+				AssetServer: &assetserver.Options{
+					Handler: router,
+				},
+				Mac: &mac.Options{
+					TitleBar: mac.TitleBarDefault(),
+					About: &mac.AboutInfo{
+						Title:   "OCS Testbench",
+						Message: "Diameter Gy Credit-Control testing tool",
+					},
+				},
+			})
+
+			// Window closed — cancel the lifecycle context so lc.Run unblocks,
+			// then drain the channel before returning.
+			lcCancel()
+			if lcErr := <-lcErrCh; lcErr != nil && !errors.Is(lcErr, context.Canceled) {
+				if wailsErr == nil {
+					return lcErr
+				}
+			}
+			return wailsErr
 		}
 	}
 

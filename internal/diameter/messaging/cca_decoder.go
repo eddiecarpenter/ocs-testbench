@@ -59,17 +59,28 @@ func DecodeCCAMessage(m *diam.Message) (*CCA, error) {
 			cca.CCRequestNumber = uint32(v)
 		}
 	}
-	if a, err := m.FindAVP(avp.ValidityTime, 0); err == nil {
-		// Top-level Validity-Time only — the FindAVP API does
-		// not walk into MSCC sub-trees by default; per-MSCC
-		// Validity-Time is read out of MSCCBlock instead.
-		if v, ok := a.Data.(datatype.Unsigned32); ok {
-			cca.ValidityTime = uint32(v)
+	// ValidityTime and FinalUnitIndication must be read from the top-level
+	// message AVPs only. m.FindAVP recurses one level into grouped sub-AVPs,
+	// which causes it to find these AVPs inside MSCC blocks and incorrectly
+	// promote them to root-level fields. Per-MSCC values are decoded
+	// separately in decodeMSCCs.
+	for _, a := range m.AVP {
+		if a.VendorID != 0 {
+			continue
 		}
-	}
-	if a, err := m.FindAVP(avp.FinalUnitIndication, 0); err == nil {
-		if g, ok := a.Data.(*diam.GroupedAVP); ok {
-			cca.FUIAction = readFUIAction(g)
+		switch a.Code {
+		case avp.GrantedServiceUnit:
+			if g, ok := a.Data.(*diam.GroupedAVP); ok {
+				cca.GrantedTime, cca.GrantedTotalOctets = readGrantedUnits(g)
+			}
+		case avp.ValidityTime:
+			if v, ok := a.Data.(datatype.Unsigned32); ok {
+				cca.ValidityTime = uint32(v)
+			}
+		case avp.FinalUnitIndication:
+			if g, ok := a.Data.(*diam.GroupedAVP); ok {
+				cca.FUIAction = readFUIAction(g)
+			}
 		}
 	}
 

@@ -161,6 +161,16 @@ type CCA struct {
 	CCRequestType   uint32
 	CCRequestNumber uint32
 
+	// GrantedTime is the CC-Time (seconds) from the top-level
+	// Granted-Service-Unit AVP, when present. Zero means absent or
+	// no grant. Only populated for root service model CCA responses
+	// (no MSCC blocks); MSCC grants live on each MSCCBlock.
+	GrantedTime uint32
+
+	// GrantedTotalOctets is the CC-Total-Octets from the top-level
+	// Granted-Service-Unit AVP. Same semantics as GrantedTime.
+	GrantedTotalOctets uint64
+
 	// ValidityTime is the top-level Validity-Time AVP, in
 	// seconds, when present at the message level. Zero indicates
 	// absent. (Per-MSCC Validity-Time lives on each MSCCBlock.)

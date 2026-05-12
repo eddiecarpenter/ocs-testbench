@@ -54,6 +54,7 @@ import { BuilderHeader } from './BuilderHeader';
 import { BuilderTabs } from './BuilderTabs';
 import { DirtyGuard } from './DirtyGuard';
 import { makeNewScenarioDraft, toScenarioInput } from './defaults';
+import { validateScenario } from './validators';
 
 /** Strip server-owned fields from a Scenario to use as a duplicate seed. */
 function makeDuplicateDraft(source: Scenario): Scenario {
@@ -158,6 +159,25 @@ export function ScenarioBuilderPage() {
   async function handleSave() {
     if (!draft) return;
     const input = toScenarioInput(draft);
+
+    // Client-side validation — catches config errors before hitting the API.
+    const issues = validateScenario({
+      serviceType: draft.serviceType,
+      serviceModel: draft.serviceModel,
+      sessionMode: draft.sessionMode,
+      services: draft.services,
+      steps: draft.steps,
+    });
+    if (issues.length > 0) {
+      const errors: Record<string, string[]> = {};
+      for (const issue of issues) {
+        (errors[issue.path] ??= []).push(issue.message);
+      }
+      setFieldErrors(errors);
+      notifyError({ title: 'Save failed', message: 'Validation errors — see fields below.' });
+      return;
+    }
+
     setFieldErrors({});
     try {
       const saved = isNew

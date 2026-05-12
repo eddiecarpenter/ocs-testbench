@@ -22,7 +22,7 @@ import (
 // pre-populate the store before issuing requests.
 func newTestRouterWithStore(t *testing.T, s store.Store) http.Handler {
 	t.Helper()
-	return api.Router(s, nil, nil, nil)
+	return api.Router(s, nil, nil, nil, nil, "test")
 }
 
 // seedPeer creates a peer via POST /peers. Fails the test if not 201.

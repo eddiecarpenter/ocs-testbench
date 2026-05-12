@@ -106,9 +106,32 @@ func (e *Engine) buildAVPNode(
 	inheritedVendorID int64,
 ) (*diam.AVP, error) {
 	// Step 1 — dictionary lookup (AC-6: unknown name → UNKNOWN_AVP).
+	// When the name is not in the loaded dictionary but the node carries an
+	// explicit Code (vendor-specific AVPs absent from the built-in XML), we
+	// synthesise metadata from the node itself so the encode step can
+	// proceed. Grouped vs leaf is inferred from whether child AVPs are
+	// present; leaf type defaults to OctetString.
 	meta, err := d.Lookup(node.Name)
 	if err != nil {
-		return nil, err
+		if node.Code == 0 {
+			return nil, err
+		}
+		// Name not in dictionary but node has an explicit code — synthesise
+		// metadata (vendor-specific AVPs absent from the built-in XML).
+		// Grouped vs leaf is inferred from child presence; leaf type defaults
+		// to OctetString.
+		meta = AVPMetadata{
+			Code:     node.Code,
+			Grouped:  len(node.AVPs) > 0,
+			DataType: "OctetString",
+		}
+	} else if node.Code != 0 && node.Code != meta.Code {
+		// The dictionary found a match by name, but the node carries an
+		// explicit code that differs (e.g. a Huawei AVP named
+		// "Calling-Party-Address" with code 20336 vs the 3GPP entry at
+		// code 831). Honour the node's code; keep the dictionary's DataType
+		// so encoding still works for known types.
+		meta.Code = node.Code
 	}
 
 	// Step 2 — vendor-id inheritance (AC-7, AC-8).
@@ -164,8 +187,22 @@ func (e *Engine) buildRootServiceAVPs(input EngineInput) ([]*diam.AVP, error) {
 	if len(input.MSCC) == 0 {
 		return nil, nil
 	}
+	block := input.MSCC[0]
 	reqType := requestTypeFromValues(input.Values)
-	return e.buildServiceUnitPair(input.MSCC[0], input.Values, input.UnitType, reqType)
+	// blockIdx=-1 signals root service model: buildServiceUnitPair uses the
+	// RESULT_CODE check rather than the RGn_GRANTED* check (no MSCC wrapping,
+	// so no per-block grant variables exist).
+	avps, err := e.buildServiceUnitPair(-1, block, input.Values, input.UnitType, reqType)
+	if err != nil {
+		return nil, err
+	}
+	// Service-Identifier at CCR root level when configured.
+	// HasServiceIdentifier lets callers send zero (Huawei requires it).
+	if block.HasServiceIdentifier {
+		si := diam.NewAVP(avp.ServiceIdentifier, avp.Mbit, 0, datatype.Unsigned32(block.ServiceIdentifier))
+		avps = append([]*diam.AVP{si}, avps...)
+	}
+	return avps, nil
 }
 
 // buildSingleMSCCAVPs handles ServiceModelSingleMSCC: one MSCC block
@@ -182,7 +219,8 @@ func (e *Engine) buildSingleMSCCAVPs(input EngineInput) ([]*diam.AVP, error) {
 	}
 
 	reqType := requestTypeFromValues(input.Values)
-	msccAVP, err := e.buildMSCCBlock(input.MSCC[0], input.Values, input.UnitType, reqType)
+	// blockIdx=0 → position-based variable key RG1_* (first and only block).
+	msccAVP, err := e.buildMSCCBlock(0, input.MSCC[0], input.Values, input.UnitType, reqType)
 	if err != nil {
 		return nil, err
 	}
@@ -200,8 +238,11 @@ func (e *Engine) buildMultiMSCCAVPs(input EngineInput) ([]*diam.AVP, error) {
 	result = append(result, msi)
 
 	reqType := requestTypeFromValues(input.Values)
-	for _, block := range input.MSCC {
-		msccAVP, err := e.buildMSCCBlock(block, input.Values, input.UnitType, reqType)
+	for i, block := range input.MSCC {
+		// Pass the loop index so buildMSCCBlock can look up the position-based
+		// grant variable (RG1_GRANTED_UNITS for i=0, RG2_GRANTED_UNITS for i=1,
+		// …) that autoUpdateVarsFromCCA writes after each CCA response.
+		msccAVP, err := e.buildMSCCBlock(i, block, input.Values, input.UnitType, reqType)
 		if err != nil {
 			return nil, err
 		}
@@ -212,7 +253,14 @@ func (e *Engine) buildMultiMSCCAVPs(input EngineInput) ([]*diam.AVP, error) {
 
 // buildMSCCBlock constructs one Multiple-Services-Credit-Control AVP.
 // Children: Rating-Group, Service-Identifier, RSU, USU per §7 rules.
+//
+// blockIdx is the 0-based position of this block in the scenario's MSCC
+// list. It is used to derive the position-based variable key for
+// GRANTED_UNITS / GRANTED (RG1_*, RG2_*, …) that autoUpdateVarsFromCCA
+// writes after each CCA. Position-based naming is stable regardless of
+// the actual Rating-Group value configured on the service.
 func (e *Engine) buildMSCCBlock(
+	blockIdx int,
 	block MSCCTemplateBlock,
 	values map[string]any,
 	unitType UnitType,
@@ -226,14 +274,14 @@ func (e *Engine) buildMSCCBlock(
 			diam.NewAVP(avp.RatingGroup, avp.Mbit, 0, datatype.Unsigned32(block.RatingGroup)))
 	}
 
-	// Service-Identifier (if declared)
-	if block.ServiceIdentifier > 0 {
+	// Service-Identifier (if declared); HasServiceIdentifier allows zero.
+	if block.HasServiceIdentifier {
 		children = append(children,
 			diam.NewAVP(avp.ServiceIdentifier, avp.Mbit, 0, datatype.Unsigned32(block.ServiceIdentifier)))
 	}
 
 	// RSU / USU per §7 presence rules (AC-9 independent per block)
-	suPair, err := e.buildServiceUnitPair(block, values, unitType, reqType)
+	suPair, err := e.buildServiceUnitPair(blockIdx, block, values, unitType, reqType)
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +300,15 @@ func (e *Engine) buildMSCCBlock(
 //	TERMINATE — RSU never;           USU always
 //	EVENT     — RSU if resolved > 0; USU if resolved > 0
 //	unknown   — RSU if non-empty;    USU if non-empty
+//
+// blockIdx is the 0-based position of this block in the scenario's service
+// list. It is used to derive the RG<n>_ variable key for the USU cap/suppress
+// logic. The naming matches the 1-based position scheme used by
+// autoUpdateVarsFromCCA (RG1_GRANTED_UNITS for blockIdx=0, etc.).
+// For root-service-model calls (block.RatingGroup == 0) the parameter is
+// ignored — that path uses the top-level RESULT_CODE instead.
 func (e *Engine) buildServiceUnitPair(
+	blockIdx int,
 	block MSCCTemplateBlock,
 	values map[string]any,
 	unitType UnitType,
@@ -280,15 +336,36 @@ func (e *Engine) buildServiceUnitPair(
 		return nil, err
 	}
 	// Cap USU to what the OCS actually granted in the previous exchange.
-	//   - granted == 0 → suppress USU (nothing was granted; nothing can be used).
-	//   - used > granted → cap USU to granted (cannot report more than was given).
-	// For MSCC blocks (RatingGroup > 0) look up RG<n>_GRANTED.
-	// For root service model (RatingGroup == 0) look up the root-level
+	//   - key absent   → emit USU as-is (no prior CCA yet, or tests without state)
+	//   - granted == 0 → suppress USU (nothing was granted; reporting 0 usage is wrong)
+	//   - used > granted → cap USU to granted (cannot report more than was given)
+	//
+	// For MSCC blocks (blockIdx >= 0, which implies block.RatingGroup > 0 for
+	// valid scenarios) look up the position-based variable that
+	// autoUpdateVarsFromCCA writes after each CCA:
+	//   OCTET (DATA)   → RG<blockIdx+1>_GRANTED_UNITS (CC-Total-Octets)
+	//   TIME (VOICE)   → RG<blockIdx+1>_GRANTED        (CC-Time)
+	//   EVENT / other  → RG<blockIdx+1>_GRANTED        (CC-Service-Specific-Units)
+	//
+	// Variable names are position-based (1-based: RG1, RG2, …) matching the
+	// scheme used in autoUpdateVarsFromCCA — NOT the raw Rating-Group value
+	// (which could be an arbitrary number like 100200100).
+	//
+	// For root service model (blockIdx == -1) look up the root-level
 	// RESULT_CODE: a non-2xxx code means no quota was granted at all.
 	if emitUSU {
-		if block.RatingGroup > 0 {
-			key := fmt.Sprintf("RG%d_GRANTED", block.RatingGroup)
+		if blockIdx >= 0 {
+			pos := blockIdx + 1 // 1-based position, matches RG1_*, RG2_*, …
+			var key string
+			if unitType == UnitTypeOctet {
+				key = fmt.Sprintf("RG%d_GRANTED_UNITS", pos)
+			} else {
+				key = fmt.Sprintf("RG%d_GRANTED", pos)
+			}
 			if grantedRaw, ok := values[key]; ok {
+				// Key present: OCS responded with an explicit grant value.
+				// granted == 0 → the exchange was denied (4xxx/5xxx), suppress USU.
+				// used > granted → cap USU to the actual grant.
 				grantedN, gOk := toUint64(grantedRaw)
 				if gOk {
 					if grantedN == 0 {
@@ -298,12 +375,29 @@ func (e *Engine) buildServiceUnitPair(
 					}
 				}
 			}
+			// Key absent: production sessions pre-seed RGn_GRANTED=0 and
+			// RGn_GRANTED_UNITS=0 at start, so this branch only fires in
+			// unit tests that build EngineInput directly without pre-seeding.
+			// Emit USU as-is to preserve existing test behaviour.
 		} else {
-			// Root service model: suppress USU if the previous CCA was a failure.
-			if rcRaw, ok := values["RESULT_CODE"]; ok {
-				rc, rOk := toUint64(rcRaw)
-				if rOk && rc != 0 && (rc < 2000 || rc > 2999) {
-					emitUSU = false
+			// Root service model (blockIdx == -1): use the same cap/suppress
+			// logic as MSCC, reading from RG1_GRANTED / RG1_GRANTED_UNITS which
+			// autoUpdateVarsFromCCA populates from the CCA's top-level
+			// Granted-Service-Unit AVP (and session_manager pre-seeds to 0).
+			var key string
+			if unitType == UnitTypeOctet {
+				key = "RG1_GRANTED_UNITS"
+			} else {
+				key = "RG1_GRANTED"
+			}
+			if grantedRaw, ok := values[key]; ok {
+				grantedN, gOk := toUint64(grantedRaw)
+				if gOk {
+					if grantedN == 0 {
+						emitUSU = false
+					} else if usedN, uOk := toUint64(resolvedUsed); uOk && usedN > grantedN {
+						resolvedUsed = grantedN
+					}
 				}
 			}
 		}

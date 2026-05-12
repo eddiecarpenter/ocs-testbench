@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/fiorix/go-diameter/v4/diam/dict"
 	"github.com/go-chi/chi/v5"
 
 	"github.com/eddiecarpenter/ocs-testbench/internal/diameter"
@@ -51,10 +52,14 @@ type PeerManager interface {
 // Feature #20 is fully implemented; passing nil keeps those endpoints
 // compiled and routable without a live engine.
 //
+// parser, when non-nil (production: dict.Default), enables hot-loading
+// of newly created custom dictionaries into the live Diameter stack
+// without a server restart. Pass nil in tests to skip live parser calls.
+//
 // The caller is responsible for mounting the returned router onto an
 // outer chi.Router (typically in cmd/ocs-testbench/main.go) under the
 // /api prefix.
-func Router(s store.Store, mgr PeerManager, exec ExecutionEngine, dict template.Dictionary) chi.Router {
+func Router(s store.Store, mgr PeerManager, exec ExecutionEngine, dictArg template.Dictionary, parser *dict.Parser, version string) chi.Router {
 	r := chi.NewRouter()
 
 	// Middleware stack — innermost to outermost:
@@ -76,13 +81,14 @@ func Router(s store.Store, mgr PeerManager, exec ExecutionEngine, dict template.
 		mountPeers(v1, s, mgr)
 		mountSubscribers(v1, s)
 		mountTemplates(v1, s)
-		mountScenarios(v1, s, dict)
-		mountDictionaries(v1, s)
+		mountScenarios(v1, s, dictArg)
+		mountDictionaries(v1, s, parser)
 		mountDashboard(v1, s, mgr)
 		mountExecutions(v1, exec)
 		mountMetrics(v1, exec)
 		mountExpressions(v1)
 		mountSSE(v1, s, mgr, exec)
+		mountVersion(v1, version)
 	})
 
 	return r

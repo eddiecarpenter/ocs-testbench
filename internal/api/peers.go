@@ -40,6 +40,8 @@ type peerRequest struct {
 	OriginRealm             string `json:"originRealm"`
 	OriginIP                string `json:"originIp"`
 	OriginPort              int    `json:"originPort"`
+	DestHost                string `json:"destHost"`
+	DestRealm               string `json:"destRealm"`
 	Transport               string `json:"transport"`
 	WatchdogIntervalSeconds int    `json:"watchdogIntervalSeconds"`
 	AutoConnect             bool   `json:"autoConnect"`
@@ -53,6 +55,8 @@ type peerBody struct {
 	OriginRealm             string `json:"originRealm"`
 	OriginIP                string `json:"originIp"`
 	OriginPort              int    `json:"originPort"`
+	DestHost                string `json:"destHost,omitempty"`
+	DestRealm               string `json:"destRealm,omitempty"`
 	Transport               string `json:"transport"`
 	WatchdogIntervalSeconds int    `json:"watchdogIntervalSeconds"`
 	AutoConnect             bool   `json:"autoConnect"`
@@ -69,6 +73,8 @@ type peerResponse struct {
 	OriginRealm             string `json:"originRealm"`
 	OriginIP                string `json:"originIp"`
 	OriginPort              int    `json:"originPort"`
+	DestHost                string `json:"destHost,omitempty"`
+	DestRealm               string `json:"destRealm,omitempty"`
 	Transport               string `json:"transport"`
 	WatchdogIntervalSeconds int    `json:"watchdogIntervalSeconds"`
 	AutoConnect             bool   `json:"autoConnect"`
@@ -99,6 +105,8 @@ func toPeerResponse(p store.Peer, status string) peerResponse {
 	resp.OriginRealm = b.OriginRealm
 	resp.OriginIP = b.OriginIP
 	resp.OriginPort = b.OriginPort
+	resp.DestHost = b.DestHost
+	resp.DestRealm = b.DestRealm
 	resp.Transport = b.Transport
 	resp.WatchdogIntervalSeconds = b.WatchdogIntervalSeconds
 	resp.AutoConnect = b.AutoConnect
@@ -114,6 +122,8 @@ func peerBodyBytes(req peerRequest) ([]byte, error) {
 		OriginRealm:             req.OriginRealm,
 		OriginIP:                req.OriginIP,
 		OriginPort:              req.OriginPort,
+		DestHost:                req.DestHost,
+		DestRealm:               req.DestRealm,
 		Transport:               req.Transport,
 		WatchdogIntervalSeconds: req.WatchdogIntervalSeconds,
 		AutoConnect:             req.AutoConnect,

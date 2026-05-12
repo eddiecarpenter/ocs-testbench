@@ -22,6 +22,14 @@ const TERMINAL_EVENT_TYPES = new Set([
   'execution.aborted',
 ]);
 
+// Events that require a fresh snapshot so the history pane shows the correct
+// pending step. `execution.paused` fires when the engine is interrupted mid-run;
+// the SSE payload doesn't carry step detail, so we refetch to get it.
+const REFETCH_EVENT_TYPES = new Set([
+  ...TERMINAL_EVENT_TYPES,
+  'execution.paused',
+]);
+
 interface ExecutionSseBridgeProps {
   executionId: string;
   execution: Execution;
@@ -42,7 +50,7 @@ export function ExecutionSseBridge({
       // ExecutionSnapshotBridge can populate the complete step list.
       // The SSE payload carries stale execution data from mount time;
       // the REST refetch gives us the real finished steps.
-      if (TERMINAL_EVENT_TYPES.has(event.type)) {
+      if (REFETCH_EVENT_TYPES.has(event.type)) {
         void queryClient.invalidateQueries({
           queryKey: executionKeys.detail(executionId),
         });

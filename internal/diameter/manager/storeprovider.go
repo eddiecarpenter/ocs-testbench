@@ -69,6 +69,8 @@ type peerBody struct {
 	OriginRealm string `json:"originRealm"`
 	OriginIP    string `json:"originIp"`
 	OriginPort  int    `json:"originPort"`
+	DestHost    string `json:"destHost"`
+	DestRealm   string `json:"destRealm"`
 	Transport   string `json:"transport"`
 
 	// WatchdogIntervalSeconds is the openapi field name; converted
@@ -135,6 +137,8 @@ func projectPeerBody(rowName string, body peerBody) diameter.PeerConfig {
 		OriginRealm:      body.OriginRealm,
 		OriginIP:         body.OriginIP,
 		OriginPort:       body.OriginPort,
+		DestHost:         body.DestHost,
+		DestRealm:        body.DestRealm,
 		Transport:        transport,
 		WatchdogInterval: wd,
 		AutoConnect:      body.AutoConnect,

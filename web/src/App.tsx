@@ -9,6 +9,8 @@ import { SseProvider } from './api/sse/SseProvider';
 import { ErrorProvider } from './context/error/ErrorProvider';
 import { theme } from './theme/theme';
 import { AppShell } from './layout/AppShell';
+import { AppSpotlight } from './components/AppSpotlight';
+import { AboutPage } from './pages/about/AboutPage';
 import { ScenariosListPage } from './pages/scenarios/ScenariosPage';
 import { DashboardPage } from './pages/dashboard/DashboardPage';
 import { DebuggerPage } from './pages/debugger/DebuggerPage';
@@ -25,7 +27,8 @@ export function App() {
       <MantineProvider theme={theme} defaultColorScheme="auto">
         <QueryClientProvider client={queryClient}>
           <SseProvider>
-            <Notifications position="top-right" />
+            <Notifications position="top-right" pauseResetOnHover="notification" />
+            <AppSpotlight />
             <GlobalPeerToasts />
             <Routes>
             <Route element={<AppShell />}>
@@ -38,6 +41,7 @@ export function App() {
               <Route path="executions" element={<ExecutionsPage />} />
               <Route path="executions/:id" element={<DebuggerPage />} />
               <Route path="settings" element={<SettingsPage />} />
+              <Route path="about" element={<AboutPage />} />
             </Route>
           </Routes>
           </SseProvider>

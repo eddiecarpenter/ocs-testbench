@@ -811,6 +811,18 @@ export interface components {
             originHost: string;
             /** @example test.local */
             originRealm: string;
+            /**
+             * @description Destination-Host AVP sent in every CCR. When omitted the AVP
+             *     is not sent and the OCS routes by Destination-Realm alone.
+             * @example ocs.carrier.com
+             */
+            destHost?: string;
+            /**
+             * @description Destination-Realm AVP sent in every CCR. Defaults to
+             *     `originRealm` when omitted.
+             * @example carrier.com
+             */
+            destRealm?: string;
             transport: components["schemas"]["PeerTransport"];
             /** @default 30 */
             watchdogIntervalSeconds: number;
@@ -837,6 +849,13 @@ export interface components {
             port: number;
             originHost: string;
             originRealm: string;
+            /**
+             * @description Destination-Host AVP sent in every CCR. Omit to route by
+             *     realm only.
+             */
+            destHost?: string;
+            /** @description Destination-Realm AVP. Defaults to `originRealm` when omitted. */
+            destRealm?: string;
             transport: components["schemas"]["PeerTransport"];
             /** @default 30 */
             watchdogIntervalSeconds: number;
@@ -1228,6 +1247,11 @@ export interface components {
             favourite?: boolean;
             subscriberId?: string;
             peerId?: string;
+            /**
+             * @description Overrides the Diameter Service-Context-Id AVP for this scenario.
+             *     Defaults to `32251@3gpp.org` when omitted.
+             */
+            serviceContextId?: string;
             stepCount: number;
             /** Format: date-time */
             updatedAt: string;
@@ -1269,6 +1293,11 @@ export interface components {
             favourite: boolean;
             subscriberId: string;
             peerId: string;
+            /**
+             * @description Overrides the Diameter Service-Context-Id AVP. Defaults to
+             *     `32251@3gpp.org` when omitted.
+             */
+            serviceContextId?: string;
             avpTree: components["schemas"]["AvpNode"][];
             services: components["schemas"]["Service"][];
             variables: components["schemas"]["Variable"][];

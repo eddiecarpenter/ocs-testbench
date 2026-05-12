@@ -1,0 +1,10 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "ocs-testbench",
+  "outputfilename": "OCS Testbench",
+  "frontend:dir": "../../web",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:serverUrl": "auto",
+  "version": "2"
+}
