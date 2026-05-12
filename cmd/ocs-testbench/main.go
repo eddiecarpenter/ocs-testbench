@@ -72,6 +72,7 @@ import (
 	"github.com/eddiecarpenter/ocs-testbench/internal/diameter/messaging"
 	"github.com/eddiecarpenter/ocs-testbench/internal/diameter/protocol"
 	"github.com/eddiecarpenter/ocs-testbench/internal/logging"
+	internalmcp "github.com/eddiecarpenter/ocs-testbench/internal/mcp"
 	"github.com/eddiecarpenter/ocs-testbench/internal/store"
 	tmpl "github.com/eddiecarpenter/ocs-testbench/internal/template"
 	"github.com/eddiecarpenter/ocs-testbench/web"
@@ -246,10 +247,18 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 	execEngine := api.NewSessionManager(s, dmgr, behaviour, dictAdapter)
 	apiRouter := api.Router(s, dmgr, execEngine, dictAdapter, dict.Default, Version)
 
+	// Build the MCP server handler and mount it at /mcp alongside the
+	// REST API. The MCP server is a thin adapter over the same
+	// store/PeerManager/ExecutionEngine interfaces used by the REST API.
+	// dict.Default is the loaded Diameter AVP dictionary; it is passed so
+	// the list_avps tool can enumerate all known AVPs.
+	mcpHandler := internalmcp.NewServer(s, dmgr, execEngine, dictAdapter, dict.Default, cfg)
+
 	// Mount the API router at /api. All routes within api.Router are
 	// relative to the router's root; the Mount prefix adds /api.
 	router := chi.NewRouter()
 	router.Mount("/api", apiRouter)
+	router.Mount("/mcp", mcpHandler)
 
 	// SPA fallback: any request not handled by the API routes above
 	// is served by the frontend handler (React SPA).

@@ -89,6 +89,12 @@ func (f *fakeExecutionEngine) List(_ context.Context) []api.ExecutionSummary {
 
 func (f *fakeExecutionEngine) Interrupt(_ context.Context, _ string) error { return nil }
 func (f *fakeExecutionEngine) RunToEnd(_ context.Context, _ string) error  { return nil }
+func (f *fakeExecutionEngine) ApplyContextOverride(_ context.Context, _ string, _ map[string]any) error {
+	return nil
+}
+func (f *fakeExecutionEngine) ApplyPayloadOverride(_ context.Context, _ string, _ map[string]any) error {
+	return nil
+}
 
 func (f *fakeExecutionEngine) ResponseTimeSeries(_ context.Context, window string) (api.ResponseTimeSeries, error) {
 	return api.ResponseTimeSeries{Window: window, Points: []api.ResponseTimePoint{}}, nil

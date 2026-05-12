@@ -120,6 +120,11 @@ type sessionRecord struct {
 	interruptCh chan struct{}
 	done        chan struct{}
 
+	// payloadOverride holds one-shot variable overrides staged by
+	// ApplyPayloadOverride. They are merged into the next step's
+	// Overrides at highest precedence and cleared immediately after use.
+	payloadOverride map[string]any
+
 	subsMu sync.Mutex
 	subs   []chan ExecutionEvent
 	// sleepUntil is non-zero while the engine is sleeping between
@@ -543,6 +548,45 @@ func (m *SessionManager) RunToEnd(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+// ApplyContextOverride implements ExecutionEngine — writes variables permanently
+// into the session's live Vars map. The session must be paused.
+func (m *SessionManager) ApplyContextOverride(_ context.Context, sessionID string, variables map[string]any) error {
+	rec, err := m.getSession(sessionID)
+	if err != nil {
+		return err
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if rec.state != engine.StatePaused {
+		return ErrInvalidState
+	}
+	for k, v := range variables {
+		rec.sc.Vars[k] = v
+	}
+	return nil
+}
+
+// ApplyPayloadOverride implements ExecutionEngine — stages one-shot variable
+// overrides for the next step only. The session must be paused.
+func (m *SessionManager) ApplyPayloadOverride(_ context.Context, sessionID string, variables map[string]any) error {
+	rec, err := m.getSession(sessionID)
+	if err != nil {
+		return err
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if rec.state != engine.StatePaused {
+		return ErrInvalidState
+	}
+	if rec.payloadOverride == nil {
+		rec.payloadOverride = make(map[string]any, len(variables))
+	}
+	for k, v := range variables {
+		rec.payloadOverride[k] = v
+	}
+	return nil
+}
+
 // Skip implements ExecutionEngine — advances past the current step without
 // sending a CCR. Records the step as "skipped" in history.
 func (m *SessionManager) Skip(_ context.Context, sessionID string) error {
@@ -614,9 +658,24 @@ func (m *SessionManager) Step(ctx context.Context, sessionID string, overrides m
 	prev := rec.prevResult
 	rec.mu.Unlock()
 
-	if len(overrides) > 0 {
-		strOverrides := make(map[string]string, len(overrides))
-		for k, v := range overrides {
+	// Merge payload override (one-shot, staged by ApplyPayloadOverride) and the
+	// per-call overrides parameter. Payload override provides the lowest-precedence
+	// caller-supplied values; the explicit overrides parameter wins when keys collide.
+	rec.mu.Lock()
+	staged := rec.payloadOverride
+	rec.payloadOverride = nil // consume and clear
+	rec.mu.Unlock()
+
+	effectiveOverrides := make(map[string]any, len(staged)+len(overrides))
+	for k, v := range staged {
+		effectiveOverrides[k] = v
+	}
+	for k, v := range overrides {
+		effectiveOverrides[k] = v // explicit overrides win
+	}
+	if len(effectiveOverrides) > 0 {
+		strOverrides := make(map[string]string, len(effectiveOverrides))
+		for k, v := range effectiveOverrides {
 			strOverrides[k] = fmt.Sprintf("%v", v)
 		}
 		step.Overrides = strOverrides
