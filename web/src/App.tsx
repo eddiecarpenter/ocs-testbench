@@ -11,6 +11,7 @@ import { theme } from './theme/theme';
 import { AppShell } from './layout/AppShell';
 import { AppSpotlight } from './components/AppSpotlight';
 import { AboutPage } from './pages/about/AboutPage';
+import { AiAssistantPage } from './pages/ai-assistant/AiAssistantPage';
 import { ScenariosListPage } from './pages/scenarios/ScenariosPage';
 import { DashboardPage } from './pages/dashboard/DashboardPage';
 import { DebuggerPage } from './pages/debugger/DebuggerPage';
@@ -40,6 +41,7 @@ export function App() {
               <Route path="scenarios/:id" element={<ScenariosListPage />} />
               <Route path="executions" element={<ExecutionsPage />} />
               <Route path="executions/:id" element={<DebuggerPage />} />
+              <Route path="ai-assistant" element={<AiAssistantPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="about" element={<AboutPage />} />
             </Route>
