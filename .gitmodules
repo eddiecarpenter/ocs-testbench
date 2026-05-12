@@ -1,3 +1,6 @@
 [submodule ".ai"]
 	path = .ai
 	url = https://github.com/eddiecarpenter/gh-agentic.git
+[submodule ".agents"]
+	path = .agents
+	url = https://github.com/eddiecarpenter/gh-agentic.git
