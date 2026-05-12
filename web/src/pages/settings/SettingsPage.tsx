@@ -1,5 +1,6 @@
 import {
   ActionIcon,
+  Alert,
   Anchor,
   Badge,
   Button,
@@ -8,6 +9,7 @@ import {
   Group,
   Modal,
   NumberInput,
+  PasswordInput,
   SegmentedControl,
   Select,
   Skeleton,
@@ -25,6 +27,7 @@ import { notifications } from '@mantine/notifications';
 import {
   IconCheck,
   IconDeviceLaptop,
+  IconInfoCircle,
   IconMoon,
   IconPlus,
   IconRefresh,
@@ -282,6 +285,9 @@ export function SettingsPage() {
               />
             </Stack>
           </Card>
+
+          {/* ─── AI Assistant ─────────────────────────────────── */}
+          <AiAssistantCard />
 
           {/* ─── AVP Dictionaries ──────────────────────────────── */}
           <DictionariesCard />
@@ -593,5 +599,95 @@ function DictModal({ opened, onClose, title, existing }: DictModalProps) {
         </Stack>
       </form>
     </Modal>
+  );
+}
+
+// ─── AI Assistant settings ────────────────────────────────────────────────────
+
+/**
+ * Provider preset definitions.
+ *
+ * The API endpoint is pre-filled when a provider is selected.  All fields
+ * are disabled in this release — they become functional in Feature 3.
+ *
+ * Anthropic uses its own Messages API rather than the OpenAI-compatible
+ * `/v1/chat/completions` path; Feature 3 must implement a separate adapter
+ * for it behind the common client interface.
+ */
+const PROVIDER_PRESETS: Record<string, string> = {
+  openai: 'https://api.openai.com',
+  anthropic: 'https://api.anthropic.com',
+  ollama: 'http://localhost:11434',
+  lmstudio: 'http://localhost:1234',
+  llamacpp: 'http://localhost:8080',
+  custom: '',
+};
+
+const PROVIDER_OPTIONS = [
+  { value: 'openai',    label: 'OpenAI' },
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'ollama',    label: 'Ollama' },
+  { value: 'lmstudio',  label: 'LM Studio' },
+  { value: 'llamacpp',  label: 'llama.cpp' },
+  { value: 'custom',    label: 'Custom' },
+];
+
+/**
+ * AI Assistant settings card.
+ *
+ * All fields are disabled with an info banner in this release.
+ * LLM integration (provider auth, model fetch, live endpoint) is
+ * enabled in Feature 3.
+ */
+function AiAssistantCard() {
+  const [provider, setProvider] = useState<string>('openai');
+  const endpoint = PROVIDER_PRESETS[provider] ?? '';
+
+  return (
+    <Card padding="lg" withBorder shadow="xs">
+      <Stack gap="md">
+        <Stack gap={4}>
+          <SectionLabel>AI Assistant</SectionLabel>
+          <Text size="xs" c="dimmed">
+            Configure the LLM provider used by the AI Assistant.
+          </Text>
+        </Stack>
+
+        <Alert
+          icon={<IconInfoCircle size={16} />}
+          color="blue"
+          variant="light"
+          radius="sm"
+        >
+          These settings are non-functional in this release. LLM integration
+          is enabled in Feature 3.
+        </Alert>
+
+        <Select
+          label="Provider"
+          description="Preset auto-fills the API endpoint"
+          data={PROVIDER_OPTIONS}
+          value={provider}
+          onChange={(v) => setProvider(v ?? 'openai')}
+          allowDeselect={false}
+          disabled
+          checkIconPosition="right"
+        />
+
+        <TextInput
+          label="API endpoint"
+          placeholder="https://api.openai.com"
+          value={endpoint}
+          readOnly
+          disabled
+        />
+
+        <PasswordInput
+          label="API key"
+          placeholder="sk-…"
+          disabled
+        />
+      </Stack>
+    </Card>
   );
 }
