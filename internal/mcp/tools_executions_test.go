@@ -111,7 +111,7 @@ func (f *fakeExecutionEngine) ResponseTimeSeries(_ context.Context, w string) (a
 // newMCPClientWithExecEngine creates an MCP test server with a custom execution engine.
 func newMCPClientWithExecEngine(t *testing.T, exec api.ExecutionEngine) *mcpTestClient {
 	t.Helper()
-	handler := internalmcp.NewServer(store.NewTestStore(), nil, exec, nil, nil)
+	handler := internalmcp.NewServer(store.NewTestStore(), nil, exec, nil, nil, nil)
 	ts := httptest.NewServer(handler)
 	t.Cleanup(ts.Close)
 

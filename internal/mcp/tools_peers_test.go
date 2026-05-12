@@ -25,7 +25,7 @@ type mcpTestClient struct {
 // returns an initialised client with a valid session ID.
 func newMCPTestClient(t *testing.T, s store.Store) *mcpTestClient {
 	t.Helper()
-	handler := internalmcp.NewServer(s, nil, nil, nil, nil)
+	handler := internalmcp.NewServer(s, nil, nil, nil, nil, nil)
 	ts := httptest.NewServer(handler)
 	t.Cleanup(ts.Close)
 

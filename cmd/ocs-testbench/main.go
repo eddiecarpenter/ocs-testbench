@@ -250,7 +250,9 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 	// Build the MCP server handler and mount it at /mcp alongside the
 	// REST API. The MCP server is a thin adapter over the same
 	// store/PeerManager/ExecutionEngine interfaces used by the REST API.
-	mcpHandler := internalmcp.NewServer(s, dmgr, execEngine, dictAdapter, cfg)
+	// dict.Default is the loaded Diameter AVP dictionary; it is passed so
+	// the list_avps tool can enumerate all known AVPs.
+	mcpHandler := internalmcp.NewServer(s, dmgr, execEngine, dictAdapter, dict.Default, cfg)
 
 	// Mount the API router at /api. All routes within api.Router are
 	// relative to the router's root; the Mount prefix adds /api.

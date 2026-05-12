@@ -35,6 +35,7 @@ func newTestMCPServer() http.Handler {
 		nil, // PeerManager — nil is valid; tools return errors gracefully
 		nil, // ExecutionEngine — nil is valid
 		nil, // Dictionary — nil is valid
+		nil, // dict.Parser — nil means list_avps returns empty (acceptable in tests)
 		nil, // Config — nil is valid
 	)
 }
