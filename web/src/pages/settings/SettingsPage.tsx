@@ -3,6 +3,7 @@ import {
   Alert,
   Anchor,
   Badge,
+  Box,
   Button,
   Card,
   Divider,
@@ -10,6 +11,8 @@ import {
   Modal,
   NumberInput,
   PasswordInput,
+  Radio,
+  ScrollArea,
   SegmentedControl,
   Select,
   Skeleton,
@@ -632,6 +635,25 @@ const PROVIDER_OPTIONS = [
   { value: 'custom',    label: 'Custom' },
 ];
 
+/** Static mock model list — displayed until Feature 3 wires a live /v1/models fetch. */
+const MOCK_MODELS = [
+  'gpt-4o',
+  'gpt-4o-mini',
+  'gpt-4-turbo',
+  'gpt-3.5-turbo',
+  'claude-opus-4-5',
+  'claude-sonnet-4-5',
+  'claude-haiku-3-5',
+  'llama3.2:3b',
+  'llama3.2:1b',
+  'mistral:7b',
+  'phi4:14b',
+  'qwen2.5:7b',
+];
+
+/** Height of five visible rows in the scrollable model list. */
+const MODEL_LIST_HEIGHT = 40 * 5; // ~40px per radio row × 5 rows
+
 /**
  * AI Assistant settings card.
  *
@@ -641,7 +663,12 @@ const PROVIDER_OPTIONS = [
  */
 function AiAssistantCard() {
   const [provider, setProvider] = useState<string>('openai');
+  const [modelFilter, setModelFilter] = useState('');
   const endpoint = PROVIDER_PRESETS[provider] ?? '';
+
+  const filteredModels = MOCK_MODELS.filter((m) =>
+    m.toLowerCase().includes(modelFilter.toLowerCase()),
+  );
 
   return (
     <Card padding="lg" withBorder shadow="xs">
@@ -687,6 +714,82 @@ function AiAssistantCard() {
           placeholder="sk-…"
           disabled
         />
+
+        {/* ─── Model list sub-section ──────────────────────── */}
+        <Box
+          style={{
+            border:
+              '1px solid light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-5))',
+            borderRadius: 'var(--mantine-radius-sm)',
+          }}
+        >
+          {/* Sub-heading row */}
+          <Group
+            justify="space-between"
+            align="center"
+            px="sm"
+            py="xs"
+            style={{
+              borderBottom:
+                '1px solid light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-5))',
+            }}
+          >
+            <Text size="sm" fw={600}>
+              Models
+            </Text>
+            <ActionIcon
+              variant="subtle"
+              size="sm"
+              aria-label="Refresh model list"
+              disabled
+              title="Refresh is enabled in Feature 3"
+            >
+              <IconRefresh size={14} />
+            </ActionIcon>
+          </Group>
+
+          {/* Status bar */}
+          <Box px="sm" py={6}>
+            <Text size="xs" c="dimmed">
+              Configure endpoint to fetch models
+            </Text>
+          </Box>
+
+          {/* Filter input */}
+          <Box px="sm" pb="xs">
+            <TextInput
+              size="xs"
+              placeholder="Filter models…"
+              value={modelFilter}
+              onChange={(e) => setModelFilter(e.currentTarget.value)}
+              disabled
+              aria-label="Filter models"
+            />
+          </Box>
+
+          {/* Scrollable radio list — fixed height showing 5 rows */}
+          <ScrollArea h={MODEL_LIST_HEIGHT} px="sm" pb="xs">
+            <Radio.Group value={null} onChange={() => undefined}>
+              <Stack gap={4}>
+                {filteredModels.map((model) => (
+                  <Radio
+                    key={model}
+                    value={model}
+                    label={model}
+                    size="xs"
+                    disabled
+                    styles={{ label: { fontFamily: 'monospace', fontSize: 12 } }}
+                  />
+                ))}
+                {filteredModels.length === 0 && (
+                  <Text size="xs" c="dimmed" ta="center" py="sm">
+                    No models match filter.
+                  </Text>
+                )}
+              </Stack>
+            </Radio.Group>
+          </ScrollArea>
+        </Box>
       </Stack>
     </Card>
   );
