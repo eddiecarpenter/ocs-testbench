@@ -1,14 +1,18 @@
 package mcp_test
 
 import (
+	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/eddiecarpenter/ocs-testbench/internal/baseconfig"
 	internalmcp "github.com/eddiecarpenter/ocs-testbench/internal/mcp"
 	"github.com/eddiecarpenter/ocs-testbench/internal/store"
+	tmpl "github.com/eddiecarpenter/ocs-testbench/internal/template"
 )
 
 // newMCPClientWithCfg creates an MCP test client backed by the given config.
@@ -122,4 +126,57 @@ func TestHandleUpdateConfig_InvalidLoggingFormat_ReturnsToolError(t *testing.T) 
 		"logging_format": "xml",
 	})
 	assert.True(t, isToolError(resp), "invalid format must return isError: true")
+}
+
+// fakeMCPDictionary implements tmpl.Dictionary for MCP AVP-tool unit tests.
+// It returns known metadata for "Origin-Host" and an error for all other names.
+type fakeMCPDictionary struct{}
+
+func (f *fakeMCPDictionary) Lookup(name string) (tmpl.AVPMetadata, error) {
+	switch name {
+	case "Origin-Host":
+		return tmpl.AVPMetadata{Code: 264, VendorID: 0, DataType: "UTF8String"}, nil
+	default:
+		return tmpl.AVPMetadata{}, fmt.Errorf("AVP %q not found in dictionary", name)
+	}
+}
+
+// newMCPClientWithDictionary creates an MCP test client backed by the given dictionary.
+func newMCPClientWithDictionary(t *testing.T, dict tmpl.Dictionary) *mcpTestClient {
+	t.Helper()
+	handler := internalmcp.NewServer(store.NewTestStore(), nil, nil, dict, nil, nil)
+	ts := httptest.NewServer(handler)
+	t.Cleanup(ts.Close)
+
+	initMsg := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "initialize",
+		"params": map[string]any{
+			"protocolVersion": "2025-03-26",
+			"clientInfo":      map[string]any{"name": "test", "version": "1.0.0"},
+		},
+	}
+	resp, _ := postJSONWithSessionID(t, http.DefaultClient, ts.URL, initMsg, "")
+	sessionID := resp.Header.Get("Mcp-Session-Id")
+	require.NotEmpty(t, sessionID, "initialize must return a session ID")
+	return &mcpTestClient{ts: ts, sessionID: sessionID, t: t}
+}
+
+// TestHandleGetAVPInfo_KnownAVP_ReturnsAllFields verifies AC-6: get_avp_info must return
+// populated code, vendorId, and dataType fields for a known AVP (Origin-Host, code 264).
+func TestHandleGetAVPInfo_KnownAVP_ReturnsAllFields(t *testing.T) {
+	client := newMCPClientWithDictionary(t, &fakeMCPDictionary{})
+	resp := client.callTool("get_avp_info", map[string]any{"name": "Origin-Host"})
+
+	var result map[string]any
+	toolResult(t, resp, &result)
+
+	assert.Equal(t, "Origin-Host", result["name"], "get_avp_info must return the AVP name")
+	assert.Equal(t, float64(264), result["code"], "get_avp_info must return code 264 for Origin-Host")
+	assert.Equal(t, "UTF8String", result["dataType"], "get_avp_info must return correct Diameter data type")
+	// vendorId is omitted from the JSON when zero (IETF base AVP) — absence equals 0.
+	if vid, ok := result["vendorId"]; ok {
+		assert.Equal(t, float64(0), vid, "IETF AVP must have vendorId 0 or absent")
+	}
 }

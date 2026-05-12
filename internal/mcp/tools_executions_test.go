@@ -20,6 +20,17 @@ type fakeExecutionEngine struct {
 	lists    []api.ExecutionSummary
 }
 
+// seedStep injects a step record with CCR/CCA data into an existing fake session.
+// Used in AC-3 tests to verify that get_execution_detail surfaces AVP content.
+func (f *fakeExecutionEngine) seedStep(sessionID string, step api.StepRecordJSON) {
+	d, ok := f.sessions[sessionID]
+	if !ok {
+		return
+	}
+	d.Steps = append(d.Steps, step)
+	f.sessions[sessionID] = d
+}
+
 func newFakeEngine() *fakeExecutionEngine {
 	return &fakeExecutionEngine{
 		sessions: make(map[string]api.ExecutionDetailResponse),
@@ -198,6 +209,16 @@ func TestHandleGetExecutionDetail_ReturnsFullDetail(t *testing.T) {
 	sessionID, _ := started["id"].(string)
 	require.NotEmpty(t, sessionID)
 
+	// Seed a completed step with CCR/CCA AVP data so get_execution_detail
+	// has something to return (AC-3: response must include per-step AVP content).
+	exec.seedStep(sessionID, api.StepRecordJSON{
+		N:        1,
+		Kind:     "request",
+		State:    "success",
+		Request:  map[string]any{"resultCode": float64(2001)},
+		Response: map[string]any{"resultCode": float64(2001)},
+	})
+
 	// Get detail.
 	detailResp := client.callTool("get_execution_detail", map[string]any{
 		"session_id": sessionID,
@@ -206,6 +227,13 @@ func TestHandleGetExecutionDetail_ReturnsFullDetail(t *testing.T) {
 	toolResult(t, detailResp, &detail)
 	assert.Equal(t, sessionID, detail["id"])
 	assert.NotNil(t, detail["context"], "detail must include context snapshot")
+
+	// AC-3: verify that get_execution_detail surfaces CCR/CCA AVP content per step.
+	steps, _ := detail["steps"].([]any)
+	require.NotEmpty(t, steps, "detail must contain at least one step with CCR/CCA data")
+	step0, _ := steps[0].(map[string]any)
+	assert.NotNil(t, step0["request"], "step[0] must include CCR request AVP data")
+	assert.NotNil(t, step0["response"], "step[0] must include CCA response AVP data")
 }
 
 // TestHandleApplyContextOverride_PersistsVariables verifies AC-5:
