@@ -584,8 +584,8 @@ func TestEngine_Render_ZeroGrant_SuppressesUSU(t *testing.T) {
 	values := map[string]any{
 		"CC_REQUEST_TYPE":   uint32(2), // UPDATE
 		"REQ":               "512",
-		"USED":              "256",      // a non-zero USU placeholder
-		"RG1_GRANTED_UNITS": int64(0),  // position-based: OCS granted nothing
+		"USED":              "256",    // a non-zero USU placeholder
+		"RG1_GRANTED_UNITS": int64(0), // position-based: OCS granted nothing
 	}
 
 	e := NewEngine()
@@ -616,9 +616,9 @@ func TestEngine_Render_ZeroGrant_NoRatingGroup_SuppressesUSU(t *testing.T) {
 	values := map[string]any{
 		"CC_REQUEST_TYPE": uint32(2), // UPDATE
 		"REQ":             "60",
-		"USED":            "30",         // non-zero USU
-		"RESULT_CODE":     int64(2001),  // success — root check would pass this through
-		"RG1_GRANTED":     int64(0),     // position-based: OCS granted nothing
+		"USED":            "30",        // non-zero USU
+		"RESULT_CODE":     int64(2001), // success — root check would pass this through
+		"RG1_GRANTED":     int64(0),    // position-based: OCS granted nothing
 	}
 
 	e := NewEngine()
@@ -644,10 +644,10 @@ func TestEngine_Render_NonZeroGrant_CapsUSU(t *testing.T) {
 		{RatingGroup: 100, Requested: "{{REQ}}", Used: "{{USED}}"},
 	}
 	values := map[string]any{
-		"CC_REQUEST_TYPE":   uint32(2),    // UPDATE
+		"CC_REQUEST_TYPE":   uint32(2), // UPDATE
 		"REQ":               "512",
-		"USED":              "1000",       // exceeds the grant
-		"RG1_GRANTED_UNITS": int64(300),  // position-based grant
+		"USED":              "1000",     // exceeds the grant
+		"RG1_GRANTED_UNITS": int64(300), // position-based grant
 	}
 
 	e := NewEngine()

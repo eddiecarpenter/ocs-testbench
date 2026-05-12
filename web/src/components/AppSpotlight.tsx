@@ -1,4 +1,4 @@
-import { Spotlight, spotlight } from '@mantine/spotlight';
+import { Spotlight } from '@mantine/spotlight';
 import {
   IconDashboard,
   IconLayoutGrid,
@@ -48,5 +48,3 @@ export function AppSpotlight() {
   );
 }
 
-/** Open the spotlight programmatically (e.g. from the search bar button). */
-export { spotlight };

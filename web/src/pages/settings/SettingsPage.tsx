@@ -477,6 +477,7 @@ function DictModal({ opened, onClose, title, existing }: DictModalProps) {
       isActive: existing?.isActive ?? true,
     });
     form.resetDirty();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setConfirmDelete(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened, existing?.id]);

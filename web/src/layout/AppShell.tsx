@@ -26,7 +26,7 @@ import {
 } from '@tabler/icons-react';
 import { NavLink as RouterLink, Outlet, useLocation } from 'react-router';
 
-import { spotlight } from '../components/AppSpotlight';
+import { spotlight } from '@mantine/spotlight';
 
 type NavEntry = {
   label: string;
