@@ -88,6 +88,7 @@ func Router(s store.Store, mgr PeerManager, exec ExecutionEngine, dictArg templa
 		mountMetrics(v1, exec)
 		mountExpressions(v1)
 		mountSSE(v1, s, mgr, exec)
+		mountAIChat(v1)
 		mountVersion(v1, version)
 	})
 

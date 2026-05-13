@@ -13,6 +13,7 @@ import {
   useMantineColorScheme,
 } from '@mantine/core';
 import {
+  IconAi,
   IconDashboard,
   IconInfoCircle,
   IconLayoutGrid,
@@ -45,6 +46,7 @@ const primaryNav: NavEntry[] = [
   { label: 'Subscribers', to: '/subscribers', icon: IconUsers },
   { label: 'Scenarios', to: '/scenarios', icon: IconLayoutGrid },
   { label: 'Executions', to: '/executions', icon: IconPlayerPlay },
+  { label: 'AI Assistant', to: '/ai-assistant', icon: IconAi },
 ];
 
 /** Light/dark aware border so chrome dividers remain visible in dark mode. */
