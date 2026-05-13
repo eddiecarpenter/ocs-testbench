@@ -23,7 +23,7 @@ func registerAVPTools(s *server.MCPServer, srv *Server) {
 	// get_avp_info — read-only
 	s.AddTool(
 		mcp.NewTool("get_avp_info",
-			mcp.WithDescription("Get detailed information about a specific AVP: name, code, vendor ID, and Diameter data type."),
+			mcp.WithDescription("Get detailed information about a specific AVP: name, code, vendor ID, Diameter data type, and child AVPs for Grouped types."),
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),
 			mcp.WithString("name",
@@ -36,11 +36,13 @@ func registerAVPTools(s *server.MCPServer, srv *Server) {
 }
 
 // avpInfoJSON is the MCP response shape for a single AVP.
+// For Grouped AVPs, Children lists the member AVPs defined in the dictionary.
 type avpInfoJSON struct {
-	Name     string `json:"name"`
-	Code     uint32 `json:"code"`
-	VendorID uint32 `json:"vendorId,omitempty"`
-	DataType string `json:"dataType"`
+	Name     string        `json:"name"`
+	Code     uint32        `json:"code"`
+	VendorID uint32        `json:"vendorId,omitempty"`
+	DataType string        `json:"dataType"`
+	Children []avpInfoJSON `json:"children,omitempty"`
 }
 
 // handleListAVPs returns all known AVPs from the Diameter dictionary.
@@ -73,6 +75,8 @@ func (srv *Server) handleListAVPs(ctx context.Context, req mcp.CallToolRequest) 
 }
 
 // handleGetAVPInfo returns metadata for a named AVP.
+// For Grouped AVPs the response includes a children array listing every
+// member AVP defined by the dictionary rules for that group.
 func (srv *Server) handleGetAVPInfo(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	name, err := req.RequireString("name")
 	if err != nil {
@@ -88,10 +92,39 @@ func (srv *Server) handleGetAVPInfo(ctx context.Context, req mcp.CallToolRequest
 		return mcp.NewToolResultError(fmt.Sprintf("AVP %q not found in dictionary", name)), nil
 	}
 
-	return mcp.NewToolResultJSON(avpInfoJSON{
+	result := avpInfoJSON{
 		Name:     name,
 		Code:     meta.Code,
 		VendorID: meta.VendorID,
 		DataType: meta.DataType,
-	})
+	}
+
+	// For Grouped AVPs, resolve the child AVPs from the parser's rule list.
+	if meta.DataType == "Grouped" && srv.parser != nil {
+		for _, app := range srv.parser.Apps() {
+			for _, avp := range app.AVP {
+				if avp.Name != name {
+					continue
+				}
+				for _, rule := range avp.Data.Rule {
+					childMeta, childErr := srv.dict.Lookup(rule.AVP)
+					if childErr != nil {
+						// Include partial info even if the child isn't in the
+						// high-level dictionary (e.g. vendor-specific sub-AVPs).
+						result.Children = append(result.Children, avpInfoJSON{Name: rule.AVP})
+						continue
+					}
+					result.Children = append(result.Children, avpInfoJSON{
+						Name:     rule.AVP,
+						Code:     childMeta.Code,
+						VendorID: childMeta.VendorID,
+						DataType: childMeta.DataType,
+					})
+				}
+				break
+			}
+		}
+	}
+
+	return mcp.NewToolResultJSON(result)
 }
