@@ -69,9 +69,9 @@ func postJSONWithSessionID(t *testing.T, client *http.Client, url string, body a
 	return resp, rpcResp
 }
 
-// TestNewServer_ToolListReturns33Tools verifies AC-1: the tool-list request
-// returns exactly 33 tools with non-empty names and correct hint annotations.
-func TestNewServer_ToolListReturns33Tools(t *testing.T) {
+// TestNewServer_ToolListReturns34Tools verifies AC-1: the tool-list request
+// returns exactly 34 tools with non-empty names and correct hint annotations.
+func TestNewServer_ToolListReturns34Tools(t *testing.T) {
 	handler := newTestMCPServer()
 	require.NotNil(t, handler, "NewServer must return a non-nil handler")
 
@@ -111,7 +111,7 @@ func TestNewServer_ToolListReturns33Tools(t *testing.T) {
 
 	tools, ok := listRPCResp.Result["tools"].([]any)
 	require.True(t, ok, "result.tools must be an array, got: %T", listRPCResp.Result["tools"])
-	assert.Len(t, tools, 33, "exactly 33 tools must be registered")
+	assert.Len(t, tools, 34, "exactly 34 tools must be registered")
 
 	// Build a name→annotations map for spot-check assertions.
 	type toolAnnotations struct {

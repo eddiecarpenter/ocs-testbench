@@ -357,3 +357,77 @@ func TestHandleWaitExecution_MissingSessionID_ReturnsToolError(t *testing.T) {
 	resp := client.callTool("wait_execution", map[string]any{})
 	assert.True(t, isToolError(resp), "missing session_id must return isError: true")
 }
+
+// TestHandleGetStepDetail_ReturnsStep verifies get_step_detail returns structured
+// AVP data for a specific step number.
+func TestHandleGetStepDetail_ReturnsStep(t *testing.T) {
+	exec := newFakeEngine()
+	client := newMCPClientWithExecEngine(t, exec)
+
+	startResp := client.callTool("start_execution", map[string]any{
+		"scenario_id": "scenario-step-detail",
+		"mode":        "interactive",
+	})
+	var started map[string]any
+	toolResult(t, startResp, &started)
+	sessionID, _ := started["id"].(string)
+	require.NotEmpty(t, sessionID)
+
+	exec.seedStep(sessionID, api.StepRecordJSON{
+		N:           1,
+		Kind:        "request",
+		RequestType: "INITIAL",
+		Label:       "CCR-INITIAL",
+		State:       "success",
+		DurationMs:  12,
+		Request:     map[string]any{"resultCode": float64(0)},
+		Response:    map[string]any{"resultCode": float64(2001)},
+		RequestText: "Diameter Message: CommandCode: 272, appId: 4, flags: 128\n264: Origin-Host. . . . . . ocsclient:1812\n",
+		ResponseText: "Diameter Message: CommandCode: 272, appId: 4, flags: 0\n268: Result-Code. . . . . . 2001\n",
+	})
+
+	resp := client.callTool("get_step_detail", map[string]any{
+		"session_id": sessionID,
+		"step":       float64(1),
+	})
+	var result map[string]any
+	toolResult(t, resp, &result)
+	assert.Equal(t, float64(1), result["n"])
+	assert.Equal(t, "CCR-INITIAL", result["label"])
+	assert.Equal(t, float64(2001), result["resultCode"])
+	request, _ := result["request"].([]any)
+	assert.NotEmpty(t, request, "request AVPs must be present")
+	response, _ := result["response"].([]any)
+	assert.NotEmpty(t, response, "response AVPs must be present")
+}
+
+// TestHandleGetStepDetail_OutOfRange_ReturnsToolError verifies AC-4.
+func TestHandleGetStepDetail_OutOfRange_ReturnsToolError(t *testing.T) {
+	exec := newFakeEngine()
+	client := newMCPClientWithExecEngine(t, exec)
+
+	startResp := client.callTool("start_execution", map[string]any{
+		"scenario_id": "scenario-oob",
+		"mode":        "interactive",
+	})
+	var started map[string]any
+	toolResult(t, startResp, &started)
+	sessionID, _ := started["id"].(string)
+
+	resp := client.callTool("get_step_detail", map[string]any{
+		"session_id": sessionID,
+		"step":       float64(99),
+	})
+	assert.True(t, isToolError(resp), "out-of-range step must return isError: true")
+}
+
+// TestHandleGetStepDetail_MissingStep_ReturnsToolError verifies AC-4.
+func TestHandleGetStepDetail_MissingStep_ReturnsToolError(t *testing.T) {
+	exec := newFakeEngine()
+	client := newMCPClientWithExecEngine(t, exec)
+	resp := client.callTool("get_step_detail", map[string]any{
+		"session_id": "any",
+		"step":       float64(0),
+	})
+	assert.True(t, isToolError(resp), "step=0 must return isError: true")
+}

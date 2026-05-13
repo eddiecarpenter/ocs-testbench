@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -12,7 +13,7 @@ import (
 	"github.com/eddiecarpenter/ocs-testbench/internal/api"
 )
 
-// registerExecutionTools registers all 10 execution control tools.
+// registerExecutionTools registers all 11 execution control tools.
 func registerExecutionTools(s *server.MCPServer, srv *Server) {
 	// start_execution — write, non-destructive
 	s.AddTool(
@@ -117,6 +118,26 @@ func registerExecutionTools(s *server.MCPServer, srv *Server) {
 			),
 		),
 		srv.handleGetExecutionDetail,
+	)
+
+	// get_step_detail — read-only
+	s.AddTool(
+		mcp.NewTool("get_step_detail",
+			mcp.WithDescription("Get the CCR/CCA AVP detail for a single step of an execution session. "+
+				"Returns structured AVP lines for both the request and the answer, "+
+				"plus result code, duration, and state."),
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithString("session_id",
+				mcp.Required(),
+				mcp.Description("Session ID of the execution."),
+			),
+			mcp.WithNumber("step",
+				mcp.Required(),
+				mcp.Description("1-based step number to retrieve (e.g. 1 = first step, 2 = second step)."),
+			),
+		),
+		srv.handleGetStepDetail,
 	)
 
 	// apply_execution_context_override — write, non-destructive
@@ -467,4 +488,76 @@ func (srv *Server) handleWaitExecution(ctx context.Context, req mcp.CallToolRequ
 		return mcp.NewToolResultError(fmt.Sprintf("get execution detail failed: %v", detailErr)), nil
 	}
 	return mcp.NewToolResultJSON(detail)
+}
+
+// handleGetStepDetail returns the CCR/CCA AVP detail for a single step.
+func (srv *Server) handleGetStepDetail(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if srv.execEngine == nil {
+		return mcp.NewToolResultError("execution engine not available"), nil
+	}
+	sessionID, err := req.RequireString("session_id")
+	if err != nil {
+		return mcp.NewToolResultError("session_id is required"), nil
+	}
+	stepNum := int(req.GetFloat("step", 0))
+	if stepNum < 1 {
+		return mcp.NewToolResultError("step must be a 1-based step number (e.g. 1, 2, 3)"), nil
+	}
+
+	detail, detailErr := srv.execEngine.Detail(ctx, sessionID)
+	if detailErr != nil {
+		if errors.Is(detailErr, api.ErrSessionNotFound) {
+			return mcp.NewToolResultError(fmt.Sprintf("session %q not found", sessionID)), nil
+		}
+		return mcp.NewToolResultError(fmt.Sprintf("get execution detail failed: %v", detailErr)), nil
+	}
+
+	if stepNum > len(detail.Steps) {
+		return mcp.NewToolResultError(fmt.Sprintf(
+			"step %d out of range — session has %d step(s)", stepNum, len(detail.Steps),
+		)), nil
+	}
+
+	step := detail.Steps[stepNum-1]
+	return mcp.NewToolResultJSON(map[string]any{
+		"n":           step.N,
+		"label":       step.Label,
+		"requestType": step.RequestType,
+		"state":       step.State,
+		"durationMs":  step.DurationMs,
+		"resultCode":  step.Response["resultCode"],
+		"request":     parseAVPText(step.RequestText),
+		"response":    parseAVPText(step.ResponseText),
+	})
+}
+
+// parseAVPText converts the human-readable Diameter AVP text into a slice
+// of structured {code, name, value} objects for easy consumption.
+func parseAVPText(raw string) []map[string]string {
+	var avps []map[string]string
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "Diameter Message:") {
+			continue
+		}
+		// Format: "  264: Origin-Host. . . . . . ocsclient:1812"
+		colonIdx := strings.Index(line, ":")
+		if colonIdx < 0 {
+			continue
+		}
+		code := strings.TrimSpace(line[:colonIdx])
+		rest := strings.TrimSpace(line[colonIdx+1:])
+		// Split name from value on the dot-leader sequence
+		dotIdx := strings.Index(rest, ". ")
+		if dotIdx < 0 {
+			// Grouped AVP line with no value
+			avps = append(avps, map[string]string{"code": code, "name": strings.TrimRight(rest, ". "), "value": "<Grouped>"})
+			continue
+		}
+		name := strings.TrimRight(rest[:dotIdx], ". ")
+		value := strings.TrimSpace(rest[dotIdx:])
+		value = strings.TrimLeft(value, ". ")
+		avps = append(avps, map[string]string{"code": code, "name": name, "value": value})
+	}
+	return avps
 }
