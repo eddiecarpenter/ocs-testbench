@@ -66,8 +66,9 @@ func TestHandleListScenarios_ReturnsAll(t *testing.T) {
 	client := newMCPTestClient(t, f.s)
 	resp := client.callTool("list_scenarios", nil)
 
-	var scenarios []map[string]any
-	toolResult(t, resp, &scenarios)
+	var envelope map[string]any
+	toolResult(t, resp, &envelope)
+	scenarios, _ := envelope["scenarios"].([]any)
 	assert.Len(t, scenarios, 2, "list_scenarios must return 2 scenarios")
 }
 

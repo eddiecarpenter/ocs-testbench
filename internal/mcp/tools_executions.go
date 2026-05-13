@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -11,7 +13,7 @@ import (
 	"github.com/eddiecarpenter/ocs-testbench/internal/api"
 )
 
-// registerExecutionTools registers all 9 execution control tools.
+// registerExecutionTools registers all 11 execution control tools.
 func registerExecutionTools(s *server.MCPServer, srv *Server) {
 	// start_execution — write, non-destructive
 	s.AddTool(
@@ -118,6 +120,26 @@ func registerExecutionTools(s *server.MCPServer, srv *Server) {
 		srv.handleGetExecutionDetail,
 	)
 
+	// get_step_detail — read-only
+	s.AddTool(
+		mcp.NewTool("get_step_detail",
+			mcp.WithDescription("Get the CCR/CCA AVP detail for a single step of an execution session. "+
+				"Returns structured AVP lines for both the request and the answer, "+
+				"plus result code, duration, and state."),
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithString("session_id",
+				mcp.Required(),
+				mcp.Description("Session ID of the execution."),
+			),
+			mcp.WithNumber("step",
+				mcp.Required(),
+				mcp.Description("1-based step number to retrieve (e.g. 1 = first step, 2 = second step)."),
+			),
+		),
+		srv.handleGetStepDetail,
+	)
+
 	// apply_execution_context_override — write, non-destructive
 	s.AddTool(
 		mcp.NewTool("apply_execution_context_override",
@@ -135,6 +157,25 @@ func registerExecutionTools(s *server.MCPServer, srv *Server) {
 			),
 		),
 		srv.handleApplyContextOverride,
+	)
+
+	// wait_execution — read-only, blocking
+	s.AddTool(
+		mcp.NewTool("wait_execution",
+			mcp.WithDescription("Block until an execution session reaches a terminal state (success, error, terminated) "+
+				"or the timeout expires. Returns the final execution detail. "+
+				"Use after start_execution in continuous mode to avoid polling."),
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithString("session_id",
+				mcp.Required(),
+				mcp.Description("Session ID of the execution to wait for."),
+			),
+			mcp.WithNumber("timeout_seconds",
+				mcp.Description("Maximum seconds to wait before returning (default 120, max 600)."),
+			),
+		),
+		srv.handleWaitExecution,
 	)
 
 	// apply_execution_payload_override — write, non-destructive
@@ -223,14 +264,14 @@ func (srv *Server) handleStartExecution(ctx context.Context, req mcp.CallToolReq
 // handleListExecutions lists all execution sessions.
 func (srv *Server) handleListExecutions(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if srv.execEngine == nil {
-		return mcp.NewToolResultJSON([]executionSummaryMCPJSON{})
+		return mcp.NewToolResultJSON(map[string]any{"executions": []executionSummaryMCPJSON{}})
 	}
 	sessions := srv.execEngine.List(ctx)
 	out := make([]executionSummaryMCPJSON, len(sessions))
 	for i, s := range sessions {
 		out[i] = toExecutionSummaryMCP(s)
 	}
-	return mcp.NewToolResultJSON(out)
+	return mcp.NewToolResultJSON(map[string]any{"executions": out})
 }
 
 // handleGetExecution gets the current state of an execution.
@@ -397,4 +438,126 @@ func (srv *Server) handleApplyPayloadOverride(ctx context.Context, req mcp.CallT
 		"sessionId": sessionID,
 		"variables": variables,
 	})
+}
+
+// handleWaitExecution blocks until the execution session reaches a terminal
+// state (success, error, terminated) or the timeout expires, then returns
+// the final execution detail. This avoids the need to poll get_execution.
+func (srv *Server) handleWaitExecution(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if srv.execEngine == nil {
+		return mcp.NewToolResultError("execution engine not available"), nil
+	}
+	sessionID, err := req.RequireString("session_id")
+	if err != nil {
+		return mcp.NewToolResultError("session_id is required"), nil
+	}
+
+	timeoutSecs := req.GetFloat("timeout_seconds", 120)
+	if timeoutSecs <= 0 || timeoutSecs > 600 {
+		timeoutSecs = 120
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSecs)*time.Second)
+	defer cancel()
+
+	events, subErr := srv.execEngine.Subscribe(waitCtx, sessionID)
+	if subErr != nil {
+		if errors.Is(subErr, api.ErrSessionNotFound) {
+			return mcp.NewToolResultError(fmt.Sprintf("session %q not found", sessionID)), nil
+		}
+		return mcp.NewToolResultError(fmt.Sprintf("subscribe failed: %v", subErr)), nil
+	}
+
+	// Drain events until the channel closes (terminal state) or timeout fires.
+	for range events {
+	}
+
+	// Context deadline exceeded — session did not reach a terminal state in time.
+	if waitCtx.Err() != nil {
+		return mcp.NewToolResultError(fmt.Sprintf(
+			"session %q did not complete within %.0f seconds", sessionID, timeoutSecs,
+		)), nil
+	}
+
+	// Session is terminal — return final detail.
+	detail, detailErr := srv.execEngine.Detail(ctx, sessionID)
+	if detailErr != nil {
+		if errors.Is(detailErr, api.ErrSessionNotFound) {
+			return mcp.NewToolResultError(fmt.Sprintf("session %q not found", sessionID)), nil
+		}
+		return mcp.NewToolResultError(fmt.Sprintf("get execution detail failed: %v", detailErr)), nil
+	}
+	return mcp.NewToolResultJSON(detail)
+}
+
+// handleGetStepDetail returns the CCR/CCA AVP detail for a single step.
+func (srv *Server) handleGetStepDetail(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if srv.execEngine == nil {
+		return mcp.NewToolResultError("execution engine not available"), nil
+	}
+	sessionID, err := req.RequireString("session_id")
+	if err != nil {
+		return mcp.NewToolResultError("session_id is required"), nil
+	}
+	stepNum := int(req.GetFloat("step", 0))
+	if stepNum < 1 {
+		return mcp.NewToolResultError("step must be a 1-based step number (e.g. 1, 2, 3)"), nil
+	}
+
+	detail, detailErr := srv.execEngine.Detail(ctx, sessionID)
+	if detailErr != nil {
+		if errors.Is(detailErr, api.ErrSessionNotFound) {
+			return mcp.NewToolResultError(fmt.Sprintf("session %q not found", sessionID)), nil
+		}
+		return mcp.NewToolResultError(fmt.Sprintf("get execution detail failed: %v", detailErr)), nil
+	}
+
+	if stepNum > len(detail.Steps) {
+		return mcp.NewToolResultError(fmt.Sprintf(
+			"step %d out of range — session has %d step(s)", stepNum, len(detail.Steps),
+		)), nil
+	}
+
+	step := detail.Steps[stepNum-1]
+	return mcp.NewToolResultJSON(map[string]any{
+		"n":           step.N,
+		"label":       step.Label,
+		"requestType": step.RequestType,
+		"state":       step.State,
+		"durationMs":  step.DurationMs,
+		"resultCode":  step.Response["resultCode"],
+		"request":     parseAVPText(step.RequestText),
+		"response":    parseAVPText(step.ResponseText),
+	})
+}
+
+// parseAVPText converts the human-readable Diameter AVP text into a slice
+// of structured {code, name, value} objects for easy consumption.
+func parseAVPText(raw string) []map[string]string {
+	var avps []map[string]string
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "Diameter Message:") {
+			continue
+		}
+		// Format: "  264: Origin-Host. . . . . . ocsclient:1812"
+		colonIdx := strings.Index(line, ":")
+		if colonIdx < 0 {
+			continue
+		}
+		code := strings.TrimSpace(line[:colonIdx])
+		rest := strings.TrimSpace(line[colonIdx+1:])
+		// Split name from value on the dot-leader sequence
+		dotIdx := strings.Index(rest, ". ")
+		if dotIdx < 0 {
+			// Grouped AVP line with no value
+			avps = append(avps, map[string]string{"code": code, "name": strings.TrimRight(rest, ". "), "value": "<Grouped>"})
+			continue
+		}
+		name := strings.TrimRight(rest[:dotIdx], ". ")
+		value := strings.TrimSpace(rest[dotIdx:])
+		value = strings.TrimLeft(value, ". ")
+		avps = append(avps, map[string]string{"code": code, "name": name, "value": value})
+	}
+	return avps
 }

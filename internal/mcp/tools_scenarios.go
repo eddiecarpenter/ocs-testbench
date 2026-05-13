@@ -255,7 +255,7 @@ func (srv *Server) handleListScenarios(ctx context.Context, req mcp.CallToolRequ
 	for i, sc := range scenarios {
 		out[i] = toScenarioSummaryJSON(sc)
 	}
-	return mcp.NewToolResultJSON(out)
+	return mcp.NewToolResultJSON(map[string]any{"scenarios": out})
 }
 
 // handleGetScenario returns a single scenario by UUID.
