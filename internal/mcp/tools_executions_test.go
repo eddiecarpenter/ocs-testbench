@@ -332,7 +332,7 @@ func TestHandleWaitExecution_CompletedSession_ReturnsDetail(t *testing.T) {
 	require.NotEmpty(t, sessionID)
 
 	resp := client.callTool("wait_execution", map[string]any{
-		"session_id":     sessionID,
+		"session_id":      sessionID,
 		"timeout_seconds": 10,
 	})
 	var detail map[string]any
@@ -374,15 +374,15 @@ func TestHandleGetStepDetail_ReturnsStep(t *testing.T) {
 	require.NotEmpty(t, sessionID)
 
 	exec.seedStep(sessionID, api.StepRecordJSON{
-		N:           1,
-		Kind:        "request",
-		RequestType: "INITIAL",
-		Label:       "CCR-INITIAL",
-		State:       "success",
-		DurationMs:  12,
-		Request:     map[string]any{"resultCode": float64(0)},
-		Response:    map[string]any{"resultCode": float64(2001)},
-		RequestText: "Diameter Message: CommandCode: 272, appId: 4, flags: 128\n264: Origin-Host. . . . . . ocsclient:1812\n",
+		N:            1,
+		Kind:         "request",
+		RequestType:  "INITIAL",
+		Label:        "CCR-INITIAL",
+		State:        "success",
+		DurationMs:   12,
+		Request:      map[string]any{"resultCode": float64(0)},
+		Response:     map[string]any{"resultCode": float64(2001)},
+		RequestText:  "Diameter Message: CommandCode: 272, appId: 4, flags: 128\n264: Origin-Host. . . . . . ocsclient:1812\n",
 		ResponseText: "Diameter Message: CommandCode: 272, appId: 4, flags: 0\n268: Result-Code. . . . . . 2001\n",
 	})
 
