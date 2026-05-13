@@ -58,20 +58,23 @@ func TestAIChat_ContentTypeTextEventStream(t *testing.T) {
 	s := store.NewTestStore()
 	r := api.Router(s, nil, nil, nil, nil, "test")
 
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	body := bytes.NewBufferString(`{"messages":[{"role":"user","content":"hello"}]}`)
-	req := httptest.NewRequest(http.MethodPost, "/v1/ai/chat", body).WithContext(ctx)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+"/v1/ai/chat", body)
+	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 
-	rr := httptest.NewRecorder()
-	go r.ServeHTTP(rr, req)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
 
-	// Give the handler a moment to write headers.
-	time.Sleep(50 * time.Millisecond)
-	assert.Equal(t, "text/event-stream", rr.Header().Get("Content-Type"))
-	assert.Equal(t, "no-cache", rr.Header().Get("Cache-Control"))
+	assert.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
+	assert.Equal(t, "no-cache", resp.Header.Get("Cache-Control"))
 }
 
 // TestAIChat_EmitsThinkingEventFirst verifies that the first event from
