@@ -41,9 +41,10 @@ func TestHandleListAVPs_NilParser_ReturnsEmpty(t *testing.T) {
 	client := newMCPTestClient(t, store.NewTestStore())
 	resp := client.callTool("list_avps", nil)
 
-	var result []any
-	toolResult(t, resp, &result)
-	assert.Empty(t, result, "nil parser must return empty AVP list")
+	var envelope map[string]any
+	toolResult(t, resp, &envelope)
+	avps, _ := envelope["avps"].([]any)
+	assert.Empty(t, avps, "nil parser must return empty AVP list")
 }
 
 // TestHandleGetAVPInfo_NilDict_ReturnsToolError verifies get_avp_info with nil dict.

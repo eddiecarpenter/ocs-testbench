@@ -152,7 +152,7 @@ func (srv *Server) handleListSubscribers(ctx context.Context, req mcp.CallToolRe
 	for i, s := range subs {
 		out[i] = toSubscriberJSON(s)
 	}
-	return mcp.NewToolResultJSON(out)
+	return mcp.NewToolResultJSON(map[string]any{"subscribers": out})
 }
 
 // handleGetSubscriber returns a single subscriber by UUID.

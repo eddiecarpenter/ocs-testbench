@@ -28,8 +28,9 @@ func TestHandleListSubscribers_ReturnsSubscribers(t *testing.T) {
 	client := newMCPTestClient(t, s)
 	resp := client.callTool("list_subscribers", nil)
 
-	var subs []map[string]any
-	toolResult(t, resp, &subs)
+	var envelope map[string]any
+	toolResult(t, resp, &envelope)
+	subs, _ := envelope["subscribers"].([]any)
 	assert.Len(t, subs, 2, "list_subscribers must return 2 subscribers")
 }
 

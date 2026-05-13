@@ -109,11 +109,12 @@ func TestHandleListPeers_ReturnsPeers(t *testing.T) {
 	client := newMCPTestClient(t, s)
 	resp := client.callTool("list_peers", nil)
 
-	var peers []map[string]any
-	toolResult(t, resp, &peers)
+	var envelope map[string]any
+	toolResult(t, resp, &envelope)
+	peers, _ := envelope["peers"].([]any)
 	assert.Len(t, peers, 2, "list_peers must return 2 peers")
-	assert.Equal(t, "ocs-01", peers[0]["name"])
-	assert.Equal(t, "ocs-02", peers[1]["name"])
+	assert.Equal(t, "ocs-01", peers[0].(map[string]any)["name"])
+	assert.Equal(t, "ocs-02", peers[1].(map[string]any)["name"])
 }
 
 // TestHandleGetPeer_ExistingPeer_ReturnsIt verifies get_peer with a valid ID.
@@ -146,13 +147,29 @@ func TestHandleGetPeer_MissingPeer_ReturnsToolError(t *testing.T) {
 	assert.Contains(t, errMsg, "not found", "error message must mention not found")
 }
 
-// TestHandleGetPeer_MissingRequiredParam_ReturnsToolError verifies AC-4:
-// missing required params return structured tool errors (not panics).
+// TestHandleGetPeer_ByName_ReturnsIt verifies get_peer resolves by name.
+func TestHandleGetPeer_ByName_ReturnsIt(t *testing.T) {
+	s := store.NewTestStore()
+	ctx := context.Background()
+	_, err := s.InsertPeer(ctx, "ocs-01", []byte(`{"host":"10.0.0.1","port":3868}`))
+	require.NoError(t, err)
+
+	client := newMCPTestClient(t, s)
+	resp := client.callTool("get_peer", map[string]any{"name": "ocs-01"})
+
+	var result map[string]any
+	toolResult(t, resp, &result)
+	assert.Equal(t, "ocs-01", result["name"])
+	assert.Equal(t, "10.0.0.1", result["host"])
+}
+
+// TestHandleGetPeer_MissingRequiredParam_ReturnsToolError verifies that
+// calling get_peer with neither id nor name returns a structured tool error.
 func TestHandleGetPeer_MissingRequiredParam_ReturnsToolError(t *testing.T) {
 	client := newMCPTestClient(t, store.NewTestStore())
-	// Call without id parameter.
+	// Call without id or name parameter.
 	resp := client.callTool("get_peer", map[string]any{})
-	assert.True(t, isToolError(resp), "missing id param must return isError: true")
+	assert.True(t, isToolError(resp), "missing id and name must return isError: true")
 }
 
 // TestHandleCreatePeer_ValidInput_ReturnsPeer verifies create_peer creates a peer.

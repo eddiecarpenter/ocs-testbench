@@ -47,7 +47,7 @@ type avpInfoJSON struct {
 // When the parser is nil (e.g. in tests), returns an empty list.
 func (srv *Server) handleListAVPs(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if srv.parser == nil {
-		return mcp.NewToolResultJSON([]avpInfoJSON{})
+		return mcp.NewToolResultJSON(map[string]any{"avps": []avpInfoJSON{}})
 	}
 
 	// Iterate all applications in the parser and collect unique AVPs by name.
@@ -69,7 +69,7 @@ func (srv *Server) handleListAVPs(ctx context.Context, req mcp.CallToolRequest) 
 		}
 	}
 
-	return mcp.NewToolResultJSON(avps)
+	return mcp.NewToolResultJSON(map[string]any{"avps": avps})
 }
 
 // handleGetAVPInfo returns metadata for a named AVP.

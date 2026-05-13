@@ -29,12 +29,14 @@ func registerPeerTools(s *server.MCPServer, srv *Server) {
 	// get_peer — read-only
 	s.AddTool(
 		mcp.NewTool("get_peer",
-			mcp.WithDescription("Get a single Diameter peer by ID."),
+			mcp.WithDescription("Get a single Diameter peer by UUID or name. Provide either 'id' or 'name'; if both are given, 'id' takes precedence."),
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),
 			mcp.WithString("id",
-				mcp.Required(),
 				mcp.Description("UUID of the peer to retrieve."),
+			),
+			mcp.WithString("name",
+				mcp.Description("Unique name of the peer to retrieve (e.g. 'OpenBSS')."),
 			),
 		),
 		srv.handleGetPeer,
@@ -214,23 +216,39 @@ func (srv *Server) handleListPeers(ctx context.Context, req mcp.CallToolRequest)
 	for i, p := range peers {
 		out[i] = srv.toPeerJSON(p)
 	}
-	return mcp.NewToolResultJSON(out)
+	return mcp.NewToolResultJSON(map[string]any{"peers": out})
 }
 
-// handleGetPeer returns a single peer by UUID.
+// handleGetPeer returns a single peer by UUID or name.
+// If 'id' is provided it takes precedence; otherwise 'name' is used.
 func (srv *Server) handleGetPeer(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	idStr, err := req.RequireString("id")
-	if err != nil {
-		return mcp.NewToolResultError("id is required"), nil
+	idStr := req.GetString("id", "")
+	name := req.GetString("name", "")
+
+	if idStr == "" && name == "" {
+		return mcp.NewToolResultError("either 'id' or 'name' is required"), nil
 	}
-	id, err := parseUUID(idStr)
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("invalid peer id %q: %v", idStr, err)), nil
+
+	if idStr != "" {
+		id, err := parseUUID(idStr)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid peer id %q: %v", idStr, err)), nil
+		}
+		peer, err := srv.store.GetPeer(ctx, id)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return mcp.NewToolResultError(fmt.Sprintf("peer %q not found", idStr)), nil
+			}
+			return mcp.NewToolResultError(fmt.Sprintf("get peer failed: %v", err)), nil
+		}
+		return mcp.NewToolResultJSON(srv.toPeerJSON(peer))
 	}
-	peer, err := srv.store.GetPeer(ctx, id)
+
+	// Lookup by name.
+	peer, err := srv.store.GetPeerByName(ctx, name)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return mcp.NewToolResultError(fmt.Sprintf("peer %q not found", idStr)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("peer %q not found", name)), nil
 		}
 		return mcp.NewToolResultError(fmt.Sprintf("get peer failed: %v", err)), nil
 	}

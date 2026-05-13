@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -11,7 +12,7 @@ import (
 	"github.com/eddiecarpenter/ocs-testbench/internal/api"
 )
 
-// registerExecutionTools registers all 9 execution control tools.
+// registerExecutionTools registers all 10 execution control tools.
 func registerExecutionTools(s *server.MCPServer, srv *Server) {
 	// start_execution — write, non-destructive
 	s.AddTool(
@@ -137,6 +138,25 @@ func registerExecutionTools(s *server.MCPServer, srv *Server) {
 		srv.handleApplyContextOverride,
 	)
 
+	// wait_execution — read-only, blocking
+	s.AddTool(
+		mcp.NewTool("wait_execution",
+			mcp.WithDescription("Block until an execution session reaches a terminal state (success, error, terminated) "+
+				"or the timeout expires. Returns the final execution detail. "+
+				"Use after start_execution in continuous mode to avoid polling."),
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithString("session_id",
+				mcp.Required(),
+				mcp.Description("Session ID of the execution to wait for."),
+			),
+			mcp.WithNumber("timeout_seconds",
+				mcp.Description("Maximum seconds to wait before returning (default 120, max 600)."),
+			),
+		),
+		srv.handleWaitExecution,
+	)
+
 	// apply_execution_payload_override — write, non-destructive
 	s.AddTool(
 		mcp.NewTool("apply_execution_payload_override",
@@ -223,14 +243,14 @@ func (srv *Server) handleStartExecution(ctx context.Context, req mcp.CallToolReq
 // handleListExecutions lists all execution sessions.
 func (srv *Server) handleListExecutions(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if srv.execEngine == nil {
-		return mcp.NewToolResultJSON([]executionSummaryMCPJSON{})
+		return mcp.NewToolResultJSON(map[string]any{"executions": []executionSummaryMCPJSON{}})
 	}
 	sessions := srv.execEngine.List(ctx)
 	out := make([]executionSummaryMCPJSON, len(sessions))
 	for i, s := range sessions {
 		out[i] = toExecutionSummaryMCP(s)
 	}
-	return mcp.NewToolResultJSON(out)
+	return mcp.NewToolResultJSON(map[string]any{"executions": out})
 }
 
 // handleGetExecution gets the current state of an execution.
@@ -397,4 +417,54 @@ func (srv *Server) handleApplyPayloadOverride(ctx context.Context, req mcp.CallT
 		"sessionId": sessionID,
 		"variables": variables,
 	})
+}
+
+// handleWaitExecution blocks until the execution session reaches a terminal
+// state (success, error, terminated) or the timeout expires, then returns
+// the final execution detail. This avoids the need to poll get_execution.
+func (srv *Server) handleWaitExecution(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if srv.execEngine == nil {
+		return mcp.NewToolResultError("execution engine not available"), nil
+	}
+	sessionID, err := req.RequireString("session_id")
+	if err != nil {
+		return mcp.NewToolResultError("session_id is required"), nil
+	}
+
+	timeoutSecs := req.GetFloat("timeout_seconds", 120)
+	if timeoutSecs <= 0 || timeoutSecs > 600 {
+		timeoutSecs = 120
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSecs)*time.Second)
+	defer cancel()
+
+	events, subErr := srv.execEngine.Subscribe(waitCtx, sessionID)
+	if subErr != nil {
+		if errors.Is(subErr, api.ErrSessionNotFound) {
+			return mcp.NewToolResultError(fmt.Sprintf("session %q not found", sessionID)), nil
+		}
+		return mcp.NewToolResultError(fmt.Sprintf("subscribe failed: %v", subErr)), nil
+	}
+
+	// Drain events until the channel closes (terminal state) or timeout fires.
+	for range events {
+	}
+
+	// Context deadline exceeded — session did not reach a terminal state in time.
+	if waitCtx.Err() != nil {
+		return mcp.NewToolResultError(fmt.Sprintf(
+			"session %q did not complete within %.0f seconds", sessionID, timeoutSecs,
+		)), nil
+	}
+
+	// Session is terminal — return final detail.
+	detail, detailErr := srv.execEngine.Detail(ctx, sessionID)
+	if detailErr != nil {
+		if errors.Is(detailErr, api.ErrSessionNotFound) {
+			return mcp.NewToolResultError(fmt.Sprintf("session %q not found", sessionID)), nil
+		}
+		return mcp.NewToolResultError(fmt.Sprintf("get execution detail failed: %v", detailErr)), nil
+	}
+	return mcp.NewToolResultJSON(detail)
 }
