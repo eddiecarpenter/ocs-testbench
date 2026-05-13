@@ -265,7 +265,7 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
     }));
   },
 
-  approveOnce(_callId: string) {
+  approveOnce(_callId: string) { // eslint-disable-line @typescript-eslint/no-unused-vars
     // Clear the prompt; the caller resumes the stream.
     set({ pendingPrompt: null, streaming: true });
   },
