@@ -131,7 +131,7 @@ func newExecFixture(t *testing.T) *execFixture {
 	require.NoError(t, err)
 
 	exec := &fakeExecutionEngine{}
-	r := api.Router(s, nil, exec, nil, nil, "test")
+	r := api.Router(s, nil, exec, nil, nil, nil, nil, "test")
 	return &execFixture{
 		s:      s,
 		exec:   exec,
@@ -400,7 +400,7 @@ func TestGetExecution_NotFound_Returns404(t *testing.T) {
 // execution endpoints return 503 when no engine is wired.
 func TestExecutionEndpoints_NilEngine_Returns503(t *testing.T) {
 	s := store.NewTestStore()
-	r := api.Router(s, nil, nil, nil, nil, "test")
+	r := api.Router(s, nil, nil, nil, nil, nil, nil, "test")
 
 	paths := []struct {
 		method string

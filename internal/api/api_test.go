@@ -20,7 +20,7 @@ import (
 // helper.
 func newTestRouter(t *testing.T) http.Handler {
 	t.Helper()
-	return api.Router(store.NewTestStore(), nil, nil, nil, nil, "test")
+	return api.Router(store.NewTestStore(), nil, nil, nil, nil, nil, nil, "test")
 }
 
 // TestRouter_AC1_AllRoutesRegistered verifies that the router accepts

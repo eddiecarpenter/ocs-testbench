@@ -9,7 +9,10 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+
+	internalaiai "github.com/eddiecarpenter/ocs-testbench/internal/ai"
 )
 
 // DecodeJSONTestHandler returns an http.Handler that calls the internal
@@ -38,3 +41,15 @@ func UUIDStr(id pgtype.UUID) string {
 // BytesReader wraps a *bytes.Buffer as an io.Reader suitable for
 // json.NewDecoder. Provided to reduce boilerplate in test assertions.
 func BytesReader(b *bytes.Buffer) *bytes.Buffer { return b }
+
+// PermissionTestRouter returns a minimal chi.Router with only the
+// POST /v1/ai/chat/permission endpoint wired. Used by ai_permission_test.go
+// to test the permission handler in isolation before Router gains the
+// sessions parameter in Task 5.
+func PermissionTestRouter(sessions *internalaiai.SessionManager) http.Handler {
+	r := chi.NewRouter()
+	r.Route("/v1", func(v1 chi.Router) {
+		mountAIPermission(v1, sessions)
+	})
+	return r
+}
