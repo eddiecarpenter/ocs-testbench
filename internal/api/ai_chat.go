@@ -126,9 +126,9 @@ func handleAIChat(w http.ResponseWriter, r *http.Request, agent *internalaiai.Ag
 		// operator, then block until the decision arrives or the context
 		// is cancelled.
 		_ = emit("permission_required", permissionRequiredData{
-			CallID:      callID,
-			ToolName:    toolName,
-			Tier:        tier,
+			CallID:   callID,
+			ToolName: toolName,
+			Tier:     tier,
 		})
 		select {
 		case <-r.Context().Done():

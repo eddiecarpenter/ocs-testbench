@@ -64,6 +64,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/eddiecarpenter/ocs-testbench/db"
+	"github.com/eddiecarpenter/ocs-testbench/internal/ai"
 	"github.com/eddiecarpenter/ocs-testbench/internal/api"
 	"github.com/eddiecarpenter/ocs-testbench/internal/appl"
 	"github.com/eddiecarpenter/ocs-testbench/internal/baseconfig"
@@ -72,7 +73,6 @@ import (
 	"github.com/eddiecarpenter/ocs-testbench/internal/diameter/messaging"
 	"github.com/eddiecarpenter/ocs-testbench/internal/diameter/protocol"
 	"github.com/eddiecarpenter/ocs-testbench/internal/logging"
-	"github.com/eddiecarpenter/ocs-testbench/internal/ai"
 	internalmcp "github.com/eddiecarpenter/ocs-testbench/internal/mcp"
 	"github.com/eddiecarpenter/ocs-testbench/internal/store"
 	tmpl "github.com/eddiecarpenter/ocs-testbench/internal/template"

@@ -63,8 +63,8 @@ func toolCallResponse(calls ...ai.ToolCall) ai.CompletionResponse {
 
 // mockMCPCaller provides controllable ListTools and CallTool responses.
 type mockMCPCaller struct {
-	tools     []mcp.Tool
-	callError error
+	tools      []mcp.Tool
+	callError  error
 	callResult *mcp.CallToolResult
 }
 
@@ -177,8 +177,8 @@ func TestAgent_Run_OneToolCall(t *testing.T) {
 	llm := &mockLLMClient{responses: []ai.CompletionResponse{
 		// First turn: LLM requests list_peers.
 		toolCallResponse(ai.ToolCall{
-			ID:   "tc-1",
-			Type: "function",
+			ID:       "tc-1",
+			Type:     "function",
 			Function: ai.FunctionCall{Name: "list_peers", Arguments: `{}`},
 		}),
 		// Second turn: LLM produces final text.
