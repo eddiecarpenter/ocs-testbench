@@ -739,6 +739,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/config/ai": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get current AI assistant configuration
+         * @description Returns the configured LLM endpoint, model, and a boolean indicating
+         *     whether an API key is set. The API key value is never returned.
+         *     When the AI assistant was not configured at startup, returns a
+         *     zero-value response (empty endpoint/model, apiKeySet false).
+         */
+        get: operations["getAIConfig"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update AI assistant configuration and hot-reload the LLM client
+         * @description Replaces the LLM endpoint, model, and optionally the API key.
+         *     Leave `apiKey` blank to preserve the existing key. The LLM client
+         *     is hot-swapped under a mutex — in-flight requests continue with the
+         *     old client; subsequent requests use the new one.
+         *
+         *     Returns 503 when the binary was started without any LLM endpoint
+         *     configured — a restart with a valid endpoint is required in that case.
+         */
+        patch: operations["updateAIConfig"];
+        trace?: never;
+    };
+    "/config/ai/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List available models from the configured LLM endpoint
+         * @description Proxies `GET {endpoint}/v1/models` (OpenAI-compatible) server-side
+         *     with a 5-second timeout. Returns the list of model IDs. This avoids
+         *     CORS issues in the browser and works for any OpenAI-compatible endpoint
+         *     (LM Studio, Ollama, OpenAI, etc.).
+         *
+         *     Returns 503 when the AI assistant is not configured.
+         *     Returns 502 when the upstream endpoint is unreachable or returns an error.
+         */
+        get: operations["listAIModels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1624,6 +1683,35 @@ export interface components {
             /** @example PT2M */
             bucketSize?: string;
             points: components["schemas"]["ResponseTimePoint"][];
+        };
+        /** @description Current AI assistant configuration (read-only view; API key never exposed). */
+        AIConfig: {
+            /**
+             * @description LLM API base URL (e.g. https://api.openai.com)
+             * @example https://api.openai.com
+             * @example http://localhost:1234
+             */
+            endpoint: string;
+            /**
+             * @description Model identifier to use for completions
+             * @example gpt-4o
+             * @example llama3
+             */
+            model: string;
+            /** @description True when an API key is configured; the key value is never returned. */
+            apiKeySet: boolean;
+        };
+        /** @description Input body for PATCH /config/ai. */
+        AIConfigInput: {
+            /** @description LLM API base URL. Must be non-empty. */
+            endpoint?: string;
+            /** @description Model identifier to use for completions. */
+            model?: string;
+            /**
+             * @description API key for the LLM endpoint. Leave blank to keep the existing key.
+             *     Send a new value to replace it.
+             */
+            apiKey?: string;
         };
     };
     responses: {
@@ -2754,6 +2842,101 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResponseTimeSeries"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getAIConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current AI configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIConfig"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    updateAIConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AIConfigInput"];
+            };
+        };
+        responses: {
+            /** @description Updated AI configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIConfig"];
+                };
+            };
+            400: components["responses"]["ValidationProblem"];
+            /** @description AI assistant not configured at startup — restart required */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listAIModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of model IDs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
+                };
+            };
+            /** @description Upstream model endpoint returned an error or was unreachable */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description AI assistant not configured */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             default: components["responses"]["Problem"];
