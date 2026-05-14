@@ -1,12 +1,14 @@
 # Dev Session Recovery — Feature #209
 
 ## Completed Tasks
-_(none yet — first checkpoint before task 1 commit)_
+- #210 — Agent hot-reload: add Reconfigure() and GetConfig() to Agent  (commit 75c1354)
 
 ## Current Task
-Task 1 of 5: #210 — Agent hot-reload: add Reconfigure() and GetConfig() to Agent
+Task 2 of 5: #211 — Backend config handlers: GET/PATCH /config/ai and GET /config/ai/models
 Progress: Implementation complete, awaiting commit
 Files in flight:
-  - internal/ai/agent.go (mutex + Reconfigure + GetConfig + llmClient helper)
-  - internal/ai/client.go (MakeAIConfigWithKey test helper)
-  - internal/ai/agent_test.go (tests for Reconfigure, GetConfig)
+  - internal/ai/agent.go (GetRawAPIKey helper)
+  - internal/api/ai_config.go (new — three handlers)
+  - internal/api/api.go (mountAIConfig wired)
+  - internal/api/export_test.go (MountAIConfig exported)
+  - internal/api/ai_config_test.go (new — handler tests)
