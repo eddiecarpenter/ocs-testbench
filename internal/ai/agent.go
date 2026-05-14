@@ -87,6 +87,18 @@ func (a *Agent) GetConfig() baseconfig.AIConfig {
 	return cfg
 }
 
+// GetRawAPIKey returns the unmasked API key under a read lock.
+// This is intentionally a separate method from GetConfig so callers
+// that only need to check whether a key is set use GetConfig (safe for
+// logging/serialisation), while callers that must forward the key to an
+// upstream service (e.g. the /config/ai/models proxy) call this method
+// explicitly — making the usage auditable.
+func (a *Agent) GetRawAPIKey() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.cfg.APIKey
+}
+
 // NewAgentWithClient creates a testable Agent with a custom LLMClient.
 // The mcpBaseURL is used to construct the real mcp-go client for MCP calls;
 // pass an httptest.Server URL for end-to-end tests that need a real MCP server.

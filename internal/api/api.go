@@ -96,6 +96,7 @@ func Router(s store.Store, mgr PeerManager, exec ExecutionEngine, dictArg templa
 		mountSSE(v1, s, mgr, exec)
 		mountAIChat(v1, agent, sessions)
 		mountAIPermission(v1, sessions)
+		mountAIConfig(v1, agent)
 		mountVersion(v1, version)
 	})
 
