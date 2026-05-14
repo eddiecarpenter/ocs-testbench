@@ -95,6 +95,15 @@ type Peer struct {
 	Host string `yaml:"host"`
 }
 
+// AIConfig is the AI assistant configuration block. When Endpoint is
+// empty the AI assistant feature is disabled — the chat endpoint returns
+// 503 and no LLM client is created.
+type AIConfig struct {
+	Endpoint string `yaml:"endpoint"` // e.g. "https://api.openai.com"
+	Model    string `yaml:"model"`    // e.g. "gpt-4o"
+	APIKey   string `yaml:"api_key"`  // plaintext; operators use env-var injection
+}
+
 // Config is the testbench's full runtime configuration. It embeds the
 // BaseConfig cross-cutting fields and adds the HTTP server, frontend,
 // peer-list, and the headless-mode flag.
@@ -104,6 +113,7 @@ type Config struct {
 	Frontend   FrontendConfig `yaml:"frontend"`
 	Headless   bool           `yaml:"headless"`
 	Peers      []Peer         `yaml:"peers"`
+	AI         AIConfig       `yaml:"ai"`
 }
 
 // Load reads a YAML configuration file, applies defaults, validates
@@ -181,6 +191,11 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Frontend.EmbeddedAssetsPath == "" {
 		c.Frontend.EmbeddedAssetsPath = "web/dist"
+	}
+	// AI config defaults — only applied when an endpoint is set so that
+	// deployments without AI config are not affected.
+	if c.AI.Endpoint != "" && c.AI.Model == "" {
+		c.AI.Model = "gpt-4o"
 	}
 }
 

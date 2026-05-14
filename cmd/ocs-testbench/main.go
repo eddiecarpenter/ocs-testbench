@@ -72,6 +72,7 @@ import (
 	"github.com/eddiecarpenter/ocs-testbench/internal/diameter/messaging"
 	"github.com/eddiecarpenter/ocs-testbench/internal/diameter/protocol"
 	"github.com/eddiecarpenter/ocs-testbench/internal/logging"
+	"github.com/eddiecarpenter/ocs-testbench/internal/ai"
 	internalmcp "github.com/eddiecarpenter/ocs-testbench/internal/mcp"
 	"github.com/eddiecarpenter/ocs-testbench/internal/store"
 	tmpl "github.com/eddiecarpenter/ocs-testbench/internal/template"
@@ -245,7 +246,6 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 
 	dictAdapter := tmpl.NewDictAdapter(dict.Default)
 	execEngine := api.NewSessionManager(s, dmgr, behaviour, dictAdapter)
-	apiRouter := api.Router(s, dmgr, execEngine, dictAdapter, dict.Default, Version)
 
 	// Build the MCP server handler and mount it at /mcp alongside the
 	// REST API. The MCP server is a thin adapter over the same
@@ -253,6 +253,26 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 	// dict.Default is the loaded Diameter AVP dictionary; it is passed so
 	// the list_avps tool can enumerate all known AVPs.
 	mcpHandler := internalmcp.NewServer(s, dmgr, execEngine, dictAdapter, dict.Default, cfg)
+
+	// Bind the listener before constructing the AI agent so the agent
+	// knows the real port when cfg.Server.Addr ends in :0.
+	ln, err := net.Listen("tcp", cfg.Server.Addr)
+	if err != nil {
+		return fmt.Errorf("ocs-testbench: listen %q: %w", cfg.Server.Addr, err)
+	}
+	if addrCh != nil {
+		addrCh <- ln.Addr().String()
+	}
+
+	// Construct the AI agent. NewAgent returns nil when the LLM endpoint is
+	// not configured — the Router's nil guard returns 503 for AI endpoints.
+	// The agent calls MCP tools via the HTTP server's /mcp path, so the
+	// mcpBaseURL must resolve to the bound address.
+	mcpBaseURL := "http://" + ln.Addr().String()
+	aiAgent := ai.NewAgent(cfg.AI, mcpBaseURL)
+	aiSessions := ai.NewSessionManager()
+
+	apiRouter := api.Router(s, dmgr, execEngine, dictAdapter, dict.Default, aiAgent, aiSessions, Version)
 
 	// Mount the API router at /api. All routes within api.Router are
 	// relative to the router's root; the Mount prefix adds /api.
@@ -269,14 +289,6 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 		ReadTimeout:  cfg.Server.ReadTimeout,
 		WriteTimeout: cfg.Server.WriteTimeout,
 		IdleTimeout:  cfg.Server.IdleTimeout,
-	}
-
-	ln, err := net.Listen("tcp", cfg.Server.Addr)
-	if err != nil {
-		return fmt.Errorf("ocs-testbench: listen %q: %w", cfg.Server.Addr, err)
-	}
-	if addrCh != nil {
-		addrCh <- ln.Addr().String()
 	}
 	logging.Info("http server listening", "addr", ln.Addr().String())
 
@@ -316,6 +328,12 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 	}
 	lc.RegisterShutdown("http-server", func(shutCtx context.Context) error {
 		return server.Shutdown(shutCtx)
+	})
+	// AI session manager — stop background TTL cleanup goroutine after the
+	// HTTP server drains (registered after http-server so it drains first).
+	lc.RegisterShutdown("ai-sessions", func(context.Context) error {
+		aiSessions.Stop()
+		return nil
 	})
 
 	if !cfg.Headless {

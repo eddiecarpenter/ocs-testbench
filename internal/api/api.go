@@ -6,6 +6,7 @@ import (
 	"github.com/fiorix/go-diameter/v4/diam/dict"
 	"github.com/go-chi/chi/v5"
 
+	"github.com/eddiecarpenter/ocs-testbench/internal/ai"
 	"github.com/eddiecarpenter/ocs-testbench/internal/diameter"
 	"github.com/eddiecarpenter/ocs-testbench/internal/logging"
 	"github.com/eddiecarpenter/ocs-testbench/internal/store"
@@ -56,10 +57,15 @@ type PeerManager interface {
 // of newly created custom dictionaries into the live Diameter stack
 // without a server restart. Pass nil in tests to skip live parser calls.
 //
+// agent may be nil — if nil, the AI chat endpoint returns 503. Pass nil
+// when the LLM endpoint is not configured (ai.NewAgent returns nil for
+// empty endpoints). sessions must accompany a non-nil agent; it is safe
+// to pass nil when agent is nil.
+//
 // The caller is responsible for mounting the returned router onto an
 // outer chi.Router (typically in cmd/ocs-testbench/main.go) under the
 // /api prefix.
-func Router(s store.Store, mgr PeerManager, exec ExecutionEngine, dictArg template.Dictionary, parser *dict.Parser, version string) chi.Router {
+func Router(s store.Store, mgr PeerManager, exec ExecutionEngine, dictArg template.Dictionary, parser *dict.Parser, agent *ai.Agent, sessions *ai.SessionManager, version string) chi.Router {
 	r := chi.NewRouter()
 
 	// Middleware stack — innermost to outermost:
@@ -88,7 +94,8 @@ func Router(s store.Store, mgr PeerManager, exec ExecutionEngine, dictArg templa
 		mountMetrics(v1, exec)
 		mountExpressions(v1)
 		mountSSE(v1, s, mgr, exec)
-		mountAIChat(v1)
+		mountAIChat(v1, agent, sessions)
+		mountAIPermission(v1, sessions)
 		mountVersion(v1, version)
 	})
 

@@ -4,18 +4,25 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	internalaiai "github.com/eddiecarpenter/ocs-testbench/internal/ai"
 )
 
 // mountAIChat registers the AI assistant chat endpoint.
 //
-// POST /ai/chat — scripted SSE stream simulating an agentic loop with
-// thinking, token streaming, tool calls, and permission prompts.  This
-// is a development stub; Feature 3 replaces it with a real LLM runtime.
-func mountAIChat(r chi.Router) {
-	r.Post("/ai/chat", handleAIChat)
+// POST /ai/chat — real agentic SSE stream that calls the LLM, executes
+// MCP tools on its behalf, and streams events to the browser. When agent
+// is nil (LLM not configured) the endpoint returns 503.
+func mountAIChat(r chi.Router, agent *internalaiai.Agent, sessions *internalaiai.SessionManager) {
+	r.Post("/ai/chat", func(w http.ResponseWriter, req *http.Request) {
+		if agent == nil || sessions == nil {
+			respondError(w, http.StatusServiceUnavailable, CodeInternalError, "AI assistant not configured")
+			return
+		}
+		handleAIChat(w, req, agent, sessions)
+	})
 }
 
 // chatRequest is the request body for POST /ai/chat.
@@ -34,25 +41,6 @@ type chatSSEEvent struct {
 	Data any    `json:"data"`
 }
 
-// tokenData carries a single streamed text chunk.
-type tokenData struct {
-	Chunk string `json:"chunk"`
-}
-
-// thinkingData carries planning block content.
-type thinkingData struct {
-	Content string `json:"content"`
-}
-
-// toolCallData carries a tool invocation and its result.
-type toolCallData struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Tier        string `json:"tier"`
-	Result      any    `json:"result"`
-}
-
 // permissionRequiredData is emitted when a write/destructive tool needs approval.
 type permissionRequiredData struct {
 	CallID      string `json:"callId"`
@@ -63,29 +51,43 @@ type permissionRequiredData struct {
 
 // handleAIChat implements POST /v1/ai/chat.
 //
-// It streams a scripted SSE sequence that exercises all three permission
-// tiers so the frontend guardrail can be developed without a live LLM.
-//
-// Scripted sequence:
-//  1. thinking — "Analysing request, selecting tools…"
-//  2. token stream — introductory assistant text (5 chunks)
-//  3. tool_call — list_peers (read-only tier, result inline)
-//  4. tool_call — duplicate_scenario (write tier) → permission_required
-//  5. token stream — continuation text after approval (4 chunks)
-//  6. tool_call — start_execution (write tier, running state)
-//  7. done
-//
-// Stream delay: 150 ms between token chunks to simulate real streaming.
-func handleAIChat(w http.ResponseWriter, r *http.Request) {
-	// Decode and discard the request body — the mock doesn't use it, but
-	// we read it to respect the HTTP contract (avoid broken-pipe on the client).
+// It reads the X-Session-ID header (generating one if absent), loads the
+// session's conversation history, and invokes the agentic loop via
+// Agent.Run. SSE events (token, tool_call, permission_required, done,
+// error) are streamed to the client as the loop progresses. On return
+// the updated history is persisted back to the session.
+func handleAIChat(w http.ResponseWriter, r *http.Request, agent *internalaiai.Agent, sessions *internalaiai.SessionManager) {
+	// Resolve session ID — generate one if the client did not supply it.
+	sessionID := r.Header.Get("X-Session-ID")
+	if sessionID == "" {
+		sessionID = internalaiai.GenerateSessionID()
+	}
+
+	// Load (or create) the session and get the current history.
+	session := sessions.GetOrCreate(sessionID)
+
+	// Decode the request body to extract the new user message.
 	var req chatRequest
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondInvalidRequest(w, "invalid request body: "+err.Error())
+		return
+	}
+
+	// Convert the request messages to ai.Message and append to history.
+	// The caller sends only the new turn; history already carries prior turns.
+	history := append([]internalaiai.Message(nil), session.History...)
+	for _, m := range req.Messages {
+		history = append(history, internalaiai.Message{
+			Role:    m.Role,
+			Content: m.Content,
+		})
+	}
 
 	// Set SSE headers — from this point on we are streaming.
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Session-ID", sessionID)
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -93,141 +95,60 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	emit := func(evtType string, data any) bool {
+	// emit writes a single SSE event to the response writer and flushes.
+	emit := func(evtType string, data any) error {
 		evt := chatSSEEvent{Type: evtType, Data: data}
 		b, err := json.Marshal(evt)
 		if err != nil {
-			return false
+			return err
 		}
-		fmt.Fprintf(w, "data: %s\n\n", b)
+		if _, werr := fmt.Fprintf(w, "data: %s\n\n", b); werr != nil {
+			return werr
+		}
 		flusher.Flush()
-		return true
+		return nil
 	}
 
-	delay := func() bool {
+	// Create a per-call PermChan so the permission endpoint can deliver
+	// decisions to this handler goroutine. Buffered(1) so the HTTP handler
+	// for the permission endpoint never blocks.
+	permChan := make(chan internalaiai.PermissionDecision, 1)
+	session.PermChan = permChan
+
+	// perm implements PermissionFunc: checks AllowAlways first, then waits
+	// for a decision from the permission endpoint (via PermChan), then
+	// registers allow_always decisions for the session lifetime.
+	perm := func(callID, toolName, tier string) bool {
+		if session.AllowAlways[toolName] {
+			return true
+		}
+		// Emit a permission_required event so the frontend can prompt the
+		// operator, then block until the decision arrives or the context
+		// is cancelled.
+		_ = emit("permission_required", permissionRequiredData{
+			CallID:      callID,
+			ToolName:    toolName,
+			Tier:        tier,
+		})
 		select {
 		case <-r.Context().Done():
 			return false
-		case <-time.After(150 * time.Millisecond):
-			return true
+		case decision := <-permChan:
+			if decision.Decision == "allow_always" {
+				session.AllowAlways[toolName] = true
+			}
+			return decision.Decision == "allow_once" || decision.Decision == "allow_always"
 		}
 	}
 
-	// 1 — thinking block
-	if !emit("thinking", thinkingData{Content: "Analysing request, selecting tools…"}) {
-		return
-	}
-	if !delay() {
-		return
-	}
+	// Run the agentic loop — this blocks until the LLM produces a final
+	// response (no tool_calls), the context is cancelled, or a fatal error
+	// occurs. The updated history is returned for persistence.
+	updatedHistory, _ := agent.Run(r.Context(), history, emit, perm)
 
-	// 2 — introductory token stream
-	introTokens := []string{
-		"I'll help you with that. ",
-		"Let me first check the connected peers ",
-		"to understand the current topology, ",
-		"then duplicate the scenario ",
-		"and start an execution for you.",
-	}
-	for _, chunk := range introTokens {
-		if !emit("token", tokenData{Chunk: chunk}) {
-			return
-		}
-		if !delay() {
-			return
-		}
-	}
+	// Clear the per-call PermChan so subsequent calls get a fresh channel.
+	session.PermChan = nil
 
-	// 3 — read-only tool call: list_peers (no permission prompt)
-	if !emit("tool_call", toolCallData{
-		ID:          "tc-list-peers",
-		Name:        "list_peers",
-		Description: "List all registered Diameter peers and their connection state",
-		Tier:        "readonly",
-		Result:      []map[string]string{{"name": "ocs-01", "state": "connected"}, {"name": "ocs-02", "state": "disconnected"}},
-	}) {
-		return
-	}
-	if !delay() {
-		return
-	}
-
-	// 4 — write tool call: duplicate_scenario → needs permission prompt
-	if !emit("permission_required", permissionRequiredData{
-		CallID:      "tc-dup-scenario",
-		ToolName:    "duplicate_scenario",
-		Description: "Create a copy of scenario 'Gy — data single MSCC'",
-		Tier:        "write",
-	}) {
-		return
-	}
-	// Stream pauses here; the client resumes it after the user approves or
-	// denies.  For the scripted mock, we continue automatically after a
-	// short pause to exercise the continuation path.
-	if !delay() {
-		return
-	}
-	if !delay() {
-		return
-	}
-
-	if !emit("tool_call", toolCallData{
-		ID:          "tc-dup-scenario",
-		Name:        "duplicate_scenario",
-		Description: "Create a copy of scenario 'Gy — data single MSCC'",
-		Tier:        "write",
-		Result:      map[string]string{"id": "scn-copy-001", "name": "Copy of Gy — data single MSCC"},
-	}) {
-		return
-	}
-	if !delay() {
-		return
-	}
-
-	// 5 — continuation tokens
-	continuationTokens := []string{
-		"\n\nScenario duplicated. ",
-		"Now starting an execution ",
-		"against peer ocs-01.",
-	}
-	for _, chunk := range continuationTokens {
-		if !emit("token", tokenData{Chunk: chunk}) {
-			return
-		}
-		if !delay() {
-			return
-		}
-	}
-
-	// 6 — write tool call: start_execution (running state)
-	if !emit("permission_required", permissionRequiredData{
-		CallID:      "tc-start-exec",
-		ToolName:    "start_execution",
-		Description: "Run the copied scenario against peer ocs-01 (1 repeat, interactive mode)",
-		Tier:        "write",
-	}) {
-		return
-	}
-	if !delay() {
-		return
-	}
-	if !delay() {
-		return
-	}
-
-	if !emit("tool_call", toolCallData{
-		ID:          "tc-start-exec",
-		Name:        "start_execution",
-		Description: "Run the copied scenario against peer ocs-01 (1 repeat, interactive mode)",
-		Tier:        "write",
-		Result:      map[string]string{"sessionId": "session-mock-001", "state": "running"},
-	}) {
-		return
-	}
-	if !delay() {
-		return
-	}
-
-	// 7 — done
-	emit("done", map[string]any{}) //nolint:errcheck
+	// Persist the updated history back to the session.
+	sessions.UpdateHistory(sessionID, updatedHistory)
 }

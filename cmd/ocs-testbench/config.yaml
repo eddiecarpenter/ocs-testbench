@@ -47,3 +47,23 @@ headless: false
 # Diameter peer list. Empty in this Feature; later Features wiring
 # the Diameter stack will populate the schema with concrete fields.
 peers: []
+
+# AI assistant configuration. Leave endpoint empty (or omit this block)
+# to disable the AI assistant feature — the chat endpoint will return 503.
+#
+# OpenAI example:
+#   ai:
+#     endpoint: https://api.openai.com
+#     model: gpt-4o
+#     api_key: sk-...
+#
+# Local Ollama example:
+#   ai:
+#     endpoint: http://localhost:11434
+#     model: llama3
+#     api_key: ""
+#
+# ai:
+#   endpoint: ""
+#   model: ""
+#   api_key: ""
