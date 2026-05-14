@@ -369,6 +369,50 @@ func TestNewAgent_NilOnEmptyEndpoint(t *testing.T) {
 	assert.Nil(t, from_testbench, "NewAgent must return nil for empty endpoint")
 }
 
+// TestAgent_Reconfigure_ValidEndpoint verifies that Reconfigure returns nil
+// for a valid endpoint and that GetConfig reflects the new endpoint.
+func TestAgent_Reconfigure_ValidEndpoint(t *testing.T) {
+	a := ai.NewAgentWithClient(&mockLLMClient{}, "http://localhost:8080")
+	require.NotNil(t, a)
+
+	cfg := ai.MakeAIConfig("http://newllm.example.com")
+	err := a.Reconfigure(cfg)
+	assert.NoError(t, err, "Reconfigure with valid endpoint must return nil")
+
+	got := a.GetConfig()
+	assert.Equal(t, "http://newllm.example.com", got.Endpoint, "GetConfig must return updated endpoint")
+}
+
+// TestAgent_Reconfigure_EmptyEndpoint verifies that Reconfigure returns an
+// error when given an empty endpoint.
+func TestAgent_Reconfigure_EmptyEndpoint(t *testing.T) {
+	a := ai.NewAgentWithClient(&mockLLMClient{}, "http://localhost:8080")
+	require.NotNil(t, a)
+
+	err := a.Reconfigure(ai.MakeAIConfig(""))
+	assert.Error(t, err, "Reconfigure with empty endpoint must return an error")
+}
+
+// TestAgent_GetConfig_MasksAPIKey verifies that GetConfig returns "••••"
+// when the API key is non-empty, and an empty string when unset.
+func TestAgent_GetConfig_MasksAPIKey(t *testing.T) {
+	t.Run("key set", func(t *testing.T) {
+		a := ai.NewAgent(ai.MakeAIConfigWithKey("http://llm.example.com", "super-secret"), "http://localhost:8080")
+		require.NotNil(t, a)
+
+		got := a.GetConfig()
+		assert.Equal(t, "••••", got.APIKey, "GetConfig must mask a non-empty API key")
+	})
+
+	t.Run("key empty", func(t *testing.T) {
+		a := ai.NewAgentWithClient(&mockLLMClient{}, "http://localhost:8080")
+		require.NotNil(t, a)
+
+		got := a.GetConfig()
+		assert.Equal(t, "", got.APIKey, "GetConfig must return empty string when no key is set")
+	})
+}
+
 // TestNewAgentWithClient_NonNil verifies that NewAgentWithClient returns
 // a non-nil Agent for valid inputs.
 func TestNewAgentWithClient_NonNil(t *testing.T) {

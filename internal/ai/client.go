@@ -51,6 +51,12 @@ func MakeAIConfig(endpoint string) baseconfig.AIConfig {
 	return baseconfig.AIConfig{Endpoint: endpoint, Model: "gpt-4o"}
 }
 
+// MakeAIConfigWithKey builds an AIConfig with an endpoint and API key.
+// Intended for tests that need to verify key masking behaviour.
+func MakeAIConfigWithKey(endpoint, apiKey string) baseconfig.AIConfig {
+	return baseconfig.AIConfig{Endpoint: endpoint, Model: "gpt-4o", APIKey: apiKey}
+}
+
 // NewHTTPLLMClient constructs a production LLMClient from the given
 // AIConfig. Returns an error when cfg.Endpoint is empty — an empty
 // endpoint is treated as disabled, not as a valid configuration.

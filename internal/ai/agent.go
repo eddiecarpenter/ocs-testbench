@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	mcpclient "github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -26,9 +27,13 @@ type mcpCaller interface {
 // produces a final text response with no further tool calls.
 //
 // Agent is safe for concurrent use — multiple goroutines may call Run
-// simultaneously. Agent holds no mutable per-run state.
+// simultaneously. The mu/llm/cfg fields are guarded by mu; all other
+// fields are immutable after construction.
 type Agent struct {
-	llm    LLMClient
+	mu  sync.RWMutex
+	llm LLMClient
+	cfg baseconfig.AIConfig
+
 	mcpURL string // full URL for the MCP endpoint, e.g. "http://host/mcp"
 	prompt string
 	// testMCP is non-nil only in tests; overrides the real mcp-go client.
@@ -47,9 +52,39 @@ func NewAgent(cfg baseconfig.AIConfig, mcpBaseURL string) *Agent {
 	}
 	return &Agent{
 		llm:    llm,
+		cfg:    cfg,
 		mcpURL: mcpBaseURL + "/mcp",
 		prompt: SystemPrompt,
 	}
+}
+
+// Reconfigure atomically swaps the LLM client with one built from cfg.
+// In-flight Run calls continue with the old client; subsequent calls use
+// the new one. Returns an error when cfg.Endpoint is empty or the new
+// client cannot be constructed.
+func (a *Agent) Reconfigure(cfg baseconfig.AIConfig) error {
+	newLLM, err := NewHTTPLLMClient(cfg)
+	if err != nil {
+		return fmt.Errorf("ai: reconfigure: %w", err)
+	}
+	a.mu.Lock()
+	a.llm = newLLM
+	a.cfg = cfg
+	a.mu.Unlock()
+	return nil
+}
+
+// GetConfig returns a copy of the current AIConfig with the API key masked.
+// When the API key is non-empty, APIKey is replaced with "••••" so the
+// caller can signal to the UI that a key is set without exposing it.
+func (a *Agent) GetConfig() baseconfig.AIConfig {
+	a.mu.RLock()
+	cfg := a.cfg
+	a.mu.RUnlock()
+	if cfg.APIKey != "" {
+		cfg.APIKey = "••••"
+	}
+	return cfg
 }
 
 // NewAgentWithClient creates a testable Agent with a custom LLMClient.
@@ -72,6 +107,14 @@ func newAgentWithMock(llmClient LLMClient, caller mcpCaller) *Agent {
 		prompt:  SystemPrompt,
 		testMCP: caller,
 	}
+}
+
+// llmClient returns the current LLM client under a read lock so callers
+// get a stable reference for the duration of a single send.
+func (a *Agent) llmClient() LLMClient {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.llm
 }
 
 // getMCPCaller returns the mcpCaller for a Run. In tests, testMCP is
@@ -159,7 +202,7 @@ func (a *Agent) Run(
 			return updatedHistory, ctx.Err()
 		}
 
-		resp, err := a.llm.Complete(ctx, CompletionRequest{
+		resp, err := a.llmClient().Complete(ctx, CompletionRequest{
 			Messages: messages,
 			Tools:    toolDefs,
 		})
