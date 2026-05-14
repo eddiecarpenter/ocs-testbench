@@ -1,12 +1,9 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -32,7 +29,6 @@ type aiConfigResponse struct {
 	Endpoint  string `json:"endpoint"`
 	Model     string `json:"model"`
 	APIKeySet bool   `json:"apiKeySet"`
-	Thinking  bool   `json:"thinking"`
 }
 
 // aiConfigInput is the request body for PATCH /config/ai.
@@ -41,7 +37,6 @@ type aiConfigInput struct {
 	Endpoint string `json:"endpoint"`
 	Model    string `json:"model"`
 	APIKey   string `json:"apiKey"`
-	Thinking bool   `json:"thinking"`
 }
 
 // getAIConfig implements GET /v1/config/ai.
@@ -58,7 +53,6 @@ func getAIConfig(agent *internalaiai.Agent) http.HandlerFunc {
 			Endpoint:  cfg.Endpoint,
 			Model:     cfg.Model,
 			APIKeySet: cfg.APIKey != "",
-			Thinking:  cfg.Thinking,
 		}
 		respondJSON(w, http.StatusOK, resp)
 	}
@@ -93,7 +87,6 @@ func updateAIConfig(agent *internalaiai.Agent) http.HandlerFunc {
 			Endpoint: input.Endpoint,
 			Model:    input.Model,
 			APIKey:   apiKey,
-			Thinking: input.Thinking,
 		}
 		if err := agent.Reconfigure(newCfg); err != nil {
 			respondError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error())
@@ -105,31 +98,13 @@ func updateAIConfig(agent *internalaiai.Agent) http.HandlerFunc {
 			Endpoint:  updated.Endpoint,
 			Model:     updated.Model,
 			APIKeySet: updated.APIKey != "",
-			Thinking:  updated.Thinking,
 		}
 		respondJSON(w, http.StatusOK, resp)
 	}
 }
 
-// anthropicModels is the fallback model list for api.anthropic.com when the
-// endpoint rejects OAuth Bearer tokens on GET /v1/models (it requires x-api-key).
-var anthropicModels = []string{
-	"claude-opus-4-7",
-	"claude-sonnet-4-6",
-	"claude-haiku-4-5-20251001",
-	"claude-3-5-sonnet-20241022",
-	"claude-3-5-haiku-20241022",
-	"claude-3-opus-20240229",
-}
-
 // listAIModels implements GET /v1/config/ai/models.
-// Proxies {endpoint}/v1/models (OpenAI-compatible) with a 10-second timeout.
-// An optional ?endpoint= query parameter overrides the saved config endpoint,
-// allowing the frontend to fetch models for an endpoint that has not been saved
-// yet (e.g. while the user is editing the provider field).
-// For api.anthropic.com, falls back to a static model list when the upstream
-// rejects the request (the /v1/models endpoint requires x-api-key; OAuth tokens
-// from Claude Code are not accepted there).
+// Proxies {endpoint}/v1/models (OpenAI-compatible) with a 5-second timeout.
 // Returns 503 when agent is nil; 502 when the upstream call fails.
 func listAIModels(agent *internalaiai.Agent) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -140,24 +115,13 @@ func listAIModels(agent *internalaiai.Agent) http.HandlerFunc {
 		}
 
 		cfg := agent.GetConfig()
-
-		// Allow the caller to override endpoint and/or API key without saving
-		// first — useful when the user is testing new credentials in the UI.
-		if override := r.URL.Query().Get("endpoint"); override != "" {
-			cfg.Endpoint = override
-		}
-		apiKey := agent.GetRawAPIKey()
-		if override := r.URL.Query().Get("apiKey"); override != "" {
-			apiKey = override
-		}
-
 		if cfg.Endpoint == "" {
 			respondError(w, http.StatusServiceUnavailable, CodeInternalError,
 				"AI endpoint not configured")
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
 		url := cfg.Endpoint + "/v1/models"
@@ -167,9 +131,9 @@ func listAIModels(agent *internalaiai.Agent) http.HandlerFunc {
 				"failed to build models request: "+err.Error())
 			return
 		}
-		// Delegate header logic to the same helper used by the LLM client.
-		if apiKey != "" {
-			internalaiai.SetAuthHeaders(req, cfg.Endpoint, apiKey)
+		// GetConfig masks the key; GetRawAPIKey provides it for the proxied request.
+		if rawKey := agent.GetRawAPIKey(); rawKey != "" {
+			req.Header.Set("Authorization", "Bearer "+rawKey)
 		}
 
 		resp, err := http.DefaultClient.Do(req)
@@ -181,16 +145,8 @@ func listAIModels(agent *internalaiai.Agent) http.HandlerFunc {
 		defer resp.Body.Close() //nolint:errcheck
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			var buf bytes.Buffer
-			_, _ = buf.ReadFrom(resp.Body)
-			// Anthropic's /v1/models endpoint rejects OAuth Bearer tokens (Claude
-			// Code credentials) with 401 — fall back to the static model list.
-			if strings.Contains(cfg.Endpoint, "anthropic.com") {
-				respondJSON(w, http.StatusOK, anthropicModels)
-				return
-			}
 			respondError(w, http.StatusBadGateway, CodeInternalError,
-				fmt.Sprintf("upstream returned HTTP %d: %s", resp.StatusCode, buf.String()))
+				"upstream models endpoint returned non-2xx status")
 			return
 		}
 
