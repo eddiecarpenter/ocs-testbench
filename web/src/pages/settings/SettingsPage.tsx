@@ -17,6 +17,7 @@ import {
   Skeleton,
   Stack,
   Switch,
+  Table,
   Text,
   Textarea,
   TextInput,
@@ -24,7 +25,7 @@ import {
   useMantineColorScheme,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
-import { useDisclosure } from '@mantine/hooks';
+import { useDisclosure, useLocalStorage } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import {
   IconCheck,
@@ -42,6 +43,11 @@ import {
   useAIModels,
   useUpdateAIConfig,
 } from '../../api/resources/aiConfig';
+import {
+  type AIToolPermission,
+  useAIPermissions,
+  useSetAIPermission,
+} from '../../api/resources/aiPermissions';
 import {
   type CustomDictionary,
   type CustomDictionaryInput,
@@ -295,6 +301,9 @@ export function SettingsPage() {
           {/* ─── AI Assistant ─────────────────────────────────── */}
           <AiAssistantCard />
 
+          {/* ─── AI Tool Permissions ───────────────────────────── */}
+          <AIPermissionsCard />
+
           {/* ─── AVP Dictionaries ──────────────────────────────── */}
           <DictionariesCard />
 
@@ -324,6 +333,125 @@ export function SettingsPage() {
         </Stack>
       </form>
     </Stack>
+  );
+}
+
+// ─── AI Tool Permissions ──────────────────────────────────────────────────
+
+/** Maps tier names to Mantine Badge colors. */
+const TIER_COLOR: Record<string, string> = {
+  readonly: 'blue',
+  write: 'orange',
+  destructive: 'red',
+};
+
+/**
+ * Inline row for a single MCP tool permission.
+ *
+ * The SegmentedControl fires the PATCH mutation immediately when the
+ * operator changes the value — no separate Save button is needed.
+ */
+function PermissionRow({ perm }: { perm: AIToolPermission }) {
+  const setPermMut = useSetAIPermission();
+
+  const handleChange = (value: string) => {
+    setPermMut.mutate({
+      toolName: perm.toolName,
+      decision: value as AIToolPermission['decision'],
+    });
+  };
+
+  return (
+    <Table.Tr>
+      <Table.Td>
+        <Text size="sm" ff="monospace">
+          {perm.toolName}
+        </Text>
+      </Table.Td>
+      <Table.Td>
+        <Text size="sm" c="dimmed" lineClamp={2}>
+          {perm.description ?? '—'}
+        </Text>
+      </Table.Td>
+      <Table.Td>
+        {perm.tier ? (
+          <Badge
+            variant="light"
+            color={TIER_COLOR[perm.tier] ?? 'gray'}
+            radius="sm"
+            size="sm"
+          >
+            {perm.tier}
+          </Badge>
+        ) : (
+          <Text size="xs" c="dimmed">
+            —
+          </Text>
+        )}
+      </Table.Td>
+      <Table.Td>
+        <SegmentedControl
+          size="xs"
+          value={perm.decision ?? 'ask'}
+          onChange={handleChange}
+          disabled={setPermMut.isPending}
+          data={[
+            { value: 'ask', label: 'Ask' },
+            { value: 'allow', label: 'Allow' },
+            { value: 'deny', label: 'Deny' },
+          ]}
+        />
+      </Table.Td>
+    </Table.Tr>
+  );
+}
+
+/**
+ * AI Tool Permissions card.
+ *
+ * Lists every MCP tool with its current permission decision. Changes are
+ * saved inline — each SegmentedControl fires a PATCH immediately.
+ */
+function AIPermissionsCard() {
+  const { data: permissions, isLoading } = useAIPermissions();
+
+  return (
+    <Card padding="lg" withBorder shadow="xs">
+      <Stack gap="md">
+        <Stack gap={4}>
+          <SectionLabel>AI Tool Permissions</SectionLabel>
+          <Text size="xs" c="dimmed">
+            Configure how the AI assistant handles each MCP tool call.
+            Changes take effect immediately — no restart required.
+          </Text>
+        </Stack>
+
+        {isLoading ? (
+          <Skeleton height={120} radius="sm" />
+        ) : !permissions || permissions.length === 0 ? (
+          <Text size="sm" c="dimmed" ta="center" py="sm">
+            No MCP tools available. Start the server with a configured AI
+            endpoint to see tools here.
+          </Text>
+        ) : (
+          <Table striped highlightOnHover withTableBorder withColumnBorders>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Tool</Table.Th>
+                <Table.Th>Description</Table.Th>
+                <Table.Th>Tier</Table.Th>
+                <Table.Th>Permission</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {permissions.map((p) => (
+                <PermissionRow key={p.toolName} perm={p} />
+              ))}
+            </Table.Tbody>
+          </Table>
+        )}
+      </Stack>
+    </Card>
   );
 }
 
@@ -621,17 +749,17 @@ function DictModal({ opened, onClose, title, existing }: DictModalProps) {
  * for it behind the common client interface.
  */
 const PROVIDER_PRESETS: Record<string, string> = {
-  openai: 'https://api.openai.com',
   anthropic: 'https://api.anthropic.com',
-  ollama: 'http://localhost:11434',
-  lmstudio: 'http://localhost:1234',
-  llamacpp: 'http://localhost:8080',
-  custom: '',
+  openai:    'https://api.openai.com',
+  ollama:    'http://localhost:11434',
+  lmstudio:  'http://localhost:1234',
+  llamacpp:  'http://localhost:8080',
+  custom:    '',
 };
 
 const PROVIDER_OPTIONS = [
-  { value: 'openai',    label: 'OpenAI' },
   { value: 'anthropic', label: 'Anthropic' },
+  { value: 'openai',    label: 'OpenAI' },
   { value: 'ollama',    label: 'Ollama' },
   { value: 'lmstudio',  label: 'LM Studio' },
   { value: 'llamacpp',  label: 'llama.cpp' },
@@ -668,8 +796,15 @@ function AiAssistantCard() {
   const [endpoint, setEndpoint] = useState('');
   const [model, setModel] = useState('');
   const [apiKey, setApiKey] = useState('');
+  const [thinking, setThinking] = useState(false);
   const [modelFilter, setModelFilter] = useState('');
   const [seeded, setSeeded] = useState(false);
+
+  // UI-only preference persisted in localStorage — no backend needed.
+  const [hideToolCalls, setHideToolCalls] = useLocalStorage({
+    key: 'ai-hide-tool-calls',
+    defaultValue: false,
+  });
 
   // Seed local state from server config on first successful fetch.
   useEffect(() => {
@@ -677,17 +812,20 @@ function AiAssistantCard() {
     setProvider(detectProvider(serverCfg.endpoint));
     setEndpoint(serverCfg.endpoint);
     setModel(serverCfg.model);
+    setThinking(serverCfg.thinking ?? false);
     // Don't seed apiKey — user types a new value to change it.
     setSeeded(true);
   }, [serverCfg, seeded]);
 
-  // Fetch model list when an endpoint is configured; enabled only when
-  // endpoint is non-blank.
+  // Fetch model list when an endpoint is configured; pass the unsaved API key
+  // so models can be fetched before Save (important for new key entry).
   const {
     data: models,
     isFetching: modelsFetching,
+    isError: modelsError,
+    error: modelsErrorDetail,
     refetch: refetchModels,
-  } = useAIModels(!!endpoint);
+  } = useAIModels(endpoint, apiKey || undefined);
 
   const filteredModels = (models ?? []).filter((m) =>
     m.toLowerCase().includes(modelFilter.toLowerCase()),
@@ -708,6 +846,7 @@ function AiAssistantCard() {
       await updateMut.mutateAsync({
         endpoint,
         model,
+        thinking,
         // Send the key only when the user typed something; otherwise blank
         // tells the backend to preserve the existing key.
         apiKey: apiKey || undefined,
@@ -728,6 +867,7 @@ function AiAssistantCard() {
     setProvider(detectProvider(serverCfg.endpoint));
     setEndpoint(serverCfg.endpoint);
     setModel(serverCfg.model);
+    setThinking(serverCfg.thinking ?? false);
     setApiKey('');
   };
 
@@ -771,6 +911,11 @@ function AiAssistantCard() {
               placeholder={apiKeyPlaceholder}
               value={apiKey}
               onChange={(e) => setApiKey(e.currentTarget.value)}
+              description={
+                provider === 'anthropic'
+                  ? 'Requires an Anthropic API key from console.anthropic.com.'
+                  : undefined
+              }
             />
 
             {/* ─── Model list sub-section ──────────────────────── */}
@@ -817,6 +962,10 @@ function AiAssistantCard() {
                 ) : modelsFetching ? (
                   <Text size="xs" c="dimmed">
                     Fetching models…
+                  </Text>
+                ) : modelsError ? (
+                  <Text size="xs" c="red">
+                    {String((modelsErrorDetail as Error)?.message ?? modelsErrorDetail ?? 'Failed to fetch models')}
                   </Text>
                 ) : models && models.length > 0 ? (
                   <Text size="xs" c="dimmed">
@@ -876,6 +1025,24 @@ function AiAssistantCard() {
                 )}
               </ScrollArea>
             </Box>
+
+            {/* ─── Behaviour toggles ───────────────────────────── */}
+            <Stack gap="xs">
+              <Switch
+                label="Enable thinking mode"
+                description="Allows the model to reason internally before responding (slower but more accurate for complex questions)"
+                checked={thinking}
+                onChange={(e) => setThinking(e.currentTarget.checked)}
+                size="sm"
+              />
+              <Switch
+                label="Hide tool execution"
+                description="Suppress tool-call blocks in the chat thread — only show the final answer"
+                checked={hideToolCalls}
+                onChange={(e) => setHideToolCalls(e.currentTarget.checked)}
+                size="sm"
+              />
+            </Stack>
 
             {/* ─── Self-contained Save / Reset ─────────────────── */}
             <Group justify="flex-end">

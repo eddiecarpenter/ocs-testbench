@@ -31,15 +31,15 @@ func buildLLMResponse(content string, toolCalls []ai.ToolCall) []byte {
 	return b
 }
 
-// TestNewHTTPLLMClient_EmptyEndpoint verifies that an empty endpoint returns
+// TestNewLLMClient_EmptyEndpoint verifies that an empty endpoint returns
 // an error rather than a client.
-func TestNewHTTPLLMClient_EmptyEndpoint(t *testing.T) {
-	_, err := ai.NewHTTPLLMClient(baseconfig.AIConfig{Endpoint: ""})
+func TestNewLLMClient_EmptyEndpoint(t *testing.T) {
+	_, err := ai.NewLLMClient(baseconfig.AIConfig{Endpoint: ""})
 	assert.Error(t, err, "empty endpoint must return an error")
 }
 
-// TestHTTPLLMClient_Complete_Success verifies a happy-path completion call.
-func TestHTTPLLMClient_Complete_Success(t *testing.T) {
+// TestOpenAILLMClient_Complete_Success verifies a happy-path completion call.
+func TestOpenAILLMClient_Complete_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "/v1/chat/completions", r.URL.Path)
@@ -57,7 +57,7 @@ func TestHTTPLLMClient_Complete_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client, err := ai.NewHTTPLLMClient(baseconfig.AIConfig{
+	client, err := ai.NewLLMClient(baseconfig.AIConfig{
 		Endpoint: srv.URL,
 		Model:    "gpt-4o",
 		APIKey:   "test-key",
@@ -72,9 +72,9 @@ func TestHTTPLLMClient_Complete_Success(t *testing.T) {
 	assert.Equal(t, "Hello!", resp.Choices[0].Message.Content)
 }
 
-// TestHTTPLLMClient_Complete_NonTwoXX verifies that a non-2xx response
+// TestOpenAILLMClient_Complete_NonTwoXX verifies that a non-2xx response
 // returns an *LLMError with the status code and body.
-func TestHTTPLLMClient_Complete_NonTwoXX(t *testing.T) {
+func TestOpenAILLMClient_Complete_NonTwoXX(t *testing.T) {
 	tests := []struct {
 		name       string
 		statusCode int
@@ -90,7 +90,7 @@ func TestHTTPLLMClient_Complete_NonTwoXX(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			client, err := ai.NewHTTPLLMClient(baseconfig.AIConfig{Endpoint: srv.URL, Model: "gpt-4o"})
+			client, err := ai.NewLLMClient(baseconfig.AIConfig{Endpoint: srv.URL, Model: "gpt-4o"})
 			require.NoError(t, err)
 
 			_, err = client.Complete(context.Background(), ai.CompletionRequest{
@@ -106,9 +106,9 @@ func TestHTTPLLMClient_Complete_NonTwoXX(t *testing.T) {
 	}
 }
 
-// TestHTTPLLMClient_Complete_NetworkTimeout verifies that a request timeout
+// TestOpenAILLMClient_Complete_NetworkTimeout verifies that a request timeout
 // returns an error (not a successful response).
-func TestHTTPLLMClient_Complete_NetworkTimeout(t *testing.T) {
+func TestOpenAILLMClient_Complete_NetworkTimeout(t *testing.T) {
 	// Server that sleeps for longer than the client's deadline.
 	started := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -118,7 +118,7 @@ func TestHTTPLLMClient_Complete_NetworkTimeout(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client, err := ai.NewHTTPLLMClient(baseconfig.AIConfig{Endpoint: srv.URL, Model: "gpt-4o"})
+	client, err := ai.NewLLMClient(baseconfig.AIConfig{Endpoint: srv.URL, Model: "gpt-4o"})
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -133,9 +133,9 @@ func TestHTTPLLMClient_Complete_NetworkTimeout(t *testing.T) {
 	assert.Error(t, err, "timed-out request must return an error")
 }
 
-// TestHTTPLLMClient_Complete_ToolCalls verifies that tool_calls in the
+// TestOpenAILLMClient_Complete_ToolCalls verifies that tool_calls in the
 // response are correctly parsed.
-func TestHTTPLLMClient_Complete_ToolCalls(t *testing.T) {
+func TestOpenAILLMClient_Complete_ToolCalls(t *testing.T) {
 	expectedToolCalls := []ai.ToolCall{
 		{
 			ID:   "call-1",
@@ -153,7 +153,7 @@ func TestHTTPLLMClient_Complete_ToolCalls(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client, err := ai.NewHTTPLLMClient(baseconfig.AIConfig{Endpoint: srv.URL, Model: "gpt-4o"})
+	client, err := ai.NewLLMClient(baseconfig.AIConfig{Endpoint: srv.URL, Model: "gpt-4o"})
 	require.NoError(t, err)
 
 	resp, err := client.Complete(context.Background(), ai.CompletionRequest{

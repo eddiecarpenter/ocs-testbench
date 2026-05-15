@@ -21,10 +21,18 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/eddiecarpenter/ocs-testbench/internal/store/sqlc"
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+// AIPermission represents a persisted AI tool permission decision.
+type AIPermission struct {
+	ToolName  string
+	Decision  string // "allow" | "deny"
+	UpdatedAt time.Time
+}
 
 // Type aliases — re-export the sqlc-generated row models so callers
 // of the store package do not have to import internal/store/sqlc
@@ -176,6 +184,18 @@ type Store interface {
 	// DeleteCustomDictionary removes a dictionary. Returns
 	// ErrNotFound if id does not resolve.
 	DeleteCustomDictionary(ctx context.Context, id pgtype.UUID) error
+
+	// ----- ai_tool_permissions ------------------------------------
+
+	// ListAIPermissions returns all persisted AI tool permission
+	// decisions ordered by tool name.
+	ListAIPermissions(ctx context.Context) ([]AIPermission, error)
+	// UpsertAIPermission inserts or updates the decision for a
+	// named tool. decision must be "allow" or "deny".
+	UpsertAIPermission(ctx context.Context, toolName, decision string) error
+	// DeleteAIPermission removes the permission record for toolName.
+	// It is a no-op when no record exists (i.e. resetting to "ask").
+	DeleteAIPermission(ctx context.Context, toolName string) error
 
 	// ----- lifecycle ----------------------------------------------
 

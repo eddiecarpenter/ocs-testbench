@@ -28,14 +28,15 @@ metrics:
 server:
   addr: ":8080"
   read_timeout: 10s
-  write_timeout: 30s
+  # write_timeout: 0 (no timeout) — required for long-lived SSE streams.
+  # Setting this to a non-zero value will kill AI chat streams.
   idle_timeout: 60s
 
 # Embedded React/TypeScript frontend.
 frontend:
   # Open the default browser automatically when the server starts —
   # gated by the top-level `headless` flag.
-  auto_open_browser: false
+  auto_open_browser: true
   # Path on disk to the frontend build output. Used at compile time
   # by go:embed; runtime serving uses the embedded filesystem.
   embedded_assets_path: web/dist
@@ -63,7 +64,7 @@ peers: []
 #     model: llama3
 #     api_key: ""
 #
-# ai:
-#   endpoint: ""
-#   model: ""
-#   api_key: ""
+ai:
+  endpoint: http://localhost:1234
+  model: ""
+  api_key: ""

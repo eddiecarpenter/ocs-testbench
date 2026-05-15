@@ -1,6 +1,7 @@
 package ai_test
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -14,10 +15,10 @@ import (
 // TestSessionManager_CreateNewSession verifies that GetOrCreate creates a
 // new session when the session ID is unknown.
 func TestSessionManager_CreateNewSession(t *testing.T) {
-	sm := ai.NewSessionManager()
+	sm := ai.NewSessionManager(nil)
 	defer sm.Stop()
 
-	s := sm.GetOrCreate("sess-1")
+	s := sm.GetOrCreate(context.Background(), "sess-1")
 	require.NotNil(t, s)
 	assert.NotNil(t, s.AllowAlways, "AllowAlways must be initialised")
 	assert.Empty(t, s.History, "new session must have empty history")
@@ -26,20 +27,20 @@ func TestSessionManager_CreateNewSession(t *testing.T) {
 // TestSessionManager_GetExistingSession verifies that GetOrCreate returns
 // the same Session on subsequent calls with the same ID.
 func TestSessionManager_GetExistingSession(t *testing.T) {
-	sm := ai.NewSessionManager()
+	sm := ai.NewSessionManager(nil)
 	defer sm.Stop()
 
-	s1 := sm.GetOrCreate("sess-same")
+	s1 := sm.GetOrCreate(context.Background(), "sess-same")
 	s1.History = []ai.Message{{Role: "user", Content: "hello"}}
 
-	s2 := sm.GetOrCreate("sess-same")
+	s2 := sm.GetOrCreate(context.Background(), "sess-same")
 	require.Equal(t, s1, s2, "same session must be returned for same ID")
 	assert.Len(t, s2.History, 1)
 }
 
 // TestSessionManager_GetNotExist verifies that Get returns nil for unknown IDs.
 func TestSessionManager_GetNotExist(t *testing.T) {
-	sm := ai.NewSessionManager()
+	sm := ai.NewSessionManager(nil)
 	defer sm.Stop()
 
 	s := sm.Get("no-such-session")
@@ -49,10 +50,10 @@ func TestSessionManager_GetNotExist(t *testing.T) {
 // TestSessionManager_Get_ReturnsExistingSession verifies that Get returns the
 // session when it exists without creating a new one.
 func TestSessionManager_Get_ReturnsExistingSession(t *testing.T) {
-	sm := ai.NewSessionManager()
+	sm := ai.NewSessionManager(nil)
 	defer sm.Stop()
 
-	sm.GetOrCreate("existing-sess")
+	sm.GetOrCreate(context.Background(), "existing-sess")
 	s := sm.Get("existing-sess")
 	require.NotNil(t, s)
 }
@@ -60,10 +61,10 @@ func TestSessionManager_Get_ReturnsExistingSession(t *testing.T) {
 // TestSessionManager_UpdateHistory_ReplacesHistory verifies that
 // UpdateHistory replaces the existing conversation history.
 func TestSessionManager_UpdateHistory_ReplacesHistory(t *testing.T) {
-	sm := ai.NewSessionManager()
+	sm := ai.NewSessionManager(nil)
 	defer sm.Stop()
 
-	sm.GetOrCreate("sess-update")
+	sm.GetOrCreate(context.Background(), "sess-update")
 	newHistory := []ai.Message{
 		{Role: "user", Content: "query"},
 		{Role: "assistant", Content: "response"},
@@ -78,7 +79,7 @@ func TestSessionManager_UpdateHistory_ReplacesHistory(t *testing.T) {
 // TestSessionManager_UpdateHistory_CreatesSession verifies that
 // UpdateHistory creates a session when it does not exist.
 func TestSessionManager_UpdateHistory_CreatesSession(t *testing.T) {
-	sm := ai.NewSessionManager()
+	sm := ai.NewSessionManager(nil)
 	defer sm.Stop()
 
 	msgs := []ai.Message{{Role: "user", Content: "hi"}}
@@ -92,7 +93,7 @@ func TestSessionManager_UpdateHistory_CreatesSession(t *testing.T) {
 // TestSessionManager_ConcurrentAccess verifies that concurrent GetOrCreate
 // and UpdateHistory calls do not race.
 func TestSessionManager_ConcurrentAccess(t *testing.T) {
-	sm := ai.NewSessionManager()
+	sm := ai.NewSessionManager(nil)
 	defer sm.Stop()
 
 	const goroutines = 20
@@ -103,7 +104,7 @@ func TestSessionManager_ConcurrentAccess(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			id := "concurrent-sess"
-			_ = sm.GetOrCreate(id)
+			_ = sm.GetOrCreate(context.Background(), id)
 			sm.UpdateHistory(id, []ai.Message{{Role: "user", Content: "msg"}})
 			_ = sm.Get(id)
 		}(i)
@@ -115,11 +116,11 @@ func TestSessionManager_ConcurrentAccess(t *testing.T) {
 // TestSessionManager_TTLEviction verifies that sessions idle beyond the TTL
 // are evicted by the cleanup logic.
 func TestSessionManager_TTLEviction(t *testing.T) {
-	sm := ai.NewSessionManager()
+	sm := ai.NewSessionManager(nil)
 	defer sm.Stop()
 
 	// Create a session.
-	sm.GetOrCreate("evict-me")
+	sm.GetOrCreate(context.Background(), "evict-me")
 
 	// Trigger eviction with a "now" that is 31 minutes in the future,
 	// which puts the session past the 30-minute TTL.
@@ -132,10 +133,10 @@ func TestSessionManager_TTLEviction(t *testing.T) {
 // TestSessionManager_TTLEviction_KeepsRecentSession verifies that a session
 // accessed recently is NOT evicted.
 func TestSessionManager_TTLEviction_KeepsRecentSession(t *testing.T) {
-	sm := ai.NewSessionManager()
+	sm := ai.NewSessionManager(nil)
 	defer sm.Stop()
 
-	sm.GetOrCreate("keep-me")
+	sm.GetOrCreate(context.Background(), "keep-me")
 
 	// Trigger eviction with a "now" only 5 minutes in the future — well
 	// within the 30-minute TTL.
@@ -148,13 +149,13 @@ func TestSessionManager_TTLEviction_KeepsRecentSession(t *testing.T) {
 // TestSessionManager_AllowAlwaysRegistration verifies that AllowAlways can
 // be populated and read correctly.
 func TestSessionManager_AllowAlwaysRegistration(t *testing.T) {
-	sm := ai.NewSessionManager()
+	sm := ai.NewSessionManager(nil)
 	defer sm.Stop()
 
-	s := sm.GetOrCreate("allow-always-sess")
+	s := sm.GetOrCreate(context.Background(), "allow-always-sess")
 	s.AllowAlways["list_peers"] = true
 
-	s2 := sm.GetOrCreate("allow-always-sess")
+	s2 := sm.GetOrCreate(context.Background(), "allow-always-sess")
 	assert.True(t, s2.AllowAlways["list_peers"], "AllowAlways entry must persist across GetOrCreate calls")
 	assert.False(t, s2.AllowAlways["unknown_tool"])
 }

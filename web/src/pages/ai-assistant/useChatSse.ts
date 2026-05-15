@@ -53,8 +53,9 @@ export function useChatSse() {
       startStream();
 
       // Build the conversation history for the request body.
+      // Aborted items stay in the thread for display but are excluded here.
       const messages: ChatRequest['messages'] = thread
-        .filter((i) => i.kind === 'user' || i.kind === 'assistant')
+        .filter((i) => (i.kind === 'user' || i.kind === 'assistant') && !i.aborted)
         .map((i) => ({
           role: i.kind as 'user' | 'assistant',
           content: i.kind === 'user' || i.kind === 'assistant' ? i.content : '',
@@ -119,7 +120,7 @@ export function useChatSse() {
 
   const abort = useCallback(() => {
     abortRef.current?.abort();
-    store.getState().endStream();
+    store.getState().abortStream();
   }, [store]);
 
   return { sendMessage, abort };

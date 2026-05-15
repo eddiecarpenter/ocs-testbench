@@ -292,6 +292,32 @@ func (s *pgStore) DeleteCustomDictionary(ctx context.Context, id pgtype.UUID) er
 	return nil
 }
 
+// ----- ai_tool_permissions ----------------------------------------
+
+func (s *pgStore) ListAIPermissions(ctx context.Context) ([]AIPermission, error) {
+	rows, err := s.queries.ListAIPermissions(ctx)
+	if err != nil {
+		return nil, translate(err, "ai_tool_permissions", "")
+	}
+	out := make([]AIPermission, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, AIPermission{
+			ToolName:  r.ToolName,
+			Decision:  r.Decision,
+			UpdatedAt: r.UpdatedAt.Time,
+		})
+	}
+	return out, nil
+}
+
+func (s *pgStore) UpsertAIPermission(ctx context.Context, toolName, decision string) error {
+	return translate(s.queries.UpsertAIPermission(ctx, toolName, decision), "ai_tool_permissions", toolName)
+}
+
+func (s *pgStore) DeleteAIPermission(ctx context.Context, toolName string) error {
+	return translate(s.queries.DeleteAIPermission(ctx, toolName), "ai_tool_permissions", toolName)
+}
+
 // deleteWithTag wraps the sqlc Delete* helpers (which return only an
 // error) with a "rows affected" probe so the wrapper can distinguish
 // "row deleted" from "no row matched id". sqlc's :exec output discards

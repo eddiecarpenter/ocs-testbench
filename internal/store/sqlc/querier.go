@@ -11,6 +11,7 @@ import (
 )
 
 type Querier interface {
+	DeleteAIPermission(ctx context.Context, toolName string) error
 	DeleteAVPTemplate(ctx context.Context, id pgtype.UUID) error
 	DeleteCustomDictionary(ctx context.Context, id pgtype.UUID) error
 	DeletePeer(ctx context.Context, id pgtype.UUID) error
@@ -64,6 +65,7 @@ type Querier interface {
 	// accept an `Arg` struct rather than positional parameters, which
 	// keeps the call sites readable.
 	InsertSubscriber(ctx context.Context, arg InsertSubscriberParams) (Subscriber, error)
+	ListAIPermissions(ctx context.Context) ([]AiToolPermission, error)
 	ListAVPTemplates(ctx context.Context) ([]AvpTemplate, error)
 	ListCustomDictionaries(ctx context.Context) ([]CustomDictionary, error)
 	ListPeers(ctx context.Context) ([]Peer, error)
@@ -77,6 +79,7 @@ type Querier interface {
 	UpdatePeer(ctx context.Context, iD pgtype.UUID, name string, body []byte) (Peer, error)
 	UpdateScenario(ctx context.Context, arg UpdateScenarioParams) (Scenario, error)
 	UpdateSubscriber(ctx context.Context, arg UpdateSubscriberParams) (Subscriber, error)
+	UpsertAIPermission(ctx context.Context, toolName string, decision string) error
 }
 
 var _ Querier = (*Queries)(nil)

@@ -7,7 +7,9 @@ package ai
 //
 // The prompt is sized to fit within all major provider context windows
 // while providing enough context for accurate tool selection.
-const SystemPrompt = `You are an AI assistant embedded in the OCS Testbench — a Diameter Gy credit-control traffic generator and fault-diagnosis tool.
+const SystemPrompt = `/nothink
+
+You are an AI assistant embedded in the OCS Testbench — a Diameter Gy credit-control traffic generator and fault-diagnosis tool.
 
 ## Domain context
 

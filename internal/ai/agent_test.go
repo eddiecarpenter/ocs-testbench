@@ -43,6 +43,20 @@ func (m *mockLLMClient) Complete(_ context.Context, _ ai.CompletionRequest) (*ai
 	return &r, nil
 }
 
+// CompleteStream satisfies the LLMClient interface for tests.
+// It delegates to Complete and calls onToken once with the full content
+// so tests do not need to be rewritten for streaming.
+func (m *mockLLMClient) CompleteStream(ctx context.Context, req ai.CompletionRequest, onToken func(string), _ func(ai.Usage)) (*ai.CompletionResponse, error) {
+	resp, err := m.Complete(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if len(resp.Choices) > 0 && resp.Choices[0].Message.Content != "" {
+		onToken(resp.Choices[0].Message.Content)
+	}
+	return resp, nil
+}
+
 // textResponse builds a CompletionResponse with a plain text assistant message.
 func textResponse(content string) ai.CompletionResponse {
 	return ai.CompletionResponse{Choices: []ai.Choice{{
@@ -126,8 +140,8 @@ func captureEmit() (ai.EmitFunc, *[]capturedEvent) {
 	return fn, &events
 }
 
-func alwaysAllow(_ string, _ string, _ string) bool { return true }
-func alwaysDeny(_ string, _ string, _ string) bool  { return false }
+func alwaysAllow(_ string, _ string, _ string, _ string) bool { return true }
+func alwaysDeny(_ string, _ string, _ string, _ string) bool  { return false }
 
 // ---- Tests -----------------------------------------------------------------
 

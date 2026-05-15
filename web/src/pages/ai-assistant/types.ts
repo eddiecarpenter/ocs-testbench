@@ -41,6 +41,11 @@ export interface AssistantMessage {
   id: string;
   /** Accumulated text content. Tokens are appended as they stream in. */
   content: string;
+  /**
+   * True when this message was part of an aborted exchange.
+   * It is shown in the thread but excluded from the next request payload.
+   */
+  aborted?: true;
 }
 
 /** A message the user typed and submitted. */
@@ -48,6 +53,11 @@ export interface UserMessage {
   kind: 'user';
   id: string;
   content: string;
+  /**
+   * True when this message was part of an aborted exchange.
+   * It is shown in the thread but excluded from the next request payload.
+   */
+  aborted?: true;
 }
 
 /**
@@ -130,10 +140,16 @@ export interface SseThinkingEvent {
   data: { content: string };
 }
 
+/** Mid-stream usage update — fired as soon as token counts are known. */
+export interface SseUsageUpdateEvent {
+  type: 'usage_update';
+  data: { inputTokens?: number; outputTokens?: number };
+}
+
 /** Terminal event — stream complete. */
 export interface SseDoneEvent {
   type: 'done';
-  data: Record<string, never>;
+  data: { inputTokens?: number; outputTokens?: number };
 }
 
 export type SseEvent =
@@ -141,6 +157,7 @@ export type SseEvent =
   | SseToolCallEvent
   | SsePermissionRequiredEvent
   | SseThinkingEvent
+  | SseUsageUpdateEvent
   | SseDoneEvent;
 
 /** Request body for POST /api/ai/chat */

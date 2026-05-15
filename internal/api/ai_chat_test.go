@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -56,6 +57,8 @@ func readSSEEvents(t *testing.T, scanner *bufio.Scanner, count int, timeout time
 // newLLMServer creates a minimal httptest.Server that responds to
 // POST /v1/chat/completions with the given scripted JSON responses in order.
 // Each call to the server returns the next response in the sequence.
+// When the request body includes "stream":true the response is returned as
+// SSE (text/event-stream) so CompleteStream can parse it.
 func newLLMServer(t *testing.T, responses []map[string]any) *httptest.Server {
 	t.Helper()
 	idx := 0
@@ -64,14 +67,95 @@ func newLLMServer(t *testing.T, responses []map[string]any) *httptest.Server {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		if idx >= len(responses) {
-			// fallback: no more responses → empty choices causes an error SSE
-			json.NewEncoder(w).Encode(map[string]any{"choices": []any{}}) //nolint:errcheck
+
+		// Detect streaming request.
+		var reqBody struct {
+			Stream bool `json:"stream"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&reqBody)
+
+		if !reqBody.Stream {
+			w.Header().Set("Content-Type", "application/json")
+			if idx >= len(responses) {
+				json.NewEncoder(w).Encode(map[string]any{"choices": []any{}}) //nolint:errcheck
+				return
+			}
+			json.NewEncoder(w).Encode(responses[idx]) //nolint:errcheck
+			idx++
 			return
 		}
-		json.NewEncoder(w).Encode(responses[idx]) //nolint:errcheck
+
+		// SSE streaming response.
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+
+		if idx >= len(responses) {
+			fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n") //nolint:errcheck
+			fmt.Fprintf(w, "data: [DONE]\n\n")                                                    //nolint:errcheck
+			return
+		}
+		resp := responses[idx]
 		idx++
+
+		choices, _ := resp["choices"].([]map[string]any)
+		if len(choices) == 0 {
+			fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n") //nolint:errcheck
+			fmt.Fprintf(w, "data: [DONE]\n\n")                                                    //nolint:errcheck
+			return
+		}
+		choice := choices[0]
+		finishReason, _ := choice["finish_reason"].(string)
+
+		if msg, ok := choice["message"].(map[string]any); ok {
+			if content, ok := msg["content"].(string); ok && content != "" {
+				// Emit content as a single delta chunk.
+				chunk := map[string]any{
+					"choices": []map[string]any{{
+						"delta":         map[string]any{"content": content},
+						"finish_reason": "",
+					}},
+				}
+				b, _ := json.Marshal(chunk)
+				fmt.Fprintf(w, "data: %s\n\n", b) //nolint:errcheck
+			}
+			if toolCalls, ok := msg["tool_calls"].([]map[string]any); ok {
+				// Emit each tool call as a delta.
+				for i, tc := range toolCalls {
+					fn, _ := tc["function"].(map[string]any)
+					fnName, _ := fn["name"].(string)
+					fnArgs, _ := fn["arguments"].(string)
+					chunk := map[string]any{
+						"choices": []map[string]any{{
+							"delta": map[string]any{
+								"tool_calls": []map[string]any{{
+									"index": i,
+									"id":    tc["id"],
+									"type":  "function",
+									"function": map[string]any{
+										"name":      fnName,
+										"arguments": fnArgs,
+									},
+								}},
+							},
+							"finish_reason": "",
+						}},
+					}
+					b, _ := json.Marshal(chunk)
+					fmt.Fprintf(w, "data: %s\n\n", b) //nolint:errcheck
+				}
+			}
+		}
+
+		// Final chunk with finish_reason.
+		finalChunk := map[string]any{
+			"choices": []map[string]any{{
+				"delta":         map[string]any{},
+				"finish_reason": finishReason,
+			}},
+		}
+		b, _ := json.Marshal(finalChunk)
+		fmt.Fprintf(w, "data: %s\n\n", b) //nolint:errcheck
+		fmt.Fprintf(w, "data: [DONE]\n\n") //nolint:errcheck
 	}))
 	t.Cleanup(srv.Close)
 	return srv
@@ -142,7 +226,7 @@ func newChatRouter(t *testing.T, llmResponses []map[string]any) (http.Handler, *
 	agent := ai.NewAgent(llmCfg, mcpURL)
 	require.NotNil(t, agent)
 
-	sessions := ai.NewSessionManager()
+	sessions := ai.NewSessionManager(nil)
 	t.Cleanup(sessions.Stop)
 
 	s := store.NewTestStore()
@@ -324,7 +408,7 @@ func TestAIChat_LLMError_EmitsErrorEvent(t *testing.T) {
 	agent := ai.NewAgent(llmCfg, errSrv.URL)
 	require.NotNil(t, agent)
 
-	sessions := ai.NewSessionManager()
+	sessions := ai.NewSessionManager(nil)
 	t.Cleanup(sessions.Stop)
 
 	s := store.NewTestStore()
@@ -405,7 +489,7 @@ func TestAIChat_EndToEnd_OneToolCall(t *testing.T) {
 	agent := ai.NewAgent(llmCfg, mcpURL)
 	require.NotNil(t, agent)
 
-	sessions := ai.NewSessionManager()
+	sessions := ai.NewSessionManager(nil)
 	t.Cleanup(sessions.Stop)
 
 	s := store.NewTestStore()
@@ -465,7 +549,7 @@ func TestAIChat_EndToEnd_UnexecutableTool(t *testing.T) {
 	agent := ai.NewAgent(llmCfg, mcpURL)
 	require.NotNil(t, agent)
 
-	sessions := ai.NewSessionManager()
+	sessions := ai.NewSessionManager(nil)
 	t.Cleanup(sessions.Stop)
 
 	s := store.NewTestStore()

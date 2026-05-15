@@ -52,26 +52,82 @@ type FunctionDef struct {
 	Parameters  map[string]any `json:"parameters"`
 }
 
+// streamOptions asks the OpenAI-compatible endpoint to include a usage object
+// in the final SSE chunk so we can report real token counts.
+type streamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
+}
+
+// openAIUsage is the usage shape returned by OpenAI-compatible endpoints.
+// Field names differ from Anthropic's so we map them on decode.
+type openAIUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+}
+
 // CompletionRequest is the OpenAI-format chat completion request.
-// Stream is always false — the agentic loop uses non-streaming calls so
-// the full response (including tool_calls) is available atomically.
 type CompletionRequest struct {
-	Model    string           `json:"model"`
-	Messages []Message        `json:"messages"`
-	Tools    []ToolDefinition `json:"tools,omitempty"`
-	Stream   bool             `json:"stream"`
+	Model         string           `json:"model"`
+	Messages      []Message        `json:"messages"`
+	Tools         []ToolDefinition `json:"tools,omitempty"`
+	Stream        bool             `json:"stream"`
+	StreamOptions *streamOptions   `json:"stream_options,omitempty"`
+	// EnableThinking controls the model's extended chain-of-thought reasoning
+	// mode (e.g. Qwen3 <think> blocks). When nil the parameter is omitted and
+	// the model uses its default. Set to a *false pointer to disable thinking
+	// for faster, lower-latency responses.
+	EnableThinking *bool `json:"enable_thinking,omitempty"`
+}
+
+// Usage holds the token consumption figures returned by the LLM.
+type Usage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
 }
 
 // CompletionResponse is the parsed top-level OpenAI chat completion
 // response envelope.
 type CompletionResponse struct {
 	Choices []Choice `json:"choices"`
+	Usage   Usage    `json:"usage"`
 }
 
 // Choice is one candidate response inside a CompletionResponse.
 type Choice struct {
 	Message      Message `json:"message"`
 	FinishReason string  `json:"finish_reason"`
+}
+
+// streamChunk is a single Server-Sent Event chunk from a streaming
+// chat completion response (OpenAI format).
+type streamChunk struct {
+	Choices []streamChoice `json:"choices"`
+	Usage   *openAIUsage   `json:"usage,omitempty"`
+}
+
+// streamChoice is one choice delta inside a streamChunk.
+type streamChoice struct {
+	Delta        streamDelta `json:"delta"`
+	FinishReason string      `json:"finish_reason"`
+}
+
+// streamDelta carries the incremental content for a streaming choice.
+type streamDelta struct {
+	Content   string            `json:"content"`
+	ToolCalls []toolCallDelta   `json:"tool_calls"`
+}
+
+// toolCallDelta is an incremental fragment of a tool call in a streaming
+// response. Multiple deltas with the same Index are assembled into one
+// complete ToolCall.
+type toolCallDelta struct {
+	Index    int    `json:"index"`
+	ID       string `json:"id,omitempty"`
+	Type     string `json:"type,omitempty"`
+	Function struct {
+		Name      string `json:"name,omitempty"`
+		Arguments string `json:"arguments,omitempty"`
+	} `json:"function"`
 }
 
 // EmitFunc is the callback used by Agent.Run to stream SSE events to the
@@ -84,12 +140,13 @@ type EmitFunc func(eventType string, data any) error
 // approval before executing write-tier or destructive-tier tool calls.
 //
 // callID is the LLM-assigned tool call identifier, toolName is the MCP
-// tool name, and tier is one of "write" or "destructive".
+// tool name, description is the tool's human-readable description, and
+// tier is one of "write" or "destructive".
 //
 // The function blocks until the operator's decision arrives (via the
 // permission API endpoint) or the request context is cancelled.
 // Returns true to allow execution, false to deny.
-type PermissionFunc func(callID, toolName, tier string) bool
+type PermissionFunc func(callID, toolName, description, tier string) bool
 
 // PermissionDecision is the decision payload sent by the permission API
 // endpoint to the agent goroutine over Session.PermChan.

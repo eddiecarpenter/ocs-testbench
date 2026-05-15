@@ -1163,6 +1163,71 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
+  /config/ai/permissions:
+    get:
+      tags: [AI]
+      operationId: listAIPermissions
+      summary: List AI tool permissions
+      description: |
+        Returns the merged list of MCP tools and their persisted permission
+        decisions. When the MCP server is unavailable only the DB-persisted
+        rows are returned. Tools with no persisted decision default to "ask".
+      responses:
+        '200':
+          description: List of tool permission records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AIToolPermission'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /config/ai/permissions/{toolName}:
+    patch:
+      tags: [AI]
+      operationId: setAIPermission
+      summary: Set permission decision for an AI tool
+      description: |
+        Persists a permission decision for the named tool. When decision is
+        "ask" the stored record is deleted, resetting the tool to the default
+        prompt-each-time behaviour.
+      parameters:
+        - name: toolName
+          in: path
+          required: true
+          schema:
+            type: string
+          description: MCP tool name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AIPermissionInput'
+      responses:
+        '204':
+          description: Permission updated
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      tags: [AI]
+      operationId: deleteAIPermission
+      summary: Reset AI tool permission to default (ask)
+      parameters:
+        - name: toolName
+          in: path
+          required: true
+          schema:
+            type: string
+          description: MCP tool name
+      responses:
+        '204':
+          description: Permission reset to ask
+        default:
+          $ref: '#/components/responses/Problem'
+
 components:
   parameters:
     IdPath:
@@ -2645,7 +2710,7 @@ components:
 
     AIConfig:
       type: object
-      required: [endpoint, model, apiKeySet]
+      required: [endpoint, model, apiKeySet, thinking]
       description: Current AI assistant configuration (read-only view; API key never exposed).
       properties:
         endpoint:
@@ -2659,6 +2724,11 @@ components:
         apiKeySet:
           type: boolean
           description: True when an API key is configured; the key value is never returned.
+        thinking:
+          type: boolean
+          description: >
+            Whether the model's extended chain-of-thought reasoning mode is enabled
+            (e.g. Qwen3 <think> blocks). Disabled by default for faster responses.
 
     AIConfigInput:
       type: object
@@ -2675,3 +2745,38 @@ components:
           description: |
             API key for the LLM endpoint. Leave blank to keep the existing key.
             Send a new value to replace it.
+        thinking:
+          type: boolean
+          description: >
+            Enable or disable the model's extended reasoning mode.
+            False (default) disables thinking for lower latency.
+
+    AIToolPermission:
+      type: object
+      required: [toolName, decision]
+      description: Permission decision for a single AI/MCP tool.
+      properties:
+        toolName:
+          type: string
+          description: MCP tool name
+        description:
+          type: string
+          description: Human-readable description of what the tool does
+        tier:
+          type: string
+          description: Permission tier (readonly, write, or destructive)
+          enum: [readonly, write, destructive]
+        decision:
+          type: string
+          description: Persisted decision for this tool
+          enum: [ask, allow, deny]
+
+    AIPermissionInput:
+      type: object
+      required: [decision]
+      description: Input body for PATCH /config/ai/permissions/{toolName}.
+      properties:
+        decision:
+          type: string
+          description: Permission decision to persist
+          enum: [ask, allow, deny]

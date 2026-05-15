@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"bytes"
 	"encoding/json"
 	"net/http"
@@ -39,10 +40,10 @@ func makePermissionRouter(sessions *ai.SessionManager) http.Handler {
 // TestAIPermission_AllowOnce verifies that an allow_once decision is
 // delivered to the session's PermChan and the endpoint returns 204.
 func TestAIPermission_AllowOnce(t *testing.T) {
-	sm := ai.NewSessionManager()
+	sm := ai.NewSessionManager(nil)
 	defer sm.Stop()
 
-	sess := sm.GetOrCreate("sess-allow")
+	sess := sm.GetOrCreate(context.Background(), "sess-allow")
 	// Create a buffered PermChan to simulate an in-flight permission prompt.
 	sess.PermChan = make(chan ai.PermissionDecision, 1)
 
@@ -65,10 +66,10 @@ func TestAIPermission_AllowOnce(t *testing.T) {
 
 // TestAIPermission_AllowAlways verifies allow_always decision is delivered.
 func TestAIPermission_AllowAlways(t *testing.T) {
-	sm := ai.NewSessionManager()
+	sm := ai.NewSessionManager(nil)
 	defer sm.Stop()
 
-	sess := sm.GetOrCreate("sess-always")
+	sess := sm.GetOrCreate(context.Background(), "sess-always")
 	sess.PermChan = make(chan ai.PermissionDecision, 1)
 
 	r := makePermissionRouter(sm)
@@ -87,10 +88,10 @@ func TestAIPermission_AllowAlways(t *testing.T) {
 
 // TestAIPermission_Deny verifies deny decision is delivered.
 func TestAIPermission_Deny(t *testing.T) {
-	sm := ai.NewSessionManager()
+	sm := ai.NewSessionManager(nil)
 	defer sm.Stop()
 
-	sess := sm.GetOrCreate("sess-deny")
+	sess := sm.GetOrCreate(context.Background(), "sess-deny")
 	sess.PermChan = make(chan ai.PermissionDecision, 1)
 
 	r := makePermissionRouter(sm)
@@ -109,7 +110,7 @@ func TestAIPermission_Deny(t *testing.T) {
 
 // TestAIPermission_SessionNotFound verifies 404 when session is unknown.
 func TestAIPermission_SessionNotFound(t *testing.T) {
-	sm := ai.NewSessionManager()
+	sm := ai.NewSessionManager(nil)
 	defer sm.Stop()
 
 	r := makePermissionRouter(sm)
@@ -122,10 +123,10 @@ func TestAIPermission_SessionNotFound(t *testing.T) {
 // TestAIPermission_NilPermChan_Returns409 verifies that 409 Conflict is
 // returned when no permission prompt is currently in flight.
 func TestAIPermission_NilPermChan_Returns409(t *testing.T) {
-	sm := ai.NewSessionManager()
+	sm := ai.NewSessionManager(nil)
 	defer sm.Stop()
 
-	sm.GetOrCreate("sess-no-perm")
+	sm.GetOrCreate(context.Background(), "sess-no-perm")
 	// PermChan is nil — no prompt in flight.
 
 	r := makePermissionRouter(sm)
@@ -138,10 +139,10 @@ func TestAIPermission_NilPermChan_Returns409(t *testing.T) {
 // TestAIPermission_FullPermChan_Returns409 verifies 409 when the buffer
 // already holds a decision (second send would block).
 func TestAIPermission_FullPermChan_Returns409(t *testing.T) {
-	sm := ai.NewSessionManager()
+	sm := ai.NewSessionManager(nil)
 	defer sm.Stop()
 
-	sess := sm.GetOrCreate("sess-full")
+	sess := sm.GetOrCreate(context.Background(), "sess-full")
 	sess.PermChan = make(chan ai.PermissionDecision, 1)
 	// Fill the buffer.
 	sess.PermChan <- ai.PermissionDecision{CallID: "old", Decision: "allow_once"}
@@ -156,7 +157,7 @@ func TestAIPermission_FullPermChan_Returns409(t *testing.T) {
 // TestAIPermission_MissingSessionID_Returns400 verifies 400 when the
 // X-Session-ID header is absent.
 func TestAIPermission_MissingSessionID_Returns400(t *testing.T) {
-	sm := ai.NewSessionManager()
+	sm := ai.NewSessionManager(nil)
 	defer sm.Stop()
 
 	r := makePermissionRouter(sm)
@@ -170,10 +171,10 @@ func TestAIPermission_MissingSessionID_Returns400(t *testing.T) {
 // TestAIPermission_InvalidDecision_Returns400 verifies 400 for unrecognised
 // decision values.
 func TestAIPermission_InvalidDecision_Returns400(t *testing.T) {
-	sm := ai.NewSessionManager()
+	sm := ai.NewSessionManager(nil)
 	defer sm.Stop()
 
-	sess := sm.GetOrCreate("sess-invalid")
+	sess := sm.GetOrCreate(context.Background(), "sess-invalid")
 	sess.PermChan = make(chan ai.PermissionDecision, 1)
 
 	r := makePermissionRouter(sm)
@@ -188,10 +189,10 @@ func TestAIPermission_InvalidDecision_Returns400(t *testing.T) {
 // handler uses a non-blocking select so it never hangs regardless of
 // agent goroutine state.
 func TestAIPermission_HandlerIsNonBlocking(t *testing.T) {
-	sm := ai.NewSessionManager()
+	sm := ai.NewSessionManager(nil)
 	defer sm.Stop()
 
-	sess := sm.GetOrCreate("sess-nonblock")
+	sess := sm.GetOrCreate(context.Background(), "sess-nonblock")
 	sess.PermChan = make(chan ai.PermissionDecision, 1)
 
 	r := makePermissionRouter(sm)

@@ -25,6 +25,16 @@ export interface ChatState {
   thread: ThreadItem[];
   /** True while the SSE stream is open. */
   streaming: boolean;
+  /** Epoch ms when the current stream started; null when no stream has run yet. */
+  streamStartedAt: number | null;
+  /** Epoch ms when the last stream ended; null while streaming or before any stream. */
+  streamEndedAt: number | null;
+  /** Input tokens used in the current/last turn (from LLM usage report). */
+  inputTokens: number;
+  /** Output tokens generated in the current/last turn (from LLM usage report). */
+  outputTokens: number;
+  /** Running character count of streamed output — used for live ~token estimate. */
+  outputChars: number;
   /** Non-null when a tool approval prompt is pending. */
   pendingPrompt: PermissionPromptState | null;
   /** Tools approved for the entire session. */
@@ -72,6 +82,13 @@ export interface ChatActions {
   /** Mark streaming as ended (clean finish or error). */
   endStream: () => void;
 
+  /**
+   * Abort an in-flight stream. Removes the trailing partial assistant
+   * message (if any) so the thread doesn't carry an incomplete response
+   * into the next turn.
+   */
+  abortStream: () => void;
+
   /** Append an error message to the thread. */
   appendError: (message: string) => void;
 
@@ -84,6 +101,11 @@ export interface ChatActions {
 const initialState: ChatState = {
   thread: [],
   streaming: false,
+  streamStartedAt: null,
+  streamEndedAt: null,
+  inputTokens: 0,
+  outputTokens: 0,
+  outputChars: 0,
   pendingPrompt: null,
   sessionPermissions: {},
   _idSeq: 0,
@@ -159,15 +181,16 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
 
       case 'token': {
         const state = get();
+        const chars = event.data.chunk.length;
         const last = lastAssistantMessage(state.thread);
         if (last && last.kind === 'assistant') {
-          // Append chunk to existing assistant message.
           set({
             thread: state.thread.map((i) =>
               i.id === last.id && i.kind === 'assistant'
                 ? { ...i, content: i.content + event.data.chunk }
                 : i,
             ),
+            outputChars: state.outputChars + chars,
           });
         } else {
           const [id, next] = nextId(state);
@@ -177,6 +200,7 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
               { kind: 'assistant', id, content: event.data.chunk },
             ],
             _idSeq: next._idSeq,
+            outputChars: state.outputChars + chars,
           });
         }
         break;
@@ -202,7 +226,9 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
                 description,
                 tier,
                 status: callStatus,
-                result: result !== null ? String(result) : null,
+                result: result !== null
+                  ? (typeof result === 'string' ? result : JSON.stringify(result, null, 2))
+                  : null,
               },
             },
           ],
@@ -231,8 +257,25 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
         break;
       }
 
+      case 'usage_update': {
+        // Fired mid-stream as soon as counts are known (Anthropic: on
+        // message_start; OpenAI: on the final usage chunk).
+        const u = event.data;
+        set((s) => ({
+          inputTokens:  u.inputTokens  ?? s.inputTokens,
+          outputTokens: u.outputTokens ?? s.outputTokens,
+        }));
+        break;
+      }
+
       case 'done': {
-        set({ streaming: false });
+        set((s) => ({
+          streaming: false,
+          streamEndedAt: Date.now(),
+          // Prefer values already set by usage_update; fall back to done payload.
+          inputTokens:  event.data.inputTokens  ?? s.inputTokens,
+          outputTokens: event.data.outputTokens ?? s.outputTokens,
+        }));
         break;
       }
     }
@@ -283,11 +326,33 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
   },
 
   startStream() {
-    set({ streaming: true });
+    set({ streaming: true, streamStartedAt: Date.now(), streamEndedAt: null, inputTokens: 0, outputTokens: 0, outputChars: 0 });
   },
 
   endStream() {
-    set({ streaming: false });
+    set({ streaming: false, streamEndedAt: Date.now() });
+  },
+
+  abortStream() {
+    const state = get();
+    // Mark the trailing partial assistant message (if any) and the user message
+    // that triggered the aborted stream as aborted=true.  They remain visible
+    // in the thread but are excluded from the next request payload.
+    const thread = state.thread.map((item, i, arr) => {
+      const isLast = i === arr.length - 1;
+      const isSecondLast = i === arr.length - 2;
+      if (isLast && item.kind === 'assistant') {
+        return { ...item, aborted: true as const };
+      }
+      if (isLast && item.kind === 'user') {
+        return { ...item, aborted: true as const };
+      }
+      if (isSecondLast && item.kind === 'user' && arr.at(-1)?.kind === 'assistant') {
+        return { ...item, aborted: true as const };
+      }
+      return item;
+    });
+    set({ streaming: false, streamStartedAt: null, streamEndedAt: null, thread });
   },
 
   appendError(message: string) {
@@ -300,6 +365,7 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
       ],
       _idSeq: next._idSeq,
       streaming: false,
+      streamEndedAt: Date.now(),
     });
   },
 

@@ -798,6 +798,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/config/ai/permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List AI tool permissions
+         * @description Returns the merged list of MCP tools and their persisted permission
+         *     decisions. When the MCP server is unavailable only the DB-persisted
+         *     rows are returned. Tools with no persisted decision default to "ask".
+         */
+        get: operations["listAIPermissions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/config/ai/permissions/{toolName}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Reset AI tool permission to default (ask) */
+        delete: operations["deleteAIPermission"];
+        options?: never;
+        head?: never;
+        /**
+         * Set permission decision for an AI tool
+         * @description Persists a permission decision for the named tool. When decision is
+         *     "ask" the stored record is deleted, resetting the tool to the default
+         *     prompt-each-time behaviour.
+         */
+        patch: operations["setAIPermission"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1700,6 +1745,8 @@ export interface components {
             model: string;
             /** @description True when an API key is configured; the key value is never returned. */
             apiKeySet: boolean;
+            /** @description Whether the model's extended chain-of-thought reasoning mode is enabled (e.g. Qwen3 <think> blocks). Disabled by default for faster responses. */
+            thinking: boolean;
         };
         /** @description Input body for PATCH /config/ai. */
         AIConfigInput: {
@@ -1712,6 +1759,33 @@ export interface components {
              *     Send a new value to replace it.
              */
             apiKey?: string;
+            /** @description Enable or disable the model's extended reasoning mode. False (default) disables thinking for lower latency. */
+            thinking?: boolean;
+        };
+        /** @description Permission decision for a single AI/MCP tool. */
+        AIToolPermission: {
+            /** @description MCP tool name */
+            toolName: string;
+            /** @description Human-readable description of what the tool does */
+            description?: string;
+            /**
+             * @description Permission tier (readonly, write, or destructive)
+             * @enum {string}
+             */
+            tier?: "readonly" | "write" | "destructive";
+            /**
+             * @description Persisted decision for this tool
+             * @enum {string}
+             */
+            decision: "ask" | "allow" | "deny";
+        };
+        /** @description Input body for PATCH /config/ai/permissions/{toolName}. */
+        AIPermissionInput: {
+            /**
+             * @description Permission decision to persist
+             * @enum {string}
+             */
+            decision: "ask" | "allow" | "deny";
         };
     };
     responses: {
@@ -2938,6 +3012,75 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listAIPermissions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of tool permission records */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIToolPermission"][];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    deleteAIPermission: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description MCP tool name */
+                toolName: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Permission reset to ask */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    setAIPermission: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description MCP tool name */
+                toolName: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AIPermissionInput"];
+            };
+        };
+        responses: {
+            /** @description Permission updated */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             default: components["responses"]["Problem"];
         };
