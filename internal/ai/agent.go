@@ -36,6 +36,9 @@ type Agent struct {
 
 	mcpURL string // full URL for the MCP endpoint, e.g. "http://host/mcp"
 	prompt string
+	// saveFn is called after every successful Reconfigure so settings survive
+	// restarts. nil in tests and when no persistence path is configured.
+	saveFn func(baseconfig.AIConfig) error
 	// testMCP is non-nil only in tests; overrides the real mcp-go client.
 	testMCP mcpCaller
 }
@@ -46,7 +49,7 @@ func NewAgent(cfg baseconfig.AIConfig, mcpBaseURL string) *Agent {
 	if strings.TrimSpace(cfg.Endpoint) == "" {
 		return nil
 	}
-	llm, err := NewHTTPLLMClient(cfg)
+	llm, err := NewLLMClient(cfg)
 	if err != nil {
 		return nil
 	}
@@ -58,20 +61,68 @@ func NewAgent(cfg baseconfig.AIConfig, mcpBaseURL string) *Agent {
 	}
 }
 
+// MCPTool is a simplified view of a single MCP tool with its permission tier.
+type MCPTool struct {
+	Name        string
+	Description string
+	Tier        string
+}
+
+// ListMCPTools fetches the current MCP tool list and returns a slice of
+// MCPTool values including the permission tier derived from tool annotations.
+// Returns an empty slice (not an error) when the MCP server has no tools.
+func (a *Agent) ListMCPTools(ctx context.Context) ([]MCPTool, error) {
+	caller, err := a.getMCPCaller(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ai: list MCP tools: %w", err)
+	}
+	result, err := caller.ListTools(ctx, mcp.ListToolsRequest{})
+	if err != nil {
+		if strings.Contains(err.Error(), "tools not supported") {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("ai: list MCP tools: %w", err)
+	}
+	out := make([]MCPTool, 0, len(result.Tools))
+	for _, t := range result.Tools {
+		out = append(out, MCPTool{
+			Name:        t.Name,
+			Description: t.Description,
+			Tier:        toolTierFromList(result.Tools, t.Name),
+		})
+	}
+	return out, nil
+}
+
 // Reconfigure atomically swaps the LLM client with one built from cfg.
 // In-flight Run calls continue with the old client; subsequent calls use
 // the new one. Returns an error when cfg.Endpoint is empty or the new
 // client cannot be constructed.
 func (a *Agent) Reconfigure(cfg baseconfig.AIConfig) error {
-	newLLM, err := NewHTTPLLMClient(cfg)
+	newLLM, err := NewLLMClient(cfg)
 	if err != nil {
 		return fmt.Errorf("ai: reconfigure: %w", err)
 	}
 	a.mu.Lock()
 	a.llm = newLLM
 	a.cfg = cfg
+	saveFn := a.saveFn
 	a.mu.Unlock()
+	if saveFn != nil {
+		if err := saveFn(cfg); err != nil {
+			// Log but don't fail the reconfigure — in-memory update succeeded.
+			fmt.Printf("ai: persist config: %v\n", err)
+		}
+	}
 	return nil
+}
+
+// SetSaveFn registers the function called after every successful Reconfigure
+// to persist the config across restarts. Call once after construction.
+func (a *Agent) SetSaveFn(fn func(baseconfig.AIConfig) error) {
+	a.mu.Lock()
+	a.saveFn = fn
+	a.mu.Unlock()
 }
 
 // GetConfig returns a copy of the current AIConfig with the API key masked.
@@ -206,6 +257,7 @@ func (a *Agent) Run(
 	messages = append(messages, history...)
 
 	updatedHistory := append([]Message(nil), history...)
+	var totalUsage Usage
 
 	// Agentic loop — runs until the LLM produces a final response with no
 	// tool_calls, or the context is cancelled, or a fatal error occurs.
@@ -214,10 +266,27 @@ func (a *Agent) Run(
 			return updatedHistory, ctx.Err()
 		}
 
-		resp, err := a.llmClient().Complete(ctx, CompletionRequest{
+		req := CompletionRequest{
 			Messages: messages,
 			Tools:    toolDefs,
-		})
+		}
+		// When thinking is disabled, explicitly tell the model to skip its
+		// chain-of-thought reasoning phase (Qwen3 and compatible models).
+		if !a.cfg.Thinking {
+			f := false
+			req.EnableThinking = &f
+		}
+		resp, err := a.llmClient().CompleteStream(ctx, req,
+			func(chunk string) {
+				_ = emit("token", map[string]string{"chunk": chunk})
+			},
+			func(u Usage) {
+				_ = emit("usage_update", map[string]any{
+					"inputTokens":  u.InputTokens,
+					"outputTokens": u.OutputTokens,
+				})
+			},
+		)
 		if err != nil {
 			_ = emit("error", map[string]string{"message": "LLM error: " + err.Error()})
 			return updatedHistory, nil
@@ -226,20 +295,19 @@ func (a *Agent) Run(
 			_ = emit("error", map[string]string{"message": "LLM returned no choices"})
 			return updatedHistory, nil
 		}
+		totalUsage.InputTokens += resp.Usage.InputTokens
+		totalUsage.OutputTokens += resp.Usage.OutputTokens
 
 		choice := resp.Choices[0].Message
 		messages = append(messages, choice)
 
-		// No tool calls → stream the final text response.
+		// No tool calls → streaming is complete; signal done with token usage.
 		if len(choice.ToolCalls) == 0 {
 			updatedHistory = append(updatedHistory, choice)
-			chunks := splitIntoChunks(choice.Content, 50)
-			for _, chunk := range chunks {
-				if err := emit("token", map[string]string{"chunk": chunk}); err != nil {
-					return updatedHistory, nil
-				}
-			}
-			_ = emit("done", map[string]any{})
+			_ = emit("done", map[string]any{
+				"inputTokens":  totalUsage.InputTokens,
+				"outputTokens": totalUsage.OutputTokens,
+			})
 			return updatedHistory, nil
 		}
 
@@ -255,7 +323,7 @@ func (a *Agent) Run(
 
 			// Permission check for non-readonly tools.
 			if tier != "readonly" {
-				if !perm(tc.ID, tc.Function.Name, tier) {
+				if !perm(tc.ID, tc.Function.Name, toolDescription(toolsResult.Tools, tc.Function.Name), tier) {
 					// Denied — inject an error result so the LLM can recover.
 					errMsg := Message{
 						Role:       "tool",
@@ -297,14 +365,12 @@ func (a *Agent) Run(
 			}
 
 			// Emit tool_call SSE event to the frontend.
-			var resultAny any
-			_ = json.Unmarshal([]byte(resultContent), &resultAny)
 			_ = emit("tool_call", map[string]any{
 				"id":          tc.ID,
 				"name":        tc.Function.Name,
 				"description": toolDescription(toolsResult.Tools, tc.Function.Name),
 				"tier":        tier,
-				"result":      resultAny,
+				"result":      resultContent,
 			})
 
 			// Append tool result message for the next LLM call.
@@ -324,10 +390,14 @@ func (a *Agent) Run(
 func mcpToolsToOpenAI(tools []mcp.Tool) []ToolDefinition {
 	defs := make([]ToolDefinition, 0, len(tools))
 	for _, t := range tools {
+		// Always include "properties" — even as an empty object — because
+		// strict OpenAI-compatible validators (LM Studio, etc.) require the
+		// field to be present and reject requests where it is absent.
 		params := map[string]any{
-			"type": "object",
+			"type":       "object",
+			"properties": map[string]any{},
 		}
-		// Preserve the MCP input schema properties if present.
+		// Overwrite with the actual schema properties when present.
 		if len(t.InputSchema.Properties) > 0 {
 			props := make(map[string]any, len(t.InputSchema.Properties))
 			for k, v := range t.InputSchema.Properties {
@@ -406,20 +476,3 @@ func mcpResultToString(result *mcp.CallToolResult) string {
 	return string(b)
 }
 
-// splitIntoChunks splits content into chunks of at most chunkSize runes.
-// This simulates token streaming for the frontend.
-func splitIntoChunks(content string, chunkSize int) []string {
-	runes := []rune(content)
-	var chunks []string
-	for i := 0; i < len(runes); i += chunkSize {
-		end := i + chunkSize
-		if end > len(runes) {
-			end = len(runes)
-		}
-		chunks = append(chunks, string(runes[i:end]))
-	}
-	if len(chunks) == 0 {
-		chunks = []string{""}
-	}
-	return chunks
-}

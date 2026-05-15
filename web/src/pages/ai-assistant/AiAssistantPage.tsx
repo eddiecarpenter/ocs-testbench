@@ -30,14 +30,19 @@ function StreamingIndicator() {
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
-    if (streamStartedAt === null) { setElapsed(0); return; } // eslint-disable-line react-hooks/set-state-in-effect
+    if (streamStartedAt === null) {
+      setElapsed(0);
+      return;
+    }
     if (!streaming) {
+      // Stream finished — show the final elapsed time and stop ticking.
       const final = streamEndedAt !== null
         ? Math.floor((streamEndedAt - streamStartedAt) / 1000)
         : elapsed;
       setElapsed(final);
       return;
     }
+    // Tick every second while streaming.
     const id = setInterval(() => {
       setElapsed(Math.floor((Date.now() - streamStartedAt) / 1000));
     }, 1000);
@@ -92,7 +97,7 @@ export function AiAssistantPage() {
   const approveAlways = useChatStore((s) => s.approveAlways);
   const reset = useChatStore((s) => s.reset);
 
-  const { sendMessage, abort, approvePermission } = useChatSse();
+  const { sendMessage, abort } = useChatSse();
 
   const [hideToolCalls] = useLocalStorage({ key: 'ai-hide-tool-calls', defaultValue: false });
 
@@ -100,19 +105,8 @@ export function AiAssistantPage() {
   const awaitingPermission = pendingPrompt !== null;
 
   function handleDeny(callId: string) {
-    void approvePermission(callId, 'deny');
     abort();
     denyPermission(callId);
-  }
-
-  function handleOnce(callId: string) {
-    void approvePermission(callId, 'allow_once');
-    approveOnce(callId);
-  }
-
-  function handleAlways(callId: string) {
-    void approvePermission(callId, 'allow_always');
-    approveAlways(callId);
   }
 
   function handleSubmit(message: string) {
@@ -155,8 +149,8 @@ export function AiAssistantPage() {
         <PermissionPrompt
           prompt={pendingPrompt}
           onDeny={handleDeny}
-          onOnce={handleOnce}
-          onAlways={handleAlways}
+          onOnce={approveOnce}
+          onAlways={approveAlways}
         />
       )}
 

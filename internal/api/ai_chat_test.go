@@ -154,7 +154,7 @@ func newLLMServer(t *testing.T, responses []map[string]any) *httptest.Server {
 			}},
 		}
 		b, _ := json.Marshal(finalChunk)
-		fmt.Fprintf(w, "data: %s\n\n", b)  //nolint:errcheck
+		fmt.Fprintf(w, "data: %s\n\n", b) //nolint:errcheck
 		fmt.Fprintf(w, "data: [DONE]\n\n") //nolint:errcheck
 	}))
 	t.Cleanup(srv.Close)
