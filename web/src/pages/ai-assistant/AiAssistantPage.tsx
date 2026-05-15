@@ -30,19 +30,14 @@ function StreamingIndicator() {
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
-    if (streamStartedAt === null) {
-      setElapsed(0);
-      return;
-    }
+    if (streamStartedAt === null) { setElapsed(0); return; } // eslint-disable-line react-hooks/set-state-in-effect
     if (!streaming) {
-      // Stream finished — show the final elapsed time and stop ticking.
       const final = streamEndedAt !== null
         ? Math.floor((streamEndedAt - streamStartedAt) / 1000)
         : elapsed;
       setElapsed(final);
       return;
     }
-    // Tick every second while streaming.
     const id = setInterval(() => {
       setElapsed(Math.floor((Date.now() - streamStartedAt) / 1000));
     }, 1000);
