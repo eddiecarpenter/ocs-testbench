@@ -213,4 +213,3 @@ func listAIModels(agent *internalaiai.Agent) http.HandlerFunc {
 		respondJSON(w, http.StatusOK, ids)
 	}
 }
-

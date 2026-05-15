@@ -475,4 +475,3 @@ func mcpResultToString(result *mcp.CallToolResult) string {
 	b, _ := json.Marshal(map[string]string{"result": text})
 	return string(b)
 }
-

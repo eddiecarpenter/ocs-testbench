@@ -31,11 +31,11 @@ type anthropicMessage struct {
 type anthropicContent struct {
 	Type      string          `json:"type"`
 	Text      string          `json:"text,omitempty"`
-	ID        string          `json:"id,omitempty"`         // tool_use
-	Name      string          `json:"name,omitempty"`       // tool_use
-	Input     json.RawMessage `json:"input,omitempty"`      // tool_use
+	ID        string          `json:"id,omitempty"`          // tool_use
+	Name      string          `json:"name,omitempty"`        // tool_use
+	Input     json.RawMessage `json:"input,omitempty"`       // tool_use
 	ToolUseID string          `json:"tool_use_id,omitempty"` // tool_result
-	Content   string          `json:"content,omitempty"`    // tool_result
+	Content   string          `json:"content,omitempty"`     // tool_result
 }
 
 type anthropicTool struct {
@@ -61,7 +61,7 @@ type anthropicEvent struct {
 }
 
 type anthropicDelta struct {
-	Type        string `json:"type"`         // text_delta | input_json_delta
+	Type        string `json:"type"` // text_delta | input_json_delta
 	Text        string `json:"text"`
 	PartialJSON string `json:"partial_json"`
 	StopReason  string `json:"stop_reason"`

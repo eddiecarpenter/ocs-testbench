@@ -809,12 +809,13 @@ function AiAssistantCard() {
   // Seed local state from server config on first successful fetch.
   useEffect(() => {
     if (!serverCfg || seeded) return;
+    /* eslint-disable react-hooks/set-state-in-effect */
     setProvider(detectProvider(serverCfg.endpoint));
     setEndpoint(serverCfg.endpoint);
     setModel(serverCfg.model);
     setThinking(serverCfg.thinking ?? false);
-    // Don't seed apiKey — user types a new value to change it.
     setSeeded(true);
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [serverCfg, seeded]);
 
   // Fetch model list when an endpoint is configured; pass the unsaved API key

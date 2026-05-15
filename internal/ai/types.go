@@ -113,8 +113,8 @@ type streamChoice struct {
 
 // streamDelta carries the incremental content for a streaming choice.
 type streamDelta struct {
-	Content   string            `json:"content"`
-	ToolCalls []toolCallDelta   `json:"tool_calls"`
+	Content   string          `json:"content"`
+	ToolCalls []toolCallDelta `json:"tool_calls"`
 }
 
 // toolCallDelta is an incremental fragment of a tool call in a streaming
