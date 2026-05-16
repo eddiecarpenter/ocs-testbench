@@ -92,7 +92,7 @@ export function AiAssistantPage() {
   const approveAlways = useChatStore((s) => s.approveAlways);
   const reset = useChatStore((s) => s.reset);
 
-  const { sendMessage, abort } = useChatSse();
+  const { sendMessage, abort, approvePermission } = useChatSse();
 
   const [hideToolCalls] = useLocalStorage({ key: 'ai-hide-tool-calls', defaultValue: false });
 
@@ -100,8 +100,19 @@ export function AiAssistantPage() {
   const awaitingPermission = pendingPrompt !== null;
 
   function handleDeny(callId: string) {
+    void approvePermission(callId, 'deny');
     abort();
     denyPermission(callId);
+  }
+
+  function handleOnce(callId: string) {
+    void approvePermission(callId, 'allow_once');
+    approveOnce(callId);
+  }
+
+  function handleAlways(callId: string) {
+    void approvePermission(callId, 'allow_always');
+    approveAlways(callId);
   }
 
   function handleSubmit(message: string) {
@@ -144,8 +155,8 @@ export function AiAssistantPage() {
         <PermissionPrompt
           prompt={pendingPrompt}
           onDeny={handleDeny}
-          onOnce={approveOnce}
-          onAlways={approveAlways}
+          onOnce={handleOnce}
+          onAlways={handleAlways}
         />
       )}
 
