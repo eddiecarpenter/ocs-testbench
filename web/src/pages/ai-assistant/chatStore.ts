@@ -23,6 +23,9 @@ import type {
 export interface ChatState {
   /** Ordered thread items (messages, tool calls, planning blocks). */
   thread: ThreadItem[];
+  /** Session ID returned by the server in X-Session-ID — needed to POST
+   *  permission decisions back to /ai/chat/permission. */
+  sessionId: string | null;
   /** True while the SSE stream is open. */
   streaming: boolean;
   /** Epoch ms when the current stream started; null when no stream has run yet. */
@@ -76,6 +79,9 @@ export interface ChatActions {
    */
   approveAlways: (callId: string) => void;
 
+  /** Store the session ID returned by the server for this stream. */
+  setSessionId: (id: string) => void;
+
   /** Mark streaming as started. */
   startStream: () => void;
 
@@ -100,6 +106,7 @@ export interface ChatActions {
 
 const initialState: ChatState = {
   thread: [],
+  sessionId: null,
   streaming: false,
   streamStartedAt: null,
   streamEndedAt: null,
@@ -323,6 +330,10 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
       streaming: true,
     });
     void callId; // identified by prompt.toolName
+  },
+
+  setSessionId(id: string) {
+    set({ sessionId: id });
   },
 
   startStream() {

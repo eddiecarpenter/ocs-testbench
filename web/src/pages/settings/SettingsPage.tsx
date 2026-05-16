@@ -5,6 +5,7 @@ import {
   Box,
   Button,
   Card,
+  Collapse,
   Divider,
   Group,
   Modal,
@@ -21,7 +22,6 @@ import {
   Text,
   Textarea,
   TextInput,
-  Title,
   useMantineColorScheme,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
@@ -102,7 +102,41 @@ function SectionLabel({ children }: { children: string }) {
  * the stored state so a user can discard in-progress edits without
  * reloading the page.
  */
+// ─── Nav items ───────────────────────────────────────────────────────────────
+
+const NAV_ITEMS = [
+  { id: 'general',     label: 'General' },
+  { id: 'diameter',    label: 'Diameter' },
+  { id: 'ai',          label: 'AI Assistant' },
+  { id: 'permissions', label: 'AI Permissions' },
+  { id: 'dictionaries', label: 'Dictionaries' },
+] as const;
+
+type NavId = typeof NAV_ITEMS[number]['id'];
+
+function NavItem({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <Box
+      px="md"
+      py="xs"
+      onClick={onClick}
+      style={{
+        cursor: 'pointer',
+        borderRadius: 'var(--mantine-radius-sm)',
+        backgroundColor: active ? 'var(--mantine-color-blue-light)' : 'transparent',
+        color: active ? 'var(--mantine-color-blue-filled)' : 'inherit',
+        fontWeight: active ? 600 : 400,
+        fontSize: 'var(--mantine-font-size-sm)',
+        userSelect: 'none',
+      }}
+    >
+      {label}
+    </Box>
+  );
+}
+
 export function SettingsPage() {
+  const [activeSection, setActiveSection] = useState<NavId>('general');
   const settings = useSettings();
   const { colorScheme, setColorScheme } = useMantineColorScheme();
 
@@ -145,19 +179,40 @@ export function SettingsPage() {
   };
 
   return (
-    <Stack gap="lg" p="md" maw={720}>
-      <Stack gap={4}>
-        <Title order={2} fw={600}>
-          Settings
-        </Title>
-        <Text c="dimmed" size="sm">
-          Configure testbench defaults and preferences
-        </Text>
-      </Stack>
+    <Group align="flex-start" gap={0} style={{ height: 'calc(100vh - 60px)' }}>
+      {/* ─── Left navigation ─────────────────────────────────── */}
+      <Box
+        p="sm"
+        style={{
+          width: 180,
+          flexShrink: 0,
+          borderRight: '1px solid light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-5))',
+          height: '100%',
+        }}
+      >
+        <Stack gap={2} pt="xs">
+          <Text size="xs" fw={600} c="dimmed" tt="uppercase" px="md" pb={4} style={{ letterSpacing: 0.5 }}>
+            Settings
+          </Text>
+          {NAV_ITEMS.map((item) => (
+            <NavItem
+              key={item.id}
+              label={item.label}
+              active={activeSection === item.id}
+              onClick={() => setActiveSection(item.id)}
+            />
+          ))}
+        </Stack>
+      </Box>
+
+      {/* ─── Content area ────────────────────────────────────── */}
+      <ScrollArea style={{ flex: 1, height: '100%' }}>
+        <Box p="lg" maw={720}>
 
       <form onSubmit={handleSubmit}>
-        <Stack gap="md">
-          {/* ─── General ───────────────────────────────────────── */}
+        {/* ─── General ─────────────────────────────────────────── */}
+        {activeSection === 'general' && (
+          <Stack gap="md">
           <Card padding="lg" withBorder shadow="xs">
             <Stack gap="md">
               <SectionLabel>General</SectionLabel>
@@ -204,9 +259,7 @@ export function SettingsPage() {
               </Group>
 
               <Group justify="space-between" align="center" wrap="nowrap">
-                <Text size="sm" fw={500}>
-                  Auto-open browser
-                </Text>
+                <Text size="sm" fw={500}>Auto-open browser</Text>
                 <Switch
                   key={form.key('autoOpenBrowser')}
                   {...form.getInputProps('autoOpenBrowser', { type: 'checkbox' })}
@@ -214,9 +267,7 @@ export function SettingsPage() {
               </Group>
 
               <Group justify="space-between" align="center" wrap="nowrap">
-                <Text size="sm" fw={500}>
-                  Log level
-                </Text>
+                <Text size="sm" fw={500}>Log level</Text>
                 <Select
                   data={LOG_LEVELS}
                   allowDeselect={false}
@@ -229,110 +280,78 @@ export function SettingsPage() {
             </Stack>
           </Card>
 
-          {/* ─── Diameter defaults ─────────────────────────────── */}
+          <Divider />
+          <Group justify="flex-end">
+            <Anchor component="button" type="button" size="sm" c="dimmed" onClick={handleReset}
+              style={{ visibility: form.isDirty() ? 'visible' : 'hidden' }}>
+              Reset changes
+            </Anchor>
+            <Button type="submit" disabled={!form.isDirty() || !form.isValid()}>Save</Button>
+          </Group>
+        </Stack>
+        )}
+
+        {/* ─── Diameter ──────────────────────────────────────────── */}
+        {activeSection === 'diameter' && (
+          <Stack gap="md">
           <Card padding="lg" withBorder shadow="xs">
             <Stack gap="md">
               <Stack gap={4}>
                 <SectionLabel>Diameter defaults</SectionLabel>
-                <Text size="xs" c="dimmed">
-                  Used when creating new peers
-                </Text>
+                <Text size="xs" c="dimmed">Used when creating new peers</Text>
               </Stack>
-
-              <TextInput
-                label="Origin-Host suffix"
-                placeholder=".test.local"
-                required
-                key={form.key('originHostSuffix')}
-                {...form.getInputProps('originHostSuffix')}
-              />
-
-              <TextInput
-                label="Origin-Realm"
-                placeholder="test.local"
-                required
-                key={form.key('originRealm')}
-                {...form.getInputProps('originRealm')}
-              />
-
-              <NumberInput
-                label="Watchdog interval"
-                suffix=" seconds"
-                min={5}
-                max={3600}
-                clampBehavior="strict"
-                required
-                key={form.key('watchdogIntervalSeconds')}
-                {...form.getInputProps('watchdogIntervalSeconds')}
-              />
-
-              <Select
-                label="Default transport"
-                data={DIAMETER_TRANSPORTS}
-                allowDeselect={false}
-                checkIconPosition="right"
-                key={form.key('defaultTransport')}
-                {...form.getInputProps('defaultTransport')}
-              />
+              <TextInput label="Origin-Host suffix" placeholder=".test.local" required
+                key={form.key('originHostSuffix')} {...form.getInputProps('originHostSuffix')} />
+              <TextInput label="Origin-Realm" placeholder="test.local" required
+                key={form.key('originRealm')} {...form.getInputProps('originRealm')} />
+              <NumberInput label="Watchdog interval" suffix=" seconds" min={5} max={3600}
+                clampBehavior="strict" required key={form.key('watchdogIntervalSeconds')}
+                {...form.getInputProps('watchdogIntervalSeconds')} />
+              <Select label="Default transport" data={DIAMETER_TRANSPORTS} allowDeselect={false}
+                checkIconPosition="right" key={form.key('defaultTransport')}
+                {...form.getInputProps('defaultTransport')} />
             </Stack>
           </Card>
 
-          {/* ─── SIM provisioning ──────────────────────────────── */}
           <Card padding="lg" withBorder shadow="xs">
             <Stack gap="md">
               <Stack gap={4}>
                 <SectionLabel>SIM provisioning</SectionLabel>
                 <Text size="xs" c="dimmed">
-                  Operator prefix used when generating an ICCID. First
-                  three digits are the MCC; the remainder is the MNC.
+                  Operator prefix used when generating an ICCID. First three digits are the MCC; the
+                  remainder is the MNC.
                 </Text>
               </Stack>
-              <TextInput
-                label="MCCMNC"
-                placeholder="65510"
-                description="5 or 6 digits (e.g. 65510 = MTN South Africa)"
-                required
-                key={form.key('mccmnc')}
-                {...form.getInputProps('mccmnc')}
-              />
+              <TextInput label="MCCMNC" placeholder="65510"
+                description="5 or 6 digits (e.g. 65510 = MTN South Africa)" required
+                key={form.key('mccmnc')} {...form.getInputProps('mccmnc')} />
             </Stack>
           </Card>
 
-          {/* ─── AI Assistant ─────────────────────────────────── */}
-          <AiAssistantCard />
-
-          {/* ─── AI Tool Permissions ───────────────────────────── */}
-          <AIPermissionsCard />
-
-          {/* ─── AVP Dictionaries ──────────────────────────────── */}
-          <DictionariesCard />
-
           <Divider />
-
-          {/* ─── Footer: Reset + Save ──────────────────────────── */}
           <Group justify="flex-end">
-            <Anchor
-              component="button"
-              type="button"
-              size="sm"
-              c="dimmed"
-              onClick={handleReset}
-              style={{
-                visibility: form.isDirty() ? 'visible' : 'hidden',
-              }}
-            >
+            <Anchor component="button" type="button" size="sm" c="dimmed" onClick={handleReset}
+              style={{ visibility: form.isDirty() ? 'visible' : 'hidden' }}>
               Reset changes
             </Anchor>
-            <Button
-              type="submit"
-              disabled={!form.isDirty() || !form.isValid()}
-            >
-              Save
-            </Button>
+            <Button type="submit" disabled={!form.isDirty() || !form.isValid()}>Save</Button>
           </Group>
         </Stack>
+        )}
+
+        {/* ─── AI Assistant ──────────────────────────────────────── */}
+        {activeSection === 'ai' && <AiAssistantCard />}
+
+        {/* ─── AI Permissions ────────────────────────────────────── */}
+        {activeSection === 'permissions' && <AIPermissionsCard />}
+
+        {/* ─── Dictionaries ──────────────────────────────────────── */}
+        {activeSection === 'dictionaries' && <DictionariesCard />}
+
       </form>
-    </Stack>
+        </Box>
+      </ScrollArea>
+    </Group>
   );
 }
 
@@ -406,52 +425,96 @@ function PermissionRow({ perm }: { perm: AIToolPermission }) {
   );
 }
 
+// Tool-name prefix → group label. Order determines display order.
+const PERMISSION_GROUPS: { label: string; match: (name: string) => boolean }[] = [
+  { label: 'Scenarios',   match: (n) => n.includes('scenario') },
+  { label: 'Executions',  match: (n) => n.includes('execution') || n.includes('step') || n.includes('resume') || n.includes('start_') || n.includes('stop_') || n.includes('wait_') },
+  { label: 'Peers',       match: (n) => n.includes('peer') },
+  { label: 'Subscribers', match: (n) => n.includes('subscriber') },
+  { label: 'System',      match: () => true }, // catch-all
+];
+
+function groupPermissions(perms: AIToolPermission[]): { label: string; items: AIToolPermission[] }[] {
+  const assigned = new Set<string>();
+  return PERMISSION_GROUPS.map(({ label, match }) => {
+    const items = perms.filter((p) => !assigned.has(p.toolName) && match(p.toolName));
+    items.forEach((p) => assigned.add(p.toolName));
+    return { label, items };
+  }).filter((g) => g.items.length > 0);
+}
+
+function PermissionGroup({ label, items }: { label: string; items: AIToolPermission[] }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <Card padding={0} withBorder shadow="xs">
+      <Box
+        px="md"
+        py="xs"
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          cursor: 'pointer',
+          borderBottom: open ? '1px solid light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-5))' : 'none',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
+      >
+        <Text size="sm" fw={600}>{label}</Text>
+        <Text size="xs" c="dimmed">{open ? '▲' : '▼'} {items.length} tools</Text>
+      </Box>
+      <Collapse expanded={open}>
+        <Table striped highlightOnHover withColumnBorders>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Tool</Table.Th>
+              <Table.Th>Description</Table.Th>
+              <Table.Th>Tier</Table.Th>
+              <Table.Th>Permission</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {items.map((p) => (
+              <PermissionRow key={p.toolName} perm={p} />
+            ))}
+          </Table.Tbody>
+        </Table>
+      </Collapse>
+    </Card>
+  );
+}
+
 /**
- * AI Tool Permissions card.
- *
- * Lists every MCP tool with its current permission decision. Changes are
- * saved inline — each SegmentedControl fires a PATCH immediately.
+ * AI Tool Permissions card — tools grouped by domain, each group collapsible.
+ * Changes are saved inline — each SegmentedControl fires a PATCH immediately.
  */
 function AIPermissionsCard() {
   const { data: permissions, isLoading } = useAIPermissions();
+  const groups = permissions ? groupPermissions(permissions) : [];
 
   return (
-    <Card padding="lg" withBorder shadow="xs">
-      <Stack gap="md">
-        <Stack gap={4}>
-          <SectionLabel>AI Tool Permissions</SectionLabel>
-          <Text size="xs" c="dimmed">
-            Configure how the AI assistant handles each MCP tool call.
-            Changes take effect immediately — no restart required.
-          </Text>
-        </Stack>
-
-        {isLoading ? (
-          <Skeleton height={120} radius="sm" />
-        ) : !permissions || permissions.length === 0 ? (
-          <Text size="sm" c="dimmed" ta="center" py="sm">
-            No MCP tools available. Start the server with a configured AI
-            endpoint to see tools here.
-          </Text>
-        ) : (
-          <Table striped highlightOnHover withTableBorder withColumnBorders>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Tool</Table.Th>
-                <Table.Th>Description</Table.Th>
-                <Table.Th>Tier</Table.Th>
-                <Table.Th>Permission</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {permissions.map((p) => (
-                <PermissionRow key={p.toolName} perm={p} />
-              ))}
-            </Table.Tbody>
-          </Table>
-        )}
+    <Stack gap="md">
+      <Stack gap={4}>
+        <SectionLabel>AI Tool Permissions</SectionLabel>
+        <Text size="xs" c="dimmed">
+          Configure how the AI assistant handles each MCP tool call.
+          Changes take effect immediately — no restart required.
+        </Text>
       </Stack>
-    </Card>
+
+      {isLoading ? (
+        <Skeleton height={120} radius="sm" />
+      ) : groups.length === 0 ? (
+        <Text size="sm" c="dimmed" ta="center" py="sm">
+          No MCP tools available. Start the server with a configured AI endpoint to see tools here.
+        </Text>
+      ) : (
+        <Stack gap="sm">
+          {groups.map((g) => (
+            <PermissionGroup key={g.label} label={g.label} items={g.items} />
+          ))}
+        </Stack>
+      )}
+    </Stack>
   );
 }
 

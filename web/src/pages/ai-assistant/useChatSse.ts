@@ -33,6 +33,28 @@ export function useChatSse() {
   const store = useChatStore;
   const abortRef = useRef<AbortController | null>(null);
 
+  /** POST a permission decision to the backend so the blocked agent goroutine
+   *  can continue. Must be called for every Deny / Once / Always action. */
+  const approvePermission = useCallback(
+    async (callId: string, decision: 'allow_once' | 'allow_always' | 'deny') => {
+      const { sessionId } = store.getState();
+      if (!sessionId) return;
+      try {
+        await fetch('/api/v1/ai/chat/permission', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Session-ID': sessionId,
+          },
+          body: JSON.stringify({ callId, decision }),
+        });
+      } catch {
+        // best-effort — stream will time out on its own if this fails
+      }
+    },
+    [store],
+  );
+
   const sendMessage = useCallback(
     async (userText: string) => {
       const {
@@ -41,6 +63,7 @@ export function useChatSse() {
         endStream,
         appendError,
         applyEvent,
+        setSessionId,
         thread,
       } = store.getState();
 
@@ -75,6 +98,10 @@ export function useChatSse() {
           appendError(`Request failed: ${response.status} ${response.statusText}`);
           return;
         }
+
+        // Capture the session ID so permission decisions can be routed back.
+        const sid = response.headers.get('X-Session-ID');
+        if (sid) setSessionId(sid);
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -123,5 +150,5 @@ export function useChatSse() {
     store.getState().abortStream();
   }, [store]);
 
-  return { sendMessage, abort };
+  return { sendMessage, abort, approvePermission };
 }
