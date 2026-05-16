@@ -25,9 +25,11 @@
 package baseconfig
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -99,9 +101,13 @@ type Peer struct {
 // empty the AI assistant feature is disabled — the chat endpoint returns
 // 503 and no LLM client is created.
 type AIConfig struct {
-	Endpoint string `yaml:"endpoint"` // e.g. "https://api.openai.com"
-	Model    string `yaml:"model"`    // e.g. "gpt-4o"
-	APIKey   string `yaml:"api_key"`  // plaintext; operators use env-var injection
+	Endpoint string `yaml:"endpoint" json:"endpoint"` // e.g. "https://api.openai.com"
+	Model    string `yaml:"model"    json:"model"`    // e.g. "gpt-4o"
+	APIKey   string `yaml:"api_key"  json:"apiKey"`   // plaintext; operators use env-var injection
+	// Thinking enables the model's extended reasoning / chain-of-thought mode
+	// (e.g. Qwen3 <think> blocks). Defaults to true; set false to skip
+	// reasoning for faster, cheaper responses on straightforward queries.
+	Thinking bool `yaml:"thinking" json:"thinking"`
 }
 
 // Config is the testbench's full runtime configuration. It embeds the
@@ -161,6 +167,47 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
+// aiOverridePath returns the path of the AI settings override file that sits
+// alongside the main config file. Respects CONFIG_FILE env var so the override
+// lands in the same directory as the config that was actually loaded.
+func aiOverridePath(configPath string) string {
+	if env := os.Getenv(ConfigFileEnv); env != "" {
+		configPath = env
+	}
+	return filepath.Join(filepath.Dir(configPath), "ai-settings.json")
+}
+
+// LoadAIOverride reads the AI settings override file written by SaveAIOverride.
+// Returns (zero, false, nil) when the file does not exist.
+func LoadAIOverride(configPath string) (AIConfig, bool, error) {
+	data, err := os.ReadFile(aiOverridePath(configPath))
+	if os.IsNotExist(err) {
+		return AIConfig{}, false, nil
+	}
+	if err != nil {
+		return AIConfig{}, false, fmt.Errorf("baseconfig: read ai override: %w", err)
+	}
+	var cfg AIConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return AIConfig{}, false, fmt.Errorf("baseconfig: parse ai override: %w", err)
+	}
+	return cfg, true, nil
+}
+
+// SaveAIOverride writes the AI config to the override file so it is loaded on
+// the next restart. The API key is stored in plaintext — the file should be
+// treated with the same care as config.yaml.
+func SaveAIOverride(configPath string, cfg AIConfig) error {
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("baseconfig: marshal ai override: %w", err)
+	}
+	if err := os.WriteFile(aiOverridePath(configPath), data, 0o600); err != nil {
+		return fmt.Errorf("baseconfig: write ai override: %w", err)
+	}
+	return nil
+}
+
 // applyDefaults populates unset fields with sensible local-dev values.
 // Defaults never override values set in YAML — every branch checks
 // the zero value before assigning.
@@ -183,9 +230,10 @@ func (c *Config) applyDefaults() {
 	if c.Server.ReadTimeout == 0 {
 		c.Server.ReadTimeout = 10 * time.Second
 	}
-	if c.Server.WriteTimeout == 0 {
-		c.Server.WriteTimeout = 30 * time.Second
-	}
+	// WriteTimeout intentionally has no default — a zero value means no
+	// timeout, which is correct for a server that serves long-lived SSE
+	// streams. Operators who need a hard limit can set write_timeout in
+	// config.yaml; setting it non-zero will kill streaming connections.
 	if c.Server.IdleTimeout == 0 {
 		c.Server.IdleTimeout = 60 * time.Second
 	}
@@ -197,6 +245,9 @@ func (c *Config) applyDefaults() {
 	if c.AI.Endpoint != "" && c.AI.Model == "" {
 		c.AI.Model = "gpt-4o"
 	}
+	// Thinking defaults to false (disabled) — fast responses are preferred
+	// for tool-dispatch workloads. Operators can enable it via Settings or
+	// by setting `thinking: true` in config.yaml.
 }
 
 // validate checks the required fields and the enum-shaped fields. Returns

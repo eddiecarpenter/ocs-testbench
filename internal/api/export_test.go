@@ -53,3 +53,8 @@ func PermissionTestRouter(sessions *internalaiai.SessionManager) http.Handler {
 	})
 	return r
 }
+
+// MountAIConfig exposes mountAIConfig for handler tests in the api_test package.
+func MountAIConfig(r chi.Router, agent *internalaiai.Agent) {
+	mountAIConfig(r, agent)
+}

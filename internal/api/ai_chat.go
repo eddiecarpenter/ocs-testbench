@@ -4,11 +4,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	internalaiai "github.com/eddiecarpenter/ocs-testbench/internal/ai"
 )
+
+// zeroTime is the zero value for time.Time, used to clear HTTP write deadlines
+// on long-lived SSE connections so the server's WriteTimeout doesn't kill them.
+var zeroTime time.Time
 
 // mountAIChat registers the AI assistant chat endpoint.
 //
@@ -64,7 +69,7 @@ func handleAIChat(w http.ResponseWriter, r *http.Request, agent *internalaiai.Ag
 	}
 
 	// Load (or create) the session and get the current history.
-	session := sessions.GetOrCreate(sessionID)
+	session := sessions.GetOrCreate(r.Context(), sessionID)
 
 	// Decode the request body to extract the new user message.
 	var req chatRequest
@@ -95,6 +100,12 @@ func handleAIChat(w http.ResponseWriter, r *http.Request, agent *internalaiai.Ag
 		return
 	}
 
+	// Clear the per-connection write deadline so the server's global
+	// WriteTimeout (default 30 s) does not kill a long-running LLM stream.
+	// Normal (non-SSE) endpoints keep their deadline unaffected.
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(zeroTime)
+
 	// emit writes a single SSE event to the response writer and flushes.
 	emit := func(evtType string, data any) error {
 		evt := chatSSEEvent{Type: evtType, Data: data}
@@ -118,7 +129,7 @@ func handleAIChat(w http.ResponseWriter, r *http.Request, agent *internalaiai.Ag
 	// perm implements PermissionFunc: checks AllowAlways first, then waits
 	// for a decision from the permission endpoint (via PermChan), then
 	// registers allow_always decisions for the session lifetime.
-	perm := func(callID, toolName, tier string) bool {
+	perm := func(callID, toolName, description, tier string) bool {
 		if session.AllowAlways[toolName] {
 			return true
 		}
@@ -126,9 +137,10 @@ func handleAIChat(w http.ResponseWriter, r *http.Request, agent *internalaiai.Ag
 		// operator, then block until the decision arrives or the context
 		// is cancelled.
 		_ = emit("permission_required", permissionRequiredData{
-			CallID:   callID,
-			ToolName: toolName,
-			Tier:     tier,
+			CallID:      callID,
+			ToolName:    toolName,
+			Description: description,
+			Tier:        tier,
 		})
 		select {
 		case <-r.Context().Done():
@@ -136,6 +148,8 @@ func handleAIChat(w http.ResponseWriter, r *http.Request, agent *internalaiai.Ag
 		case decision := <-permChan:
 			if decision.Decision == "allow_always" {
 				session.AllowAlways[toolName] = true
+				// Persist the allow_always decision so future sessions don't prompt again.
+				_ = sessions.PersistPermission(r.Context(), sessionID, toolName, "allow")
 			}
 			return decision.Decision == "allow_once" || decision.Decision == "allow_always"
 		}
@@ -144,11 +158,16 @@ func handleAIChat(w http.ResponseWriter, r *http.Request, agent *internalaiai.Ag
 	// Run the agentic loop — this blocks until the LLM produces a final
 	// response (no tool_calls), the context is cancelled, or a fatal error
 	// occurs. The updated history is returned for persistence.
-	updatedHistory, _ := agent.Run(r.Context(), history, emit, perm)
+	updatedHistory, runErr := agent.Run(r.Context(), history, emit, perm)
 
 	// Clear the per-call PermChan so subsequent calls get a fresh channel.
 	session.PermChan = nil
 
-	// Persist the updated history back to the session.
-	sessions.UpdateHistory(sessionID, updatedHistory)
+	// Only persist history when the run completed normally. A non-nil error
+	// means the context was cancelled (user aborted) — rolling back keeps the
+	// session in a clean state so the next prompt isn't contaminated by the
+	// partial/interrupted exchange.
+	if runErr == nil {
+		sessions.UpdateHistory(sessionID, updatedHistory)
+	}
 }

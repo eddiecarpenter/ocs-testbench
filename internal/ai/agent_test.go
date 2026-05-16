@@ -43,6 +43,20 @@ func (m *mockLLMClient) Complete(_ context.Context, _ ai.CompletionRequest) (*ai
 	return &r, nil
 }
 
+// CompleteStream satisfies the LLMClient interface for tests.
+// It delegates to Complete and calls onToken once with the full content
+// so tests do not need to be rewritten for streaming.
+func (m *mockLLMClient) CompleteStream(ctx context.Context, req ai.CompletionRequest, onToken func(string), _ func(ai.Usage)) (*ai.CompletionResponse, error) {
+	resp, err := m.Complete(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if len(resp.Choices) > 0 && resp.Choices[0].Message.Content != "" {
+		onToken(resp.Choices[0].Message.Content)
+	}
+	return resp, nil
+}
+
 // textResponse builds a CompletionResponse with a plain text assistant message.
 func textResponse(content string) ai.CompletionResponse {
 	return ai.CompletionResponse{Choices: []ai.Choice{{
@@ -126,8 +140,8 @@ func captureEmit() (ai.EmitFunc, *[]capturedEvent) {
 	return fn, &events
 }
 
-func alwaysAllow(_ string, _ string, _ string) bool { return true }
-func alwaysDeny(_ string, _ string, _ string) bool  { return false }
+func alwaysAllow(_ string, _ string, _ string, _ string) bool { return true }
+func alwaysDeny(_ string, _ string, _ string, _ string) bool  { return false }
 
 // ---- Tests -----------------------------------------------------------------
 
@@ -367,6 +381,50 @@ func TestAgent_Run_WriteTierPermissionDenied(t *testing.T) {
 func TestNewAgent_NilOnEmptyEndpoint(t *testing.T) {
 	from_testbench := ai.NewAgent(ai.MakeAIConfig(""), "http://localhost:8080")
 	assert.Nil(t, from_testbench, "NewAgent must return nil for empty endpoint")
+}
+
+// TestAgent_Reconfigure_ValidEndpoint verifies that Reconfigure returns nil
+// for a valid endpoint and that GetConfig reflects the new endpoint.
+func TestAgent_Reconfigure_ValidEndpoint(t *testing.T) {
+	a := ai.NewAgentWithClient(&mockLLMClient{}, "http://localhost:8080")
+	require.NotNil(t, a)
+
+	cfg := ai.MakeAIConfig("http://newllm.example.com")
+	err := a.Reconfigure(cfg)
+	assert.NoError(t, err, "Reconfigure with valid endpoint must return nil")
+
+	got := a.GetConfig()
+	assert.Equal(t, "http://newllm.example.com", got.Endpoint, "GetConfig must return updated endpoint")
+}
+
+// TestAgent_Reconfigure_EmptyEndpoint verifies that Reconfigure returns an
+// error when given an empty endpoint.
+func TestAgent_Reconfigure_EmptyEndpoint(t *testing.T) {
+	a := ai.NewAgentWithClient(&mockLLMClient{}, "http://localhost:8080")
+	require.NotNil(t, a)
+
+	err := a.Reconfigure(ai.MakeAIConfig(""))
+	assert.Error(t, err, "Reconfigure with empty endpoint must return an error")
+}
+
+// TestAgent_GetConfig_MasksAPIKey verifies that GetConfig returns "••••"
+// when the API key is non-empty, and an empty string when unset.
+func TestAgent_GetConfig_MasksAPIKey(t *testing.T) {
+	t.Run("key set", func(t *testing.T) {
+		a := ai.NewAgent(ai.MakeAIConfigWithKey("http://llm.example.com", "super-secret"), "http://localhost:8080")
+		require.NotNil(t, a)
+
+		got := a.GetConfig()
+		assert.Equal(t, "••••", got.APIKey, "GetConfig must mask a non-empty API key")
+	})
+
+	t.Run("key empty", func(t *testing.T) {
+		a := ai.NewAgentWithClient(&mockLLMClient{}, "http://localhost:8080")
+		require.NotNil(t, a)
+
+		got := a.GetConfig()
+		assert.Equal(t, "", got.APIKey, "GetConfig must return empty string when no key is set")
+	})
 }
 
 // TestNewAgentWithClient_NonNil verifies that NewAgentWithClient returns

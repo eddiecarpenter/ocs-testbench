@@ -35,17 +35,18 @@ import (
 // without race-condition surprises.
 func NewTestStore() Store {
 	return &testStore{
-		peers:      map[[16]byte]Peer{},
-		peerByName: map[string][16]byte{},
-		subs:       map[[16]byte]Subscriber{},
-		templates:  map[[16]byte]AVPTemplate{},
-		tplByName:  map[string][16]byte{},
-		scenarios:  map[[16]byte]Scenario{},
-		scenByName: map[string][16]byte{},
-		dicts:      map[[16]byte]CustomDictionary{},
-		dictByName: map[string][16]byte{},
-		now:        func() time.Time { return time.Now().UTC() },
-		newID:      randomUUID,
+		peers:         map[[16]byte]Peer{},
+		peerByName:    map[string][16]byte{},
+		subs:          map[[16]byte]Subscriber{},
+		templates:     map[[16]byte]AVPTemplate{},
+		tplByName:     map[string][16]byte{},
+		scenarios:     map[[16]byte]Scenario{},
+		scenByName:    map[string][16]byte{},
+		dicts:         map[[16]byte]CustomDictionary{},
+		dictByName:    map[string][16]byte{},
+		aiPermissions: map[string]AIPermission{},
+		now:           func() time.Time { return time.Now().UTC() },
+		newID:         randomUUID,
 	}
 }
 
@@ -71,6 +72,8 @@ type testStore struct {
 
 	dicts      map[[16]byte]CustomDictionary
 	dictByName map[string][16]byte
+
+	aiPermissions map[string]AIPermission
 
 	// now and newID are injected so tests that need deterministic
 	// timestamps or ids can swap them without touching package-level
@@ -572,6 +575,37 @@ func (t *testStore) DeleteCustomDictionary(ctx context.Context, id pgtype.UUID) 
 	}
 	delete(t.dicts, uuidKey(id))
 	delete(t.dictByName, row.Name)
+	return nil
+}
+
+// ----- ai_tool_permissions ----------------------------------------
+
+func (t *testStore) ListAIPermissions(_ context.Context) ([]AIPermission, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make([]AIPermission, 0, len(t.aiPermissions))
+	for _, p := range t.aiPermissions {
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ToolName < out[j].ToolName })
+	return out, nil
+}
+
+func (t *testStore) UpsertAIPermission(_ context.Context, toolName, decision string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.aiPermissions[toolName] = AIPermission{
+		ToolName:  toolName,
+		Decision:  decision,
+		UpdatedAt: t.now(),
+	}
+	return nil
+}
+
+func (t *testStore) DeleteAIPermission(_ context.Context, toolName string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.aiPermissions, toolName)
 	return nil
 }
 

@@ -118,8 +118,8 @@ server:
 	if cfg.Server.ReadTimeout != 10*time.Second {
 		t.Errorf("Server.ReadTimeout default: got %v, want 10s", cfg.Server.ReadTimeout)
 	}
-	if cfg.Server.WriteTimeout != 30*time.Second {
-		t.Errorf("Server.WriteTimeout default: got %v, want 30s", cfg.Server.WriteTimeout)
+	if cfg.Server.WriteTimeout != 0 {
+		t.Errorf("Server.WriteTimeout default: got %v, want 0 (no timeout — required for SSE streams)", cfg.Server.WriteTimeout)
 	}
 	if cfg.Server.IdleTimeout != 60*time.Second {
 		t.Errorf("Server.IdleTimeout default: got %v, want 60s", cfg.Server.IdleTimeout)

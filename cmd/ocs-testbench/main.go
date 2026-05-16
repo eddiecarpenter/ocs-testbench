@@ -102,10 +102,25 @@ func main() {
 	configPath := flag.String("config", "", "path to config YAML (overrides CONFIG_FILE env)")
 	flag.Parse()
 
-	cfg, err := baseconfig.Load(resolveConfigPath(*configPath))
+	resolvedCfgPath, err := filepath.Abs(resolveConfigPath(*configPath))
+	if err != nil {
+		logging.Error("resolve config path", "err", err)
+		os.Exit(1)
+	}
+	cfg, err := baseconfig.Load(resolvedCfgPath)
 	if err != nil {
 		logging.Error("load config", "err", err)
 		os.Exit(1)
+	}
+
+	// Override AI config with any settings saved via the Settings UI.
+	// The override file (ai-settings.json) sits alongside config.yaml and is
+	// written on every successful PATCH /config/ai.
+	if override, ok, oErr := baseconfig.LoadAIOverride(resolvedCfgPath); ok {
+		cfg.AI = override
+		logging.Info("ai settings override loaded", "endpoint", override.Endpoint, "model", override.Model)
+	} else if oErr != nil {
+		logging.Error("load ai settings override", "err", oErr)
 	}
 
 	if err := logging.Configure(cfg.Logging); err != nil {
@@ -126,7 +141,10 @@ func main() {
 	}
 	s := store.NewStore(pool)
 
-	if err := runWith(ctx, cfg, s, web.FS, nil); err != nil {
+	aiSaveFn := func(c baseconfig.AIConfig) error {
+		return baseconfig.SaveAIOverride(resolvedCfgPath, c)
+	}
+	if err := runWith(ctx, cfg, s, web.FS, nil, aiSaveFn); err != nil {
 		logging.Error("application exited with errors", "err", err)
 		os.Exit(1)
 	}
@@ -169,7 +187,7 @@ func resolveConfigPath(flagValue string) string {
 // addrCh, when non-nil, receives the bound HTTP address as soon as
 // the listener binds. Tests use this to discover the port when
 // cfg.Server.Addr ends in :0.
-func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedded fs.FS, addrCh chan<- string) error {
+func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedded fs.FS, addrCh chan<- string, aiSaveFn func(baseconfig.AIConfig) error) error {
 	if cfg == nil {
 		return errors.New("ocs-testbench: cfg is nil")
 	}
@@ -268,9 +286,13 @@ func runWith(ctx context.Context, cfg *baseconfig.Config, s store.Store, embedde
 	// not configured — the Router's nil guard returns 503 for AI endpoints.
 	// The agent calls MCP tools via the HTTP server's /mcp path, so the
 	// mcpBaseURL must resolve to the bound address.
+	// cfg.AI already incorporates any persisted override loaded in main().
 	mcpBaseURL := "http://" + ln.Addr().String()
 	aiAgent := ai.NewAgent(cfg.AI, mcpBaseURL)
-	aiSessions := ai.NewSessionManager()
+	if aiAgent != nil && aiSaveFn != nil {
+		aiAgent.SetSaveFn(aiSaveFn)
+	}
+	aiSessions := ai.NewSessionManager(s)
 
 	apiRouter := api.Router(s, dmgr, execEngine, dictAdapter, dict.Default, aiAgent, aiSessions, Version)
 

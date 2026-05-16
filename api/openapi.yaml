@@ -39,6 +39,8 @@ tags:
     description: Server-Sent Events stream for live updates
   - name: Docs
     description: Self-describing API — the spec and browsable docs
+  - name: AI
+    description: AI assistant configuration and model discovery
 
 paths:
   # ─────────────── Self-describing API ───────────────
@@ -1062,6 +1064,167 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ResponseTimeSeries'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  # ─────────────── AI Settings Configuration ───────────────
+
+  /config/ai:
+    get:
+      tags: [AI]
+      operationId: getAIConfig
+      summary: Get current AI assistant configuration
+      description: |
+        Returns the configured LLM endpoint, model, and a boolean indicating
+        whether an API key is set. The API key value is never returned.
+        When the AI assistant was not configured at startup, returns a
+        zero-value response (empty endpoint/model, apiKeySet false).
+      responses:
+        '200':
+          description: Current AI configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIConfig'
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      tags: [AI]
+      operationId: updateAIConfig
+      summary: Update AI assistant configuration and hot-reload the LLM client
+      description: |
+        Replaces the LLM endpoint, model, and optionally the API key.
+        Leave `apiKey` blank to preserve the existing key. The LLM client
+        is hot-swapped under a mutex — in-flight requests continue with the
+        old client; subsequent requests use the new one.
+
+        Returns 503 when the binary was started without any LLM endpoint
+        configured — a restart with a valid endpoint is required in that case.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AIConfigInput'
+      responses:
+        '200':
+          description: Updated AI configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIConfig'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '503':
+          description: AI assistant not configured at startup — restart required
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /config/ai/models:
+    get:
+      tags: [AI]
+      operationId: listAIModels
+      summary: List available models from the configured LLM endpoint
+      description: |
+        Proxies `GET {endpoint}/v1/models` (OpenAI-compatible) server-side
+        with a 5-second timeout. Returns the list of model IDs. This avoids
+        CORS issues in the browser and works for any OpenAI-compatible endpoint
+        (LM Studio, Ollama, OpenAI, etc.).
+
+        Returns 503 when the AI assistant is not configured.
+        Returns 502 when the upstream endpoint is unreachable or returns an error.
+      responses:
+        '200':
+          description: List of model IDs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                examples:
+                  - [gpt-4o, gpt-4o-mini, gpt-3.5-turbo]
+        '502':
+          description: Upstream model endpoint returned an error or was unreachable
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '503':
+          description: AI assistant not configured
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /config/ai/permissions:
+    get:
+      tags: [AI]
+      operationId: listAIPermissions
+      summary: List AI tool permissions
+      description: |
+        Returns the merged list of MCP tools and their persisted permission
+        decisions. When the MCP server is unavailable only the DB-persisted
+        rows are returned. Tools with no persisted decision default to "ask".
+      responses:
+        '200':
+          description: List of tool permission records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AIToolPermission'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /config/ai/permissions/{toolName}:
+    patch:
+      tags: [AI]
+      operationId: setAIPermission
+      summary: Set permission decision for an AI tool
+      description: |
+        Persists a permission decision for the named tool. When decision is
+        "ask" the stored record is deleted, resetting the tool to the default
+        prompt-each-time behaviour.
+      parameters:
+        - name: toolName
+          in: path
+          required: true
+          schema:
+            type: string
+          description: MCP tool name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AIPermissionInput'
+      responses:
+        '204':
+          description: Permission updated
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      tags: [AI]
+      operationId: deleteAIPermission
+      summary: Reset AI tool permission to default (ask)
+      parameters:
+        - name: toolName
+          in: path
+          required: true
+          schema:
+            type: string
+          description: MCP tool name
+      responses:
+        '204':
+          description: Permission reset to ask
         default:
           $ref: '#/components/responses/Problem'
 
@@ -2544,3 +2707,76 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ResponseTimePoint'
+
+    AIConfig:
+      type: object
+      required: [endpoint, model, apiKeySet, thinking]
+      description: Current AI assistant configuration (read-only view; API key never exposed).
+      properties:
+        endpoint:
+          type: string
+          description: LLM API base URL (e.g. https://api.openai.com)
+          examples: ['https://api.openai.com', 'http://localhost:1234']
+        model:
+          type: string
+          description: Model identifier to use for completions
+          examples: ['gpt-4o', 'llama3']
+        apiKeySet:
+          type: boolean
+          description: True when an API key is configured; the key value is never returned.
+        thinking:
+          type: boolean
+          description: >
+            Whether the model's extended chain-of-thought reasoning mode is enabled
+            (e.g. Qwen3 <think> blocks). Disabled by default for faster responses.
+
+    AIConfigInput:
+      type: object
+      description: Input body for PATCH /config/ai.
+      properties:
+        endpoint:
+          type: string
+          description: LLM API base URL. Must be non-empty.
+        model:
+          type: string
+          description: Model identifier to use for completions.
+        apiKey:
+          type: string
+          description: |
+            API key for the LLM endpoint. Leave blank to keep the existing key.
+            Send a new value to replace it.
+        thinking:
+          type: boolean
+          description: >
+            Enable or disable the model's extended reasoning mode.
+            False (default) disables thinking for lower latency.
+
+    AIToolPermission:
+      type: object
+      required: [toolName, decision]
+      description: Permission decision for a single AI/MCP tool.
+      properties:
+        toolName:
+          type: string
+          description: MCP tool name
+        description:
+          type: string
+          description: Human-readable description of what the tool does
+        tier:
+          type: string
+          description: Permission tier (readonly, write, or destructive)
+          enum: [readonly, write, destructive]
+        decision:
+          type: string
+          description: Persisted decision for this tool
+          enum: [ask, allow, deny]
+
+    AIPermissionInput:
+      type: object
+      required: [decision]
+      description: Input body for PATCH /config/ai/permissions/{toolName}.
+      properties:
+        decision:
+          type: string
+          description: Permission decision to persist
+          enum: [ask, allow, deny]

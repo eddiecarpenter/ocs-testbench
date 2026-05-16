@@ -67,7 +67,7 @@ func runSmoke(t *testing.T) (addr string, shutdown func() error) {
 	addrCh := make(chan string, 1)
 	done := make(chan error, 1)
 	go func() {
-		done <- runWith(ctx, cfg, s, fakeFrontendFS(), addrCh)
+		done <- runWith(ctx, cfg, s, fakeFrontendFS(), addrCh, nil)
 	}()
 
 	select {
@@ -165,7 +165,7 @@ func TestSmoke_GracefulShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	addrCh := make(chan string, 1)
 	done := make(chan error, 1)
-	go func() { done <- runWith(ctx, cfg, s, fakeFrontendFS(), addrCh) }()
+	go func() { done <- runWith(ctx, cfg, s, fakeFrontendFS(), addrCh, nil) }()
 
 	select {
 	case <-addrCh:
@@ -188,7 +188,7 @@ func TestSmoke_GracefulShutdown(t *testing.T) {
 
 // TestRunWith_RejectsNilCfg — defensive check at the entry to runWith.
 func TestRunWith_RejectsNilCfg(t *testing.T) {
-	err := runWith(context.Background(), nil, store.NewTestStore(), fakeFrontendFS(), nil)
+	err := runWith(context.Background(), nil, store.NewTestStore(), fakeFrontendFS(), nil, nil)
 	if err == nil {
 		t.Error("expected error for nil cfg")
 	}
@@ -196,7 +196,7 @@ func TestRunWith_RejectsNilCfg(t *testing.T) {
 
 // TestRunWith_RejectsNilStore — defensive check at the entry to runWith.
 func TestRunWith_RejectsNilStore(t *testing.T) {
-	err := runWith(context.Background(), smokeConfig(), nil, fakeFrontendFS(), nil)
+	err := runWith(context.Background(), smokeConfig(), nil, fakeFrontendFS(), nil, nil)
 	if err == nil {
 		t.Error("expected error for nil store")
 	}
@@ -208,7 +208,7 @@ func TestRunWith_FrontendMissingIndex(t *testing.T) {
 	bad := fstest.MapFS{
 		"dist/something-else.txt": {Data: []byte("nope")},
 	}
-	err := runWith(context.Background(), smokeConfig(), store.NewTestStore(), bad, nil)
+	err := runWith(context.Background(), smokeConfig(), store.NewTestStore(), bad, nil, nil)
 	if err == nil {
 		t.Error("expected error when embedded FS is missing index.html")
 	}
@@ -262,7 +262,7 @@ func TestSmoke_AutoOpenBrowser_GateClosed(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			addrCh := make(chan string, 1)
 			done := make(chan error, 1)
-			go func() { done <- runWith(ctx, cfg, store.NewTestStore(), fakeFrontendFS(), addrCh) }()
+			go func() { done <- runWith(ctx, cfg, store.NewTestStore(), fakeFrontendFS(), addrCh, nil) }()
 
 			select {
 			case <-addrCh:
@@ -305,7 +305,7 @@ func TestSmoke_AutoOpenBrowser_GateOpen(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	addrCh := make(chan string, 1)
 	done := make(chan error, 1)
-	go func() { done <- runWith(ctx, cfg, store.NewTestStore(), fakeFrontendFS(), addrCh) }()
+	go func() { done <- runWith(ctx, cfg, store.NewTestStore(), fakeFrontendFS(), addrCh, nil) }()
 
 	select {
 	case <-addrCh:

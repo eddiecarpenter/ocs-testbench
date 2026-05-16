@@ -1,5 +1,9 @@
-import { Box, Group, Stack, Text } from '@mantine/core';
-import { useEffect, useRef } from 'react';
+import { ActionIcon, Box, Collapse, Code, Group, List, Stack, Table, Text, Title } from '@mantine/core';
+import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
+import { useEffect, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import type { Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 import type {
   AssistantMessage,
@@ -46,9 +50,10 @@ function UserBubble({ msg }: { msg: UserMessage }) {
         px="md"
         py="sm"
         style={{
-          backgroundColor: USER_BG,
+          backgroundColor: msg.aborted ? '#909090' : USER_BG,
           borderRadius: 14,
           borderBottomRightRadius: 4,
+          opacity: msg.aborted ? 0.6 : 1,
         }}
       >
         <Text size="sm" c="white" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
@@ -59,13 +64,90 @@ function UserBubble({ msg }: { msg: UserMessage }) {
   );
 }
 
+/** Mantine-styled markdown component overrides for AssistantBubble. */
+const markdownComponents: Components = {
+  // Paragraphs
+  p: ({ children }) => (
+    <Text size="sm" style={{ lineHeight: 1.7, marginBottom: '0.5em' }}>
+      {children}
+    </Text>
+  ),
+  // Headings
+  h1: ({ children }) => <Title order={3} mt="sm" mb={4}>{children}</Title>,
+  h2: ({ children }) => <Title order={4} mt="sm" mb={4}>{children}</Title>,
+  h3: ({ children }) => <Title order={5} mt="xs" mb={4}>{children}</Title>,
+  // Inline code
+  code: ({ children, className }) => {
+    const isBlock = !!className; // language-* class means fenced code block
+    if (isBlock) {
+      return (
+        <Code block style={{ fontSize: 12, marginBlock: '0.5em' }}>
+          {children}
+        </Code>
+      );
+    }
+    return <Code>{children}</Code>;
+  },
+  // Fenced code blocks (pre wraps code)
+  pre: ({ children }) => <Box mb="xs">{children}</Box>,
+  // Lists
+  ul: ({ children }) => (
+    <List size="sm" style={{ marginBlock: '0.4em', paddingLeft: '1.2em' }}>
+      {children}
+    </List>
+  ),
+  ol: ({ children }) => (
+    <List type="ordered" size="sm" style={{ marginBlock: '0.4em', paddingLeft: '1.2em' }}>
+      {children}
+    </List>
+  ),
+  li: ({ children }) => <List.Item>{children}</List.Item>,
+  // Blockquote
+  blockquote: ({ children }) => (
+    <Box
+      pl="sm"
+      style={{
+        borderLeft: '3px solid var(--mantine-color-gray-4)',
+        marginBlock: '0.5em',
+        color: 'var(--mantine-color-dimmed)',
+      }}
+    >
+      {children}
+    </Box>
+  ),
+  // Horizontal rule
+  hr: () => (
+    <Box
+      component="hr"
+      style={{ border: 'none', borderTop: '1px solid var(--mantine-color-gray-3)', marginBlock: '0.8em' }}
+    />
+  ),
+  // GFM tables
+  table: ({ children }) => (
+    <Box mb="xs" style={{ overflowX: 'auto' }}>
+      <Table striped withTableBorder withColumnBorders fz="sm">
+        {children}
+      </Table>
+    </Box>
+  ),
+  thead: ({ children }) => <Table.Thead>{children}</Table.Thead>,
+  tbody: ({ children }) => <Table.Tbody>{children}</Table.Tbody>,
+  tr: ({ children }) => <Table.Tr>{children}</Table.Tr>,
+  th: ({ children }) => <Table.Th>{children}</Table.Th>,
+  td: ({ children }) => <Table.Td>{children}</Table.Td>,
+};
+
 function AssistantBubble({ msg }: { msg: AssistantMessage }) {
   return (
-    <Box maw="85%">
-      <Text size="sm" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.7 }}>
+    <Box maw="85%" style={{ wordBreak: 'break-word', opacity: msg.aborted ? 0.55 : 1 }}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
         {msg.content}
-        {/* Blinking cursor while streaming (content ends without a trailing space) */}
-      </Text>
+      </ReactMarkdown>
+      {msg.aborted && (
+        <Text size="xs" c="dimmed" mt={4} style={{ fontStyle: 'italic' }}>
+          ⊘ Generation stopped
+        </Text>
+      )}
     </Box>
   );
 }
@@ -146,6 +228,8 @@ function ToolCallItem({ block }: { block: ToolCallBlock }) {
   const effectiveTier = call.status === 'running' ? 'running' : call.tier;
   const bg = TOOL_BG[effectiveTier] ?? TOOL_BG.readonly;
   const accent = TOOL_ACCENT[effectiveTier] ?? TOOL_ACCENT.readonly;
+  const hasDetail = call.result !== null && call.status === 'done';
+  const [open, setOpen] = useState(false);
 
   return (
     <Box
@@ -159,48 +243,54 @@ function ToolCallItem({ block }: { block: ToolCallBlock }) {
       }}
     >
       <Group px="sm" py={6} justify="space-between" align="center" wrap="nowrap">
-        <Stack gap={0}>
+        <Stack gap={0} style={{ flex: 1, minWidth: 0 }}>
           <Text size="xs" fw={600} style={{ color: accent }}>
             {call.name}
           </Text>
-          <Text size="xs" c="dimmed">
+          <Text size="xs" c="dimmed" truncate>
             {call.description}
           </Text>
         </Stack>
-        <Text
-          size="xs"
-          fw={500}
-          style={{
-            color: accent,
-            whiteSpace: 'nowrap',
-            fontSize: 11,
-          }}
-        >
-          {tierLabel(call)}
-        </Text>
+        <Group gap={4} wrap="nowrap">
+          <Text size="xs" fw={500} style={{ color: accent, whiteSpace: 'nowrap', fontSize: 11 }}>
+            {tierLabel(call)}
+          </Text>
+          {hasDetail && (
+            <ActionIcon
+              size="xs"
+              variant="subtle"
+              color="gray"
+              onClick={() => setOpen((o) => !o)}
+              aria-label={open ? 'Collapse result' : 'Expand result'}
+            >
+              {open
+                ? <IconChevronDown size={12} />
+                : <IconChevronRight size={12} />}
+            </ActionIcon>
+          )}
+        </Group>
       </Group>
 
-      {/* Inline result */}
-      {call.result !== null && call.status === 'done' && (
-        <Box
-          px="sm"
-          pb="xs"
-          style={{
-            borderTop: `1px solid ${accent}22`,
-          }}
-        >
-          <Text
-            size="xs"
-            c="dimmed"
-            style={{
-              fontFamily: 'monospace',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-            }}
+      {hasDetail && (
+        <Collapse expanded={open}>
+          <Box
+            px="sm"
+            pb="xs"
+            style={{ borderTop: `1px solid ${accent}22` }}
           >
-            {call.result}
-          </Text>
-        </Box>
+            <Text
+              size="xs"
+              c="dimmed"
+              style={{
+                fontFamily: 'monospace',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}
+            >
+              {call.result}
+            </Text>
+          </Box>
+        </Collapse>
       )}
     </Box>
   );
@@ -211,6 +301,8 @@ function ToolCallItem({ block }: { block: ToolCallBlock }) {
 export interface ChatThreadProps {
   items: ThreadItem[];
   onTogglePlanning: (id: string) => void;
+  /** When true, tool-call blocks are not rendered in the thread. */
+  hideToolCalls?: boolean;
 }
 
 /**
@@ -220,7 +312,7 @@ export interface ChatThreadProps {
  * Scrolls to the bottom whenever `items` changes so new tokens
  * stay visible during streaming.
  */
-export function ChatThread({ items, onTogglePlanning }: ChatThreadProps) {
+export function ChatThread({ items, onTogglePlanning, hideToolCalls = false }: ChatThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -252,7 +344,7 @@ export function ChatThread({ items, onTogglePlanning }: ChatThreadProps) {
                 />
               );
             case 'tool_call':
-              return <ToolCallItem key={item.id} block={item} />;
+              return hideToolCalls ? null : <ToolCallItem key={item.id} block={item} />;
           }
         })}
         <div ref={bottomRef} />

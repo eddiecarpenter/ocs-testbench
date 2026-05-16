@@ -8,6 +8,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AiToolPermission struct {
+	ToolName  string
+	Decision  string
+	UpdatedAt pgtype.Timestamptz
+}
+
 type AvpTemplate struct {
 	ID        pgtype.UUID
 	Name      string

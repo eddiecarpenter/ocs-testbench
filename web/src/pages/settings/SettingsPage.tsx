@@ -1,6 +1,5 @@
 import {
   ActionIcon,
-  Alert,
   Anchor,
   Badge,
   Box,
@@ -18,6 +17,7 @@ import {
   Skeleton,
   Stack,
   Switch,
+  Table,
   Text,
   Textarea,
   TextInput,
@@ -25,12 +25,11 @@ import {
   useMantineColorScheme,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
-import { useDisclosure } from '@mantine/hooks';
+import { useDisclosure, useLocalStorage } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import {
   IconCheck,
   IconDeviceLaptop,
-  IconInfoCircle,
   IconMoon,
   IconPlus,
   IconRefresh,
@@ -39,6 +38,16 @@ import {
 } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
 
+import {
+  useAIConfig,
+  useAIModels,
+  useUpdateAIConfig,
+} from '../../api/resources/aiConfig';
+import {
+  type AIToolPermission,
+  useAIPermissions,
+  useSetAIPermission,
+} from '../../api/resources/aiPermissions';
 import {
   type CustomDictionary,
   type CustomDictionaryInput,
@@ -292,6 +301,9 @@ export function SettingsPage() {
           {/* ─── AI Assistant ─────────────────────────────────── */}
           <AiAssistantCard />
 
+          {/* ─── AI Tool Permissions ───────────────────────────── */}
+          <AIPermissionsCard />
+
           {/* ─── AVP Dictionaries ──────────────────────────────── */}
           <DictionariesCard />
 
@@ -321,6 +333,125 @@ export function SettingsPage() {
         </Stack>
       </form>
     </Stack>
+  );
+}
+
+// ─── AI Tool Permissions ──────────────────────────────────────────────────
+
+/** Maps tier names to Mantine Badge colors. */
+const TIER_COLOR: Record<string, string> = {
+  readonly: 'blue',
+  write: 'orange',
+  destructive: 'red',
+};
+
+/**
+ * Inline row for a single MCP tool permission.
+ *
+ * The SegmentedControl fires the PATCH mutation immediately when the
+ * operator changes the value — no separate Save button is needed.
+ */
+function PermissionRow({ perm }: { perm: AIToolPermission }) {
+  const setPermMut = useSetAIPermission();
+
+  const handleChange = (value: string) => {
+    setPermMut.mutate({
+      toolName: perm.toolName,
+      decision: value as AIToolPermission['decision'],
+    });
+  };
+
+  return (
+    <Table.Tr>
+      <Table.Td>
+        <Text size="sm" ff="monospace">
+          {perm.toolName}
+        </Text>
+      </Table.Td>
+      <Table.Td>
+        <Text size="sm" c="dimmed" lineClamp={2}>
+          {perm.description ?? '—'}
+        </Text>
+      </Table.Td>
+      <Table.Td>
+        {perm.tier ? (
+          <Badge
+            variant="light"
+            color={TIER_COLOR[perm.tier] ?? 'gray'}
+            radius="sm"
+            size="sm"
+          >
+            {perm.tier}
+          </Badge>
+        ) : (
+          <Text size="xs" c="dimmed">
+            —
+          </Text>
+        )}
+      </Table.Td>
+      <Table.Td>
+        <SegmentedControl
+          size="xs"
+          value={perm.decision ?? 'ask'}
+          onChange={handleChange}
+          disabled={setPermMut.isPending}
+          data={[
+            { value: 'ask', label: 'Ask' },
+            { value: 'allow', label: 'Allow' },
+            { value: 'deny', label: 'Deny' },
+          ]}
+        />
+      </Table.Td>
+    </Table.Tr>
+  );
+}
+
+/**
+ * AI Tool Permissions card.
+ *
+ * Lists every MCP tool with its current permission decision. Changes are
+ * saved inline — each SegmentedControl fires a PATCH immediately.
+ */
+function AIPermissionsCard() {
+  const { data: permissions, isLoading } = useAIPermissions();
+
+  return (
+    <Card padding="lg" withBorder shadow="xs">
+      <Stack gap="md">
+        <Stack gap={4}>
+          <SectionLabel>AI Tool Permissions</SectionLabel>
+          <Text size="xs" c="dimmed">
+            Configure how the AI assistant handles each MCP tool call.
+            Changes take effect immediately — no restart required.
+          </Text>
+        </Stack>
+
+        {isLoading ? (
+          <Skeleton height={120} radius="sm" />
+        ) : !permissions || permissions.length === 0 ? (
+          <Text size="sm" c="dimmed" ta="center" py="sm">
+            No MCP tools available. Start the server with a configured AI
+            endpoint to see tools here.
+          </Text>
+        ) : (
+          <Table striped highlightOnHover withTableBorder withColumnBorders>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Tool</Table.Th>
+                <Table.Th>Description</Table.Th>
+                <Table.Th>Tier</Table.Th>
+                <Table.Th>Permission</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {permissions.map((p) => (
+                <PermissionRow key={p.toolName} perm={p} />
+              ))}
+            </Table.Tbody>
+          </Table>
+        )}
+      </Stack>
+    </Card>
   );
 }
 
@@ -618,57 +749,132 @@ function DictModal({ opened, onClose, title, existing }: DictModalProps) {
  * for it behind the common client interface.
  */
 const PROVIDER_PRESETS: Record<string, string> = {
-  openai: 'https://api.openai.com',
   anthropic: 'https://api.anthropic.com',
-  ollama: 'http://localhost:11434',
-  lmstudio: 'http://localhost:1234',
-  llamacpp: 'http://localhost:8080',
-  custom: '',
+  openai:    'https://api.openai.com',
+  ollama:    'http://localhost:11434',
+  lmstudio:  'http://localhost:1234',
+  llamacpp:  'http://localhost:8080',
+  custom:    '',
 };
 
 const PROVIDER_OPTIONS = [
-  { value: 'openai',    label: 'OpenAI' },
   { value: 'anthropic', label: 'Anthropic' },
+  { value: 'openai',    label: 'OpenAI' },
   { value: 'ollama',    label: 'Ollama' },
   { value: 'lmstudio',  label: 'LM Studio' },
   { value: 'llamacpp',  label: 'llama.cpp' },
   { value: 'custom',    label: 'Custom' },
 ];
 
-/** Static mock model list — displayed until Feature 3 wires a live /v1/models fetch. */
-const MOCK_MODELS = [
-  'gpt-4o',
-  'gpt-4o-mini',
-  'gpt-4-turbo',
-  'gpt-3.5-turbo',
-  'claude-opus-4-5',
-  'claude-sonnet-4-5',
-  'claude-haiku-3-5',
-  'llama3.2:3b',
-  'llama3.2:1b',
-  'mistral:7b',
-  'phi4:14b',
-  'qwen2.5:7b',
-];
-
 /** Height of five visible rows in the scrollable model list. */
 const MODEL_LIST_HEIGHT = 40 * 5; // ~40px per radio row × 5 rows
 
 /**
+ * Detects the closest PROVIDER_PRESETS key for a given endpoint URL.
+ * Falls back to 'custom' when no preset matches.
+ */
+function detectProvider(endpoint: string): string {
+  for (const [key, url] of Object.entries(PROVIDER_PRESETS)) {
+    if (url && endpoint.startsWith(url)) return key;
+  }
+  return endpoint ? 'custom' : 'openai';
+}
+
+/**
  * AI Assistant settings card.
  *
- * All fields are disabled with an info banner in this release.
- * LLM integration (provider auth, model fetch, live endpoint) is
- * enabled in Feature 3.
+ * Wired to the live backend via GET/PATCH /v1/config/ai and
+ * GET /v1/config/ai/models. Settings are self-contained — Save/Reset
+ * are independent of the global Settings page form.
  */
 function AiAssistantCard() {
-  const [provider, setProvider] = useState<string>('openai');
-  const [modelFilter, setModelFilter] = useState('');
-  const endpoint = PROVIDER_PRESETS[provider] ?? '';
+  const { data: serverCfg, isLoading: cfgLoading } = useAIConfig();
+  const updateMut = useUpdateAIConfig();
 
-  const filteredModels = MOCK_MODELS.filter((m) =>
+  // Local form state — seeded from the server on first load.
+  const [provider, setProvider] = useState<string>('openai');
+  const [endpoint, setEndpoint] = useState('');
+  const [model, setModel] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [thinking, setThinking] = useState(false);
+  const [modelFilter, setModelFilter] = useState('');
+  const [seeded, setSeeded] = useState(false);
+
+  // UI-only preference persisted in localStorage — no backend needed.
+  const [hideToolCalls, setHideToolCalls] = useLocalStorage({
+    key: 'ai-hide-tool-calls',
+    defaultValue: false,
+  });
+
+  // Seed local state from server config on first successful fetch.
+  useEffect(() => {
+    if (!serverCfg || seeded) return;
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setProvider(detectProvider(serverCfg.endpoint));
+    setEndpoint(serverCfg.endpoint);
+    setModel(serverCfg.model);
+    setThinking(serverCfg.thinking ?? false);
+    setSeeded(true);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [serverCfg, seeded]);
+
+  // Fetch model list when an endpoint is configured; pass the unsaved API key
+  // so models can be fetched before Save (important for new key entry).
+  const {
+    data: models,
+    isFetching: modelsFetching,
+    isError: modelsError,
+    error: modelsErrorDetail,
+    refetch: refetchModels,
+  } = useAIModels(endpoint, apiKey || undefined);
+
+  const filteredModels = (models ?? []).filter((m) =>
     m.toLowerCase().includes(modelFilter.toLowerCase()),
   );
+
+  const handleProviderChange = (v: string | null) => {
+    const next = v ?? 'openai';
+    setProvider(next);
+    const preset = PROVIDER_PRESETS[next];
+    if (preset !== undefined) {
+      setEndpoint(preset);
+    }
+    setModel(''); // Clear model when provider changes.
+  };
+
+  const handleSave = async () => {
+    try {
+      await updateMut.mutateAsync({
+        endpoint,
+        model,
+        thinking,
+        // Send the key only when the user typed something; otherwise blank
+        // tells the backend to preserve the existing key.
+        apiKey: apiKey || undefined,
+      });
+      setApiKey(''); // Clear the field after save so it shows "unchanged" placeholder.
+      notifications.show({
+        color: 'teal',
+        title: 'AI settings saved',
+        message: 'Active immediately — no restart required.',
+      });
+    } catch (e) {
+      notifyError({ title: 'Failed to save AI settings', message: String(e) });
+    }
+  };
+
+  const handleReset = () => {
+    if (!serverCfg) return;
+    setProvider(detectProvider(serverCfg.endpoint));
+    setEndpoint(serverCfg.endpoint);
+    setModel(serverCfg.model);
+    setThinking(serverCfg.thinking ?? false);
+    setApiKey('');
+  };
+
+  const apiKeyPlaceholder = serverCfg?.apiKeySet && !apiKey
+    ? '•••• (unchanged)'
+    : 'sk-…';
 
   return (
     <Card padding="lg" withBorder shadow="xs">
@@ -680,116 +886,186 @@ function AiAssistantCard() {
           </Text>
         </Stack>
 
-        <Alert
-          icon={<IconInfoCircle size={16} />}
-          color="blue"
-          variant="light"
-          radius="sm"
-        >
-          These settings are non-functional in this release. LLM integration
-          is enabled in Feature 3.
-        </Alert>
-
-        <Select
-          label="Provider"
-          description="Preset auto-fills the API endpoint"
-          data={PROVIDER_OPTIONS}
-          value={provider}
-          onChange={(v) => setProvider(v ?? 'openai')}
-          allowDeselect={false}
-          disabled
-          checkIconPosition="right"
-        />
-
-        <TextInput
-          label="API endpoint"
-          placeholder="https://api.openai.com"
-          value={endpoint}
-          readOnly
-          disabled
-        />
-
-        <PasswordInput
-          label="API key"
-          placeholder="sk-…"
-          disabled
-        />
-
-        {/* ─── Model list sub-section ──────────────────────── */}
-        <Box
-          style={{
-            border:
-              '1px solid light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-5))',
-            borderRadius: 'var(--mantine-radius-sm)',
-          }}
-        >
-          {/* Sub-heading row */}
-          <Group
-            justify="space-between"
-            align="center"
-            px="sm"
-            py="xs"
-            style={{
-              borderBottom:
-                '1px solid light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-5))',
-            }}
-          >
-            <Text size="sm" fw={600}>
-              Models
-            </Text>
-            <ActionIcon
-              variant="subtle"
-              size="sm"
-              aria-label="Refresh model list"
-              disabled
-              title="Refresh is enabled in Feature 3"
-            >
-              <IconRefresh size={14} />
-            </ActionIcon>
-          </Group>
-
-          {/* Status bar */}
-          <Box px="sm" py={6}>
-            <Text size="xs" c="dimmed">
-              Configure endpoint to fetch models
-            </Text>
-          </Box>
-
-          {/* Filter input */}
-          <Box px="sm" pb="xs">
-            <TextInput
-              size="xs"
-              placeholder="Filter models…"
-              value={modelFilter}
-              onChange={(e) => setModelFilter(e.currentTarget.value)}
-              disabled
-              aria-label="Filter models"
+        {cfgLoading ? (
+          <Skeleton height={200} radius="sm" />
+        ) : (
+          <>
+            <Select
+              label="Provider"
+              description="Preset auto-fills the API endpoint"
+              data={PROVIDER_OPTIONS}
+              value={provider}
+              onChange={handleProviderChange}
+              allowDeselect={false}
+              checkIconPosition="right"
             />
-          </Box>
 
-          {/* Scrollable radio list — fixed height showing 5 rows */}
-          <ScrollArea h={MODEL_LIST_HEIGHT} px="sm" pb="xs">
-            <Radio.Group value={null} onChange={() => undefined}>
-              <Stack gap={4}>
-                {filteredModels.map((model) => (
-                  <Radio
-                    key={model}
-                    value={model}
-                    label={model}
-                    size="xs"
-                    disabled
-                    styles={{ label: { fontFamily: 'monospace', fontSize: 12 } }}
-                  />
-                ))}
-                {filteredModels.length === 0 && (
-                  <Text size="xs" c="dimmed" ta="center" py="sm">
-                    No models match filter.
+            <TextInput
+              label="API endpoint"
+              placeholder="https://api.openai.com"
+              value={endpoint}
+              onChange={(e) => setEndpoint(e.currentTarget.value)}
+            />
+
+            <PasswordInput
+              label="API key"
+              placeholder={apiKeyPlaceholder}
+              value={apiKey}
+              onChange={(e) => setApiKey(e.currentTarget.value)}
+              description={
+                provider === 'anthropic'
+                  ? 'Requires an Anthropic API key from console.anthropic.com.'
+                  : undefined
+              }
+            />
+
+            {/* ─── Model list sub-section ──────────────────────── */}
+            <Box
+              style={{
+                border:
+                  '1px solid light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-5))',
+                borderRadius: 'var(--mantine-radius-sm)',
+              }}
+            >
+              {/* Sub-heading row */}
+              <Group
+                justify="space-between"
+                align="center"
+                px="sm"
+                py="xs"
+                style={{
+                  borderBottom:
+                    '1px solid light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-5))',
+                }}
+              >
+                <Text size="sm" fw={600}>
+                  Models
+                </Text>
+                <ActionIcon
+                  variant="subtle"
+                  size="sm"
+                  aria-label="Refresh model list"
+                  loading={modelsFetching}
+                  disabled={!endpoint}
+                  onClick={() => void refetchModels()}
+                  title={endpoint ? 'Refresh model list from endpoint' : 'Configure an endpoint first'}
+                >
+                  <IconRefresh size={14} />
+                </ActionIcon>
+              </Group>
+
+              {/* Status bar */}
+              <Box px="sm" py={6}>
+                {!endpoint ? (
+                  <Text size="xs" c="dimmed">
+                    Configure endpoint to fetch models
+                  </Text>
+                ) : modelsFetching ? (
+                  <Text size="xs" c="dimmed">
+                    Fetching models…
+                  </Text>
+                ) : modelsError ? (
+                  <Text size="xs" c="red">
+                    {String((modelsErrorDetail as Error)?.message ?? modelsErrorDetail ?? 'Failed to fetch models')}
+                  </Text>
+                ) : models && models.length > 0 ? (
+                  <Text size="xs" c="dimmed">
+                    {models.length} model{models.length !== 1 ? 's' : ''} available
+                  </Text>
+                ) : (
+                  <Text size="xs" c="dimmed">
+                    Click Refresh to load models from the endpoint
                   </Text>
                 )}
-              </Stack>
-            </Radio.Group>
-          </ScrollArea>
-        </Box>
+              </Box>
+
+              {/* Filter input */}
+              <Box px="sm" pb="xs">
+                <TextInput
+                  size="xs"
+                  placeholder="Filter models…"
+                  value={modelFilter}
+                  onChange={(e) => setModelFilter(e.currentTarget.value)}
+                  disabled={!models || models.length === 0}
+                  aria-label="Filter models"
+                />
+              </Box>
+
+              {/* Scrollable radio list — fixed height showing 5 rows */}
+              <ScrollArea h={MODEL_LIST_HEIGHT} px="sm" pb="xs">
+                {modelsFetching ? (
+                  <Stack gap={4}>
+                    {[1, 2, 3].map((i) => (
+                      <Skeleton key={i} height={28} radius="sm" />
+                    ))}
+                  </Stack>
+                ) : (
+                  <Radio.Group
+                    value={model}
+                    onChange={(v) => setModel(v)}
+                  >
+                    <Stack gap={4}>
+                      {filteredModels.map((m) => (
+                        <Radio
+                          key={m}
+                          value={m}
+                          label={m}
+                          size="xs"
+                          styles={{ label: { fontFamily: 'monospace', fontSize: 12 } }}
+                        />
+                      ))}
+                      {filteredModels.length === 0 && (
+                        <Text size="xs" c="dimmed" ta="center" py="sm">
+                          {models && models.length > 0
+                            ? 'No models match filter.'
+                            : 'No models loaded — click Refresh.'}
+                        </Text>
+                      )}
+                    </Stack>
+                  </Radio.Group>
+                )}
+              </ScrollArea>
+            </Box>
+
+            {/* ─── Behaviour toggles ───────────────────────────── */}
+            <Stack gap="xs">
+              <Switch
+                label="Enable thinking mode"
+                description="Allows the model to reason internally before responding (slower but more accurate for complex questions)"
+                checked={thinking}
+                onChange={(e) => setThinking(e.currentTarget.checked)}
+                size="sm"
+              />
+              <Switch
+                label="Hide tool execution"
+                description="Suppress tool-call blocks in the chat thread — only show the final answer"
+                checked={hideToolCalls}
+                onChange={(e) => setHideToolCalls(e.currentTarget.checked)}
+                size="sm"
+              />
+            </Stack>
+
+            {/* ─── Self-contained Save / Reset ─────────────────── */}
+            <Group justify="flex-end">
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={handleReset}
+                disabled={updateMut.isPending}
+              >
+                Reset
+              </Button>
+              <Button
+                size="sm"
+                loading={updateMut.isPending}
+                leftSection={<IconCheck size={14} />}
+                onClick={() => void handleSave()}
+              >
+                Save AI settings
+              </Button>
+            </Group>
+          </>
+        )}
       </Stack>
     </Card>
   );

@@ -1,10 +1,13 @@
 package ai
 
 import (
+	"context"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/eddiecarpenter/ocs-testbench/internal/store"
 )
 
 const (
@@ -44,14 +47,18 @@ type SessionManager struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
 	stopCh   chan struct{}
+	store    store.Store // nil when store not available
 }
 
 // NewSessionManager creates a new SessionManager and starts its
-// TTL-cleanup goroutine.
-func NewSessionManager() *SessionManager {
+// TTL-cleanup goroutine. When st is non-nil, persisted allow/deny
+// decisions are loaded from the database when a new session is created
+// and written back when the operator chooses "always allow".
+func NewSessionManager(st store.Store) *SessionManager {
 	sm := &SessionManager{
 		sessions: make(map[string]*Session),
 		stopCh:   make(chan struct{}),
+		store:    st,
 	}
 	go sm.cleanupLoop()
 	return sm
@@ -65,7 +72,10 @@ func GenerateSessionID() string {
 
 // GetOrCreate returns the existing Session for sessionID, or creates a new
 // one if it does not exist. It updates LastAccess on every call.
-func (sm *SessionManager) GetOrCreate(sessionID string) *Session {
+// When a session is newly created and a store is configured, any
+// previously-persisted "allow" decisions are loaded into AllowAlways so the
+// operator is not prompted again for tools they have already approved.
+func (sm *SessionManager) GetOrCreate(ctx context.Context, sessionID string) *Session {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -75,9 +85,43 @@ func (sm *SessionManager) GetOrCreate(sessionID string) *Session {
 			AllowAlways: make(map[string]bool),
 		}
 		sm.sessions[sessionID] = s
+		// Seed AllowAlways from persisted DB decisions (best-effort; ignore errors).
+		if sm.store != nil {
+			if perms, err := sm.store.ListAIPermissions(ctx); err == nil {
+				for _, p := range perms {
+					if p.Decision == "allow" {
+						s.AllowAlways[p.ToolName] = true
+					}
+				}
+			}
+		}
 	}
 	s.LastAccess = time.Now()
 	return s
+}
+
+// PersistPermission writes a permission decision to the backing store
+// and updates the in-memory session's AllowAlways map. Decision must be
+// "allow" or "deny". When decision is "ask" the record is deleted.
+// Errors from the store are returned but do not prevent the in-memory
+// update.
+func (sm *SessionManager) PersistPermission(ctx context.Context, sessionID, toolName, decision string) error {
+	if sm.store == nil {
+		return nil
+	}
+	// Update in-memory session if it exists.
+	sm.mu.RLock()
+	s := sm.sessions[sessionID]
+	sm.mu.RUnlock()
+	if s != nil && decision == "allow" {
+		s.AllowAlways[toolName] = true
+	}
+	switch decision {
+	case "ask":
+		return sm.store.DeleteAIPermission(ctx, toolName)
+	default:
+		return sm.store.UpsertAIPermission(ctx, toolName, decision)
+	}
 }
 
 // Get returns the Session for sessionID, or nil if the session does not
