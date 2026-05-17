@@ -36,6 +36,7 @@ import {
   IconSun,
   IconTrash,
 } from '@tabler/icons-react';
+import Editor from '@monaco-editor/react';
 import { useEffect, useState } from 'react';
 
 import {
@@ -595,6 +596,7 @@ function DictModal({ opened, onClose, title, existing }: DictModalProps) {
   const updateMut = useUpdateDictionary();
   const deleteMut = useDeleteDictionary();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const { colorScheme } = useMantineColorScheme();
 
   const form = useForm<CustomDictionaryInput>({
     initialValues: {
@@ -655,7 +657,7 @@ function DictModal({ opened, onClose, title, existing }: DictModalProps) {
       opened={opened}
       onClose={onClose}
       title={title}
-      size="xl"
+      size="xxl"
     >
       <form onSubmit={handleSubmit}>
         <Stack gap="md">
@@ -678,17 +680,38 @@ function DictModal({ opened, onClose, title, existing }: DictModalProps) {
             {...form.getInputProps('isActive', { type: 'checkbox' })}
           />
 
-          <Textarea
-            label="XML content"
-            description="Diameter dictionary XML in go-diameter format"
-            placeholder={'<?xml version="1.0" encoding="UTF-8"?>\n<diameter>\n  <application id="4" …>\n    …\n  </application>\n</diameter>'}
-            required
-            autosize
-            minRows={14}
-            maxRows={28}
-            styles={{ input: { fontFamily: 'monospace', fontSize: 12 } }}
-            {...form.getInputProps('xmlContent')}
-          />
+          <Stack gap={4}>
+            <Text size="sm" fw={500}>
+              XML content <Text span c="red" aria-hidden>*</Text>
+            </Text>
+            <Text size="xs" c="dimmed">Diameter dictionary XML in go-diameter format</Text>
+            <Box
+              style={(theme) => ({
+                border: `1px solid ${theme.colors.dark[4]}`,
+                borderRadius: theme.radius.sm,
+                overflow: 'hidden',
+              })}
+            >
+              <Editor
+                height={400}
+                language="xml"
+                theme={colorScheme === 'dark' ? 'vs-dark' : 'light'}
+                value={form.values.xmlContent}
+                onChange={(v) => form.setFieldValue('xmlContent', v ?? '')}
+                options={{
+                  minimap: { enabled: false },
+                  scrollBeyondLastLine: false,
+                  fontSize: 13,
+                  tabSize: 2,
+                  wordWrap: 'on',
+                  lineNumbersMinChars: 3,
+                }}
+              />
+            </Box>
+            {form.errors.xmlContent && (
+              <Text size="xs" c="red">{form.errors.xmlContent}</Text>
+            )}
+          </Stack>
 
           <Group justify="space-between">
             {existing ? (
