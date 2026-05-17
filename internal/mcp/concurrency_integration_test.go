@@ -316,8 +316,9 @@ func TestEndToEnd_AC2_FullSequence(t *testing.T) {
 	// Create a test client using the established session.
 	client := &mcpTestClient{ts: ts, sessionID: sessionID, t: t}
 
-	// Step 1: create_peer.
-	peerResp := client.callTool("create_peer", map[string]any{
+	// Step 1: peer op=create.
+	peerResp := client.callTool("peer", map[string]any{
+		"op":     "create",
 		"name":   "test-peer",
 		"config": map[string]any{"host": "10.0.0.2", "port": float64(3868)},
 	})
@@ -327,14 +328,15 @@ func TestEndToEnd_AC2_FullSequence(t *testing.T) {
 	peerName := peer["name"].(string)
 	require.NotEmpty(t, peerID)
 
-	// Step 2: connect_peer.
-	connResp := client.callTool("connect_peer", map[string]any{"name": peerName})
+	// Step 2: peer_connection action=connect.
+	connResp := client.callTool("peer_connection", map[string]any{"action": "connect", "name": peerName})
 	var connResult map[string]any
 	toolResult(t, connResp, &connResult)
 	assert.Equal(t, "connecting", connResult["status"])
 
-	// Step 3: create_subscriber.
-	subResp := client.callTool("create_subscriber", map[string]any{
+	// Step 3: subscriber op=create.
+	subResp := client.callTool("subscriber", map[string]any{
+		"op":     "create",
 		"name":   "test-subscriber",
 		"msisdn": "27839999001",
 		"iccid":  "8927009999",

@@ -12,9 +12,12 @@ import (
 	"github.com/eddiecarpenter/ocs-testbench/internal/store"
 )
 
-// registerSubscriberTools registers all 5 subscriber management tools.
+// registerSubscriberTools registers the 2 subscriber tools on the MCP server.
+//
+//	list_subscribers — list all subscribers (readonly)
+//	subscriber       — CRUD: get · create · update · delete
 func registerSubscriberTools(s *server.MCPServer, srv *Server) {
-	// list_subscribers — read-only
+	// list_subscribers — readonly, no parameters
 	s.AddTool(
 		mcp.NewTool("list_subscribers",
 			mcp.WithDescription("List all configured test subscribers."),
@@ -24,90 +27,40 @@ func registerSubscriberTools(s *server.MCPServer, srv *Server) {
 		srv.handleListSubscribers,
 	)
 
-	// get_subscriber — read-only
+	// subscriber — CRUD operations
 	s.AddTool(
-		mcp.NewTool("get_subscriber",
-			mcp.WithDescription("Get a single test subscriber by ID."),
-			mcp.WithReadOnlyHintAnnotation(true),
-			mcp.WithDestructiveHintAnnotation(false),
-			mcp.WithString("id",
-				mcp.Required(),
-				mcp.Description("UUID of the subscriber to retrieve."),
-			),
-		),
-		srv.handleGetSubscriber,
-	)
-
-	// create_subscriber — write, non-destructive
-	s.AddTool(
-		mcp.NewTool("create_subscriber",
-			mcp.WithDescription("Create a new test subscriber."),
+		mcp.NewTool("subscriber",
+			mcp.WithDescription(`Test subscriber CRUD.
+op=get     id*                              → single subscriber
+op=create  msisdn*, iccid*, name?, imei?, tac?  → new subscriber
+op=update  id*, msisdn*, iccid*, name?, imei?, tac?  → update subscriber
+op=delete  id*                              → remove subscriber`),
 			mcp.WithReadOnlyHintAnnotation(false),
 			mcp.WithDestructiveHintAnnotation(false),
-			mcp.WithString("name",
-				mcp.Description("Display name for the subscriber."),
+			mcp.WithString("op",
+				mcp.Required(),
+				mcp.Description("get | create | update | delete"),
+			),
+			mcp.WithString("id",
+				mcp.Description("Subscriber UUID — required for get, update, delete."),
 			),
 			mcp.WithString("msisdn",
-				mcp.Required(),
-				mcp.Description("MSISDN (phone number) of the subscriber."),
+				mcp.Description("MSISDN (phone number) — required for create and update."),
 			),
 			mcp.WithString("iccid",
-				mcp.Required(),
-				mcp.Description("ICCID (SIM card identifier) of the subscriber."),
-			),
-			mcp.WithString("imei",
-				mcp.Description("IMEI (device identifier). Optional."),
-			),
-			mcp.WithString("tac",
-				mcp.Description("TAC (Type Allocation Code) for device identification. Optional."),
-			),
-		),
-		srv.handleCreateSubscriber,
-	)
-
-	// update_subscriber — write, non-destructive
-	s.AddTool(
-		mcp.NewTool("update_subscriber",
-			mcp.WithDescription("Update an existing test subscriber."),
-			mcp.WithReadOnlyHintAnnotation(false),
-			mcp.WithDestructiveHintAnnotation(false),
-			mcp.WithString("id",
-				mcp.Required(),
-				mcp.Description("UUID of the subscriber to update."),
+				mcp.Description("ICCID (SIM card identifier) — required for create and update."),
 			),
 			mcp.WithString("name",
-				mcp.Description("Updated display name."),
-			),
-			mcp.WithString("msisdn",
-				mcp.Required(),
-				mcp.Description("Updated MSISDN."),
-			),
-			mcp.WithString("iccid",
-				mcp.Required(),
-				mcp.Description("Updated ICCID."),
+				mcp.Description("Display name. Optional."),
 			),
 			mcp.WithString("imei",
-				mcp.Description("Updated IMEI. Optional."),
+				mcp.Description("IMEI device identifier. Optional."),
 			),
 			mcp.WithString("tac",
-				mcp.Description("Updated TAC. Optional."),
+				mcp.Description("TAC (Type Allocation Code). Optional."),
 			),
 		),
-		srv.handleUpdateSubscriber,
-	)
-
-	// delete_subscriber — destructive
-	s.AddTool(
-		mcp.NewTool("delete_subscriber",
-			mcp.WithDescription("Delete a test subscriber by ID."),
-			mcp.WithReadOnlyHintAnnotation(false),
-			mcp.WithDestructiveHintAnnotation(true),
-			mcp.WithString("id",
-				mcp.Required(),
-				mcp.Description("UUID of the subscriber to delete."),
-			),
-		),
-		srv.handleDeleteSubscriber,
+		srv.handleSubscriber,
 	)
 }
 
@@ -141,6 +94,26 @@ func optionalPGText(s string) pgtype.Text {
 }
 
 // — handlers —
+
+// handleSubscriber dispatches CRUD operations for the consolidated "subscriber" tool.
+func (srv *Server) handleSubscriber(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	op, err := req.RequireString("op")
+	if err != nil {
+		return mcp.NewToolResultError("op is required (get | create | update | delete)"), nil
+	}
+	switch op {
+	case "get":
+		return srv.handleGetSubscriber(ctx, req)
+	case "create":
+		return srv.handleCreateSubscriber(ctx, req)
+	case "update":
+		return srv.handleUpdateSubscriber(ctx, req)
+	case "delete":
+		return srv.handleDeleteSubscriber(ctx, req)
+	default:
+		return mcp.NewToolResultError(fmt.Sprintf("unknown op %q — use get | create | update | delete", op)), nil
+	}
+}
 
 // handleListSubscribers returns all subscribers.
 func (srv *Server) handleListSubscribers(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

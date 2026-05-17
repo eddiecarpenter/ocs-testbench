@@ -34,8 +34,8 @@ func TestHandleListSubscribers_ReturnsSubscribers(t *testing.T) {
 	assert.Len(t, subs, 2, "list_subscribers must return 2 subscribers")
 }
 
-// TestHandleGetSubscriber_Existing_ReturnsIt verifies get_subscriber with valid ID.
-func TestHandleGetSubscriber_Existing_ReturnsIt(t *testing.T) {
+// TestHandleSubscriber_Get_Existing_ReturnsIt verifies subscriber op=get with valid ID.
+func TestHandleSubscriber_Get_Existing_ReturnsIt(t *testing.T) {
 	s := store.NewTestStore()
 	ctx := context.Background()
 	sub, err := s.InsertSubscriber(ctx, store.InsertSubscriberParams{
@@ -44,7 +44,8 @@ func TestHandleGetSubscriber_Existing_ReturnsIt(t *testing.T) {
 	require.NoError(t, err)
 
 	client := newMCPTestClient(t, s)
-	resp := client.callTool("get_subscriber", map[string]any{
+	resp := client.callTool("subscriber", map[string]any{
+		"op": "get",
 		"id": uuidToStr(sub.ID.Bytes),
 	})
 	var result map[string]any
@@ -53,20 +54,22 @@ func TestHandleGetSubscriber_Existing_ReturnsIt(t *testing.T) {
 	assert.Equal(t, "27831234567", result["msisdn"])
 }
 
-// TestHandleGetSubscriber_Missing_ReturnsToolError verifies get_subscriber
-// with unknown ID returns a structured tool error (AC-4).
-func TestHandleGetSubscriber_Missing_ReturnsToolError(t *testing.T) {
+// TestHandleSubscriber_Get_Missing_ReturnsToolError verifies subscriber op=get
+// with unknown ID returns a structured tool error.
+func TestHandleSubscriber_Get_Missing_ReturnsToolError(t *testing.T) {
 	client := newMCPTestClient(t, store.NewTestStore())
-	resp := client.callTool("get_subscriber", map[string]any{
+	resp := client.callTool("subscriber", map[string]any{
+		"op": "get",
 		"id": "00000000-0000-0000-0000-000000000000",
 	})
 	assert.True(t, isToolError(resp), "missing subscriber must return isError: true")
 }
 
-// TestHandleCreateSubscriber_ValidInput_ReturnsSubscriber verifies create_subscriber.
-func TestHandleCreateSubscriber_ValidInput_ReturnsSubscriber(t *testing.T) {
+// TestHandleSubscriber_Create_ValidInput_ReturnsSubscriber verifies subscriber op=create.
+func TestHandleSubscriber_Create_ValidInput_ReturnsSubscriber(t *testing.T) {
 	client := newMCPTestClient(t, store.NewTestStore())
-	resp := client.callTool("create_subscriber", map[string]any{
+	resp := client.callTool("subscriber", map[string]any{
+		"op":     "create",
 		"name":   "Carol",
 		"msisdn": "27839876543",
 		"iccid":  "8927003333",
@@ -78,11 +81,12 @@ func TestHandleCreateSubscriber_ValidInput_ReturnsSubscriber(t *testing.T) {
 	assert.NotEmpty(t, result["id"])
 }
 
-// TestHandleCreateSubscriber_MissingMsisdn_ReturnsToolError verifies AC-4
-// for missing required params.
-func TestHandleCreateSubscriber_MissingMsisdn_ReturnsToolError(t *testing.T) {
+// TestHandleSubscriber_Create_MissingMsisdn_ReturnsToolError verifies missing
+// required param returns a structured tool error.
+func TestHandleSubscriber_Create_MissingMsisdn_ReturnsToolError(t *testing.T) {
 	client := newMCPTestClient(t, store.NewTestStore())
-	resp := client.callTool("create_subscriber", map[string]any{
+	resp := client.callTool("subscriber", map[string]any{
+		"op":    "create",
 		"name":  "Carol",
 		"iccid": "8927003333",
 		// msisdn intentionally omitted
@@ -90,8 +94,8 @@ func TestHandleCreateSubscriber_MissingMsisdn_ReturnsToolError(t *testing.T) {
 	assert.True(t, isToolError(resp), "missing msisdn must return isError: true")
 }
 
-// TestHandleUpdateSubscriber_ValidInput_ReturnsUpdated verifies update_subscriber.
-func TestHandleUpdateSubscriber_ValidInput_ReturnsUpdated(t *testing.T) {
+// TestHandleSubscriber_Update_ValidInput_ReturnsUpdated verifies subscriber op=update.
+func TestHandleSubscriber_Update_ValidInput_ReturnsUpdated(t *testing.T) {
 	s := store.NewTestStore()
 	ctx := context.Background()
 	sub, err := s.InsertSubscriber(ctx, store.InsertSubscriberParams{
@@ -100,7 +104,8 @@ func TestHandleUpdateSubscriber_ValidInput_ReturnsUpdated(t *testing.T) {
 	require.NoError(t, err)
 
 	client := newMCPTestClient(t, s)
-	resp := client.callTool("update_subscriber", map[string]any{
+	resp := client.callTool("subscriber", map[string]any{
+		"op":     "update",
 		"id":     uuidToStr(sub.ID.Bytes),
 		"name":   "Alice Updated",
 		"msisdn": "27831234567",
@@ -111,8 +116,8 @@ func TestHandleUpdateSubscriber_ValidInput_ReturnsUpdated(t *testing.T) {
 	assert.Equal(t, "Alice Updated", result["name"])
 }
 
-// TestHandleDeleteSubscriber_Existing_Deletes verifies delete_subscriber removes it.
-func TestHandleDeleteSubscriber_Existing_Deletes(t *testing.T) {
+// TestHandleSubscriber_Delete_Existing_Deletes verifies subscriber op=delete.
+func TestHandleSubscriber_Delete_Existing_Deletes(t *testing.T) {
 	s := store.NewTestStore()
 	ctx := context.Background()
 	sub, err := s.InsertSubscriber(ctx, store.InsertSubscriberParams{
@@ -121,7 +126,8 @@ func TestHandleDeleteSubscriber_Existing_Deletes(t *testing.T) {
 	require.NoError(t, err)
 
 	client := newMCPTestClient(t, s)
-	resp := client.callTool("delete_subscriber", map[string]any{
+	resp := client.callTool("subscriber", map[string]any{
+		"op": "delete",
 		"id": uuidToStr(sub.ID.Bytes),
 	})
 	var result map[string]string
