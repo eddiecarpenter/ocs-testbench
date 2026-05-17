@@ -113,7 +113,8 @@ func TestNewServer_ToolListReturns34Tools(t *testing.T) {
 	require.True(t, ok, "result.tools must be an array, got: %T", listRPCResp.Result["tools"])
 	// Peers: 7 → 3 (list_peers, peer, peer_connection).
 	// Subscribers: 5 → 2 (list_subscribers, subscriber).
-	assert.Len(t, tools, 27, "exactly 27 tools must be registered")
+	// Scenarios: 6 → 2 (list_scenarios, scenario).
+	assert.Len(t, tools, 23, "exactly 23 tools must be registered")
 
 	// Build a name→annotations map for spot-check assertions.
 	type toolAnnotations struct {
@@ -139,7 +140,7 @@ func TestNewServer_ToolListReturns34Tools(t *testing.T) {
 	readOnlyTools := []string{
 		"list_peers",
 		"list_subscribers",
-		"list_scenarios", "get_scenario",
+		"list_scenarios",
 		"list_executions", "get_execution", "get_execution_detail",
 		"list_avps", "get_avp_info",
 		"get_health", "get_config",
@@ -152,7 +153,7 @@ func TestNewServer_ToolListReturns34Tools(t *testing.T) {
 	}
 
 	// Spot-check destructive tools.
-	destructiveTools := []string{"delete_scenario", "stop_execution"}
+	destructiveTools := []string{"stop_execution"}
 	for _, name := range destructiveTools {
 		ta, exists := toolMap[name]
 		require.True(t, exists, "tool %q must be registered", name)
@@ -164,7 +165,7 @@ func TestNewServer_ToolListReturns34Tools(t *testing.T) {
 	writeTools := []string{
 		"peer", "peer_connection",
 		"subscriber",
-		"create_scenario", "update_scenario", "duplicate_scenario",
+		"scenario",
 		"start_execution", "resume_execution", "step_execution",
 		"apply_execution_context_override", "apply_execution_payload_override",
 		"update_config",

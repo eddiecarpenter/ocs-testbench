@@ -346,8 +346,9 @@ func TestEndToEnd_AC2_FullSequence(t *testing.T) {
 	subID := sub["id"].(string)
 	require.NotEmpty(t, subID)
 
-	// Step 4: duplicate_scenario (primary AC-2 authoring pattern).
-	dupResp := client.callTool("duplicate_scenario", map[string]any{
+	// Step 4: scenario op=duplicate (primary AC-2 authoring pattern).
+	dupResp := client.callTool("scenario", map[string]any{
+		"op":        "duplicate",
 		"source_id": starterScID,
 		"new_name":  "e2e-test-scenario",
 	})

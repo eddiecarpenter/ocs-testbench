@@ -72,12 +72,12 @@ func TestHandleListScenarios_ReturnsAll(t *testing.T) {
 	assert.Len(t, scenarios, 2, "list_scenarios must return 2 scenarios")
 }
 
-// TestHandleGetScenario_Existing_ReturnsIt verifies get_scenario with valid ID.
-func TestHandleGetScenario_Existing_ReturnsIt(t *testing.T) {
+// TestHandleScenario_Get_Existing_ReturnsIt verifies scenario op=get with valid ID.
+func TestHandleScenario_Get_Existing_ReturnsIt(t *testing.T) {
 	f := newScenarioFixture(t)
 
 	client := newMCPTestClient(t, f.s)
-	resp := client.callTool("get_scenario", map[string]any{"id": f.scID})
+	resp := client.callTool("scenario", map[string]any{"op": "get", "id": f.scID})
 
 	var result map[string]any
 	toolResult(t, resp, &result)
@@ -85,21 +85,23 @@ func TestHandleGetScenario_Existing_ReturnsIt(t *testing.T) {
 	assert.Equal(t, "session", result["sessionMode"])
 }
 
-// TestHandleGetScenario_Missing_ReturnsToolError verifies AC-4 for get_scenario.
-func TestHandleGetScenario_Missing_ReturnsToolError(t *testing.T) {
+// TestHandleScenario_Get_Missing_ReturnsToolError verifies scenario op=get with unknown ID.
+func TestHandleScenario_Get_Missing_ReturnsToolError(t *testing.T) {
 	client := newMCPTestClient(t, store.NewTestStore())
-	resp := client.callTool("get_scenario", map[string]any{
+	resp := client.callTool("scenario", map[string]any{
+		"op": "get",
 		"id": "00000000-0000-0000-0000-000000000000",
 	})
 	assert.True(t, isToolError(resp), "missing scenario must return isError: true")
 }
 
-// TestHandleCreateScenario_ValidInput_ReturnsScenario verifies create_scenario.
-func TestHandleCreateScenario_ValidInput_ReturnsScenario(t *testing.T) {
+// TestHandleScenario_Create_ValidInput_ReturnsScenario verifies scenario op=create.
+func TestHandleScenario_Create_ValidInput_ReturnsScenario(t *testing.T) {
 	f := newScenarioFixture(t)
 
 	client := newMCPTestClient(t, f.s)
-	resp := client.callTool("create_scenario", map[string]any{
+	resp := client.callTool("scenario", map[string]any{
+		"op":            "create",
 		"name":          "new-scenario",
 		"peer_id":       uuidToStr(f.peerID.Bytes),
 		"subscriber_id": uuidToStr(f.subID.Bytes),
@@ -111,37 +113,38 @@ func TestHandleCreateScenario_ValidInput_ReturnsScenario(t *testing.T) {
 	assert.NotEmpty(t, result["id"])
 }
 
-// TestHandleCreateScenario_MissingName_ReturnsToolError verifies AC-4.
-func TestHandleCreateScenario_MissingName_ReturnsToolError(t *testing.T) {
+// TestHandleScenario_Create_MissingName_ReturnsToolError verifies missing required param.
+func TestHandleScenario_Create_MissingName_ReturnsToolError(t *testing.T) {
 	f := newScenarioFixture(t)
 
 	client := newMCPTestClient(t, f.s)
-	resp := client.callTool("create_scenario", map[string]any{
+	resp := client.callTool("scenario", map[string]any{
+		"op":            "create",
 		"peer_id":       uuidToStr(f.peerID.Bytes),
 		"subscriber_id": uuidToStr(f.subID.Bytes),
 	})
 	assert.True(t, isToolError(resp), "missing name must return isError: true")
 }
 
-// TestHandleDeleteScenario_Existing_Deletes verifies delete_scenario removes it.
-func TestHandleDeleteScenario_Existing_Deletes(t *testing.T) {
+// TestHandleScenario_Delete_Existing_Deletes verifies scenario op=delete.
+func TestHandleScenario_Delete_Existing_Deletes(t *testing.T) {
 	f := newScenarioFixture(t)
 
 	client := newMCPTestClient(t, f.s)
-	resp := client.callTool("delete_scenario", map[string]any{"id": f.scID})
+	resp := client.callTool("scenario", map[string]any{"op": "delete", "id": f.scID})
 
 	var result map[string]string
 	toolResult(t, resp, &result)
 	assert.Equal(t, "deleted", result["status"])
 }
 
-// TestHandleDuplicateScenario_ExistingSource_CreatesCopy verifies duplicate_scenario
-// creates a copy with a new name (AC-2 primary authoring pattern).
-func TestHandleDuplicateScenario_ExistingSource_CreatesCopy(t *testing.T) {
+// TestHandleScenario_Duplicate_ExistingSource_CreatesCopy verifies scenario op=duplicate.
+func TestHandleScenario_Duplicate_ExistingSource_CreatesCopy(t *testing.T) {
 	f := newScenarioFixture(t)
 
 	client := newMCPTestClient(t, f.s)
-	resp := client.callTool("duplicate_scenario", map[string]any{
+	resp := client.callTool("scenario", map[string]any{
+		"op":        "duplicate",
 		"source_id": f.scID,
 		"new_name":  "copied-scenario",
 	})
@@ -151,10 +154,11 @@ func TestHandleDuplicateScenario_ExistingSource_CreatesCopy(t *testing.T) {
 	assert.NotEqual(t, f.scID, result["id"], "copy must have a different ID")
 }
 
-// TestHandleDuplicateScenario_MissingSource_ReturnsToolError verifies AC-4.
-func TestHandleDuplicateScenario_MissingSource_ReturnsToolError(t *testing.T) {
+// TestHandleScenario_Duplicate_MissingSource_ReturnsToolError verifies missing source.
+func TestHandleScenario_Duplicate_MissingSource_ReturnsToolError(t *testing.T) {
 	client := newMCPTestClient(t, store.NewTestStore())
-	resp := client.callTool("duplicate_scenario", map[string]any{
+	resp := client.callTool("scenario", map[string]any{
+		"op":        "duplicate",
 		"source_id": "00000000-0000-0000-0000-000000000000",
 		"new_name":  "copy",
 	})
