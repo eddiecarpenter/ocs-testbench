@@ -14,114 +14,68 @@ import (
 	"github.com/eddiecarpenter/ocs-testbench/internal/store"
 )
 
-// registerPeerTools registers all 7 peer management tools on the MCP server.
+// registerPeerTools registers the 3 peer tools on the MCP server.
+//
+//	list_peers      — list all peers (readonly)
+//	peer            — CRUD: get · create · update · delete
+//	peer_connection — lifecycle: connect · disconnect
 func registerPeerTools(s *server.MCPServer, srv *Server) {
-	// list_peers — read-only
+	// list_peers — readonly, no parameters
 	s.AddTool(
 		mcp.NewTool("list_peers",
-			mcp.WithDescription("List all configured Diameter peers."),
+			mcp.WithDescription("List all configured Diameter peers with their live connection status."),
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),
 		),
 		srv.handleListPeers,
 	)
 
-	// get_peer — read-only
+	// peer — CRUD operations
 	s.AddTool(
-		mcp.NewTool("get_peer",
-			mcp.WithDescription("Get a single Diameter peer by UUID or name. Provide either 'id' or 'name'; if both are given, 'id' takes precedence."),
-			mcp.WithReadOnlyHintAnnotation(true),
-			mcp.WithDestructiveHintAnnotation(false),
-			mcp.WithString("id",
-				mcp.Description("UUID of the peer to retrieve."),
-			),
-			mcp.WithString("name",
-				mcp.Description("Unique name of the peer to retrieve (e.g. 'OpenBSS')."),
-			),
-		),
-		srv.handleGetPeer,
-	)
-
-	// create_peer — write, non-destructive
-	s.AddTool(
-		mcp.NewTool("create_peer",
-			mcp.WithDescription("Create a new Diameter peer configuration."),
+		mcp.NewTool("peer",
+			mcp.WithDescription(`Diameter peer CRUD.
+op=get     id or name                          → single peer
+op=create  name*, config*                      → new peer
+op=update  id*, name*, config*                 → replace config
+op=delete  id*                                 → remove (fails if used by a scenario)
+config: {host, port, originHost, originRealm, transport, watchdogIntervalSeconds, autoConnect, originIp?, originPort?, destHost?, destRealm?}`),
 			mcp.WithReadOnlyHintAnnotation(false),
-			mcp.WithDestructiveHintAnnotation(false),
-			mcp.WithString("name",
+			mcp.WithDestructiveHintAnnotation(false), // delete is the only destructive op; annotated at runtime
+			mcp.WithString("op",
 				mcp.Required(),
-				mcp.Description("Unique name for the peer."),
+				mcp.Description("get | create | update | delete"),
+			),
+			mcp.WithString("id",
+				mcp.Description("Peer UUID — required for update, delete, and get-by-id."),
+			),
+			mcp.WithString("name",
+				mcp.Description("Peer name — required for create, update, and get-by-name."),
 			),
 			mcp.WithObject("config",
-				mcp.Required(),
-				mcp.Description("Peer configuration object (host, port, originHost, originRealm, etc.)."),
+				mcp.Description("Peer config body — required for create and update."),
 			),
 		),
-		srv.handleCreatePeer,
+		srv.handlePeer,
 	)
 
-	// update_peer — write, non-destructive
+	// peer_connection — lifecycle operations
 	s.AddTool(
-		mcp.NewTool("update_peer",
-			mcp.WithDescription("Update an existing Diameter peer configuration."),
+		mcp.NewTool("peer_connection",
+			mcp.WithDescription(`Control the live Diameter connection for a peer.
+action=connect    name*  → initiate connection
+action=disconnect name*  → gracefully close connection`),
 			mcp.WithReadOnlyHintAnnotation(false),
 			mcp.WithDestructiveHintAnnotation(false),
-			mcp.WithString("id",
+			mcp.WithString("action",
 				mcp.Required(),
-				mcp.Description("UUID of the peer to update."),
+				mcp.Description("connect | disconnect"),
 			),
 			mcp.WithString("name",
 				mcp.Required(),
-				mcp.Description("New unique name for the peer."),
-			),
-			mcp.WithObject("config",
-				mcp.Required(),
-				mcp.Description("Updated peer configuration object."),
+				mcp.Description("Name of the peer."),
 			),
 		),
-		srv.handleUpdatePeer,
-	)
-
-	// delete_peer — destructive
-	s.AddTool(
-		mcp.NewTool("delete_peer",
-			mcp.WithDescription("Delete a Diameter peer configuration. Fails if the peer is referenced by any scenario."),
-			mcp.WithReadOnlyHintAnnotation(false),
-			mcp.WithDestructiveHintAnnotation(true),
-			mcp.WithString("id",
-				mcp.Required(),
-				mcp.Description("UUID of the peer to delete."),
-			),
-		),
-		srv.handleDeletePeer,
-	)
-
-	// connect_peer — write, non-destructive
-	s.AddTool(
-		mcp.NewTool("connect_peer",
-			mcp.WithDescription("Initiate the Diameter connection lifecycle for the named peer."),
-			mcp.WithReadOnlyHintAnnotation(false),
-			mcp.WithDestructiveHintAnnotation(false),
-			mcp.WithString("name",
-				mcp.Required(),
-				mcp.Description("Name of the peer to connect."),
-			),
-		),
-		srv.handleConnectPeer,
-	)
-
-	// disconnect_peer — write, non-destructive
-	s.AddTool(
-		mcp.NewTool("disconnect_peer",
-			mcp.WithDescription("Gracefully close the Diameter connection for the named peer."),
-			mcp.WithReadOnlyHintAnnotation(false),
-			mcp.WithDestructiveHintAnnotation(false),
-			mcp.WithString("name",
-				mcp.Required(),
-				mcp.Description("Name of the peer to disconnect."),
-			),
-		),
-		srv.handleDisconnectPeer,
+		srv.handlePeerConnection,
 	)
 }
 
@@ -219,16 +173,33 @@ func (srv *Server) handleListPeers(ctx context.Context, req mcp.CallToolRequest)
 	return mcp.NewToolResultJSON(map[string]any{"peers": out})
 }
 
+// handlePeer dispatches CRUD operations for the consolidated "peer" tool.
+func (srv *Server) handlePeer(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	op, err := req.RequireString("op")
+	if err != nil {
+		return mcp.NewToolResultError("op is required (get | create | update | delete)"), nil
+	}
+	switch op {
+	case "get":
+		return srv.handleGetPeer(ctx, req)
+	case "create":
+		return srv.handleCreatePeer(ctx, req)
+	case "update":
+		return srv.handleUpdatePeer(ctx, req)
+	case "delete":
+		return srv.handleDeletePeer(ctx, req)
+	default:
+		return mcp.NewToolResultError(fmt.Sprintf("unknown op %q — use get | create | update | delete", op)), nil
+	}
+}
+
 // handleGetPeer returns a single peer by UUID or name.
-// If 'id' is provided it takes precedence; otherwise 'name' is used.
 func (srv *Server) handleGetPeer(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	idStr := req.GetString("id", "")
 	name := req.GetString("name", "")
-
 	if idStr == "" && name == "" {
 		return mcp.NewToolResultError("either 'id' or 'name' is required"), nil
 	}
-
 	if idStr != "" {
 		id, err := parseUUID(idStr)
 		if err != nil {
@@ -243,8 +214,6 @@ func (srv *Server) handleGetPeer(ctx context.Context, req mcp.CallToolRequest) (
 		}
 		return mcp.NewToolResultJSON(srv.toPeerJSON(peer))
 	}
-
-	// Lookup by name.
 	peer, err := srv.store.GetPeerByName(ctx, name)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -261,8 +230,7 @@ func (srv *Server) handleCreatePeer(ctx context.Context, req mcp.CallToolRequest
 	if err != nil {
 		return mcp.NewToolResultError("name is required"), nil
 	}
-	args := req.GetArguments()
-	config, ok := args["config"].(map[string]any)
+	config, ok := req.GetArguments()["config"].(map[string]any)
 	if !ok {
 		return mcp.NewToolResultError("config is required and must be an object"), nil
 	}
@@ -294,8 +262,7 @@ func (srv *Server) handleUpdatePeer(ctx context.Context, req mcp.CallToolRequest
 	if err != nil {
 		return mcp.NewToolResultError("name is required"), nil
 	}
-	args := req.GetArguments()
-	config, ok := args["config"].(map[string]any)
+	config, ok := req.GetArguments()["config"].(map[string]any)
 	if !ok {
 		return mcp.NewToolResultError("config is required and must be an object"), nil
 	}
@@ -338,34 +305,33 @@ func (srv *Server) handleDeletePeer(ctx context.Context, req mcp.CallToolRequest
 	return mcp.NewToolResultJSON(map[string]string{"status": "deleted"})
 }
 
-// handleConnectPeer initiates connection for a named peer.
-func (srv *Server) handleConnectPeer(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+// handlePeerConnection dispatches connect/disconnect lifecycle operations.
+func (srv *Server) handlePeerConnection(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if srv.peerMgr == nil {
 		return mcp.NewToolResultError("peer manager not available"), nil
+	}
+	action, err := req.RequireString("action")
+	if err != nil {
+		return mcp.NewToolResultError("action is required (connect | disconnect)"), nil
 	}
 	name, err := req.RequireString("name")
 	if err != nil {
 		return mcp.NewToolResultError("name is required"), nil
 	}
-	if err := srv.peerMgr.Connect(name); err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("connect failed: %v", err)), nil
+	switch action {
+	case "connect":
+		if err := srv.peerMgr.Connect(name); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("connect failed: %v", err)), nil
+		}
+		return mcp.NewToolResultJSON(map[string]string{"status": "connecting", "peer": name})
+	case "disconnect":
+		if err := srv.peerMgr.Disconnect(name); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("disconnect failed: %v", err)), nil
+		}
+		return mcp.NewToolResultJSON(map[string]string{"status": "disconnected", "peer": name})
+	default:
+		return mcp.NewToolResultError(fmt.Sprintf("unknown action %q — use connect | disconnect", action)), nil
 	}
-	return mcp.NewToolResultJSON(map[string]string{"status": "connecting", "peer": name})
-}
-
-// handleDisconnectPeer gracefully closes a named peer connection.
-func (srv *Server) handleDisconnectPeer(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if srv.peerMgr == nil {
-		return mcp.NewToolResultError("peer manager not available"), nil
-	}
-	name, err := req.RequireString("name")
-	if err != nil {
-		return mcp.NewToolResultError("name is required"), nil
-	}
-	if err := srv.peerMgr.Disconnect(name); err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("disconnect failed: %v", err)), nil
-	}
-	return mcp.NewToolResultJSON(map[string]string{"status": "disconnected", "peer": name})
 }
 
 // — UUID helpers (not re-exported from internal/api) —

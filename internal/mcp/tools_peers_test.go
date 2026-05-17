@@ -117,15 +117,16 @@ func TestHandleListPeers_ReturnsPeers(t *testing.T) {
 	assert.Equal(t, "ocs-02", peers[1].(map[string]any)["name"])
 }
 
-// TestHandleGetPeer_ExistingPeer_ReturnsIt verifies get_peer with a valid ID.
-func TestHandleGetPeer_ExistingPeer_ReturnsIt(t *testing.T) {
+// TestHandlePeer_Get_ExistingPeer_ReturnsIt verifies peer op=get with a valid ID.
+func TestHandlePeer_Get_ExistingPeer_ReturnsIt(t *testing.T) {
 	s := store.NewTestStore()
 	ctx := context.Background()
 	peer, err := s.InsertPeer(ctx, "ocs-01", []byte(`{"host":"10.0.0.1","port":3868}`))
 	require.NoError(t, err)
 
 	client := newMCPTestClient(t, s)
-	resp := client.callTool("get_peer", map[string]any{
+	resp := client.callTool("peer", map[string]any{
+		"op": "get",
 		"id": uuidToStr(peer.ID.Bytes),
 	})
 
@@ -135,11 +136,12 @@ func TestHandleGetPeer_ExistingPeer_ReturnsIt(t *testing.T) {
 	assert.Equal(t, "10.0.0.1", result["host"])
 }
 
-// TestHandleGetPeer_MissingPeer_ReturnsToolError verifies get_peer with
-// an unknown ID returns a structured tool error (AC-4).
-func TestHandleGetPeer_MissingPeer_ReturnsToolError(t *testing.T) {
+// TestHandlePeer_Get_MissingPeer_ReturnsToolError verifies peer op=get with
+// an unknown ID returns a structured tool error.
+func TestHandlePeer_Get_MissingPeer_ReturnsToolError(t *testing.T) {
 	client := newMCPTestClient(t, store.NewTestStore())
-	resp := client.callTool("get_peer", map[string]any{
+	resp := client.callTool("peer", map[string]any{
+		"op": "get",
 		"id": "00000000-0000-0000-0000-000000000000",
 	})
 	assert.True(t, isToolError(resp), "missing peer must return isError: true")
@@ -147,15 +149,15 @@ func TestHandleGetPeer_MissingPeer_ReturnsToolError(t *testing.T) {
 	assert.Contains(t, errMsg, "not found", "error message must mention not found")
 }
 
-// TestHandleGetPeer_ByName_ReturnsIt verifies get_peer resolves by name.
-func TestHandleGetPeer_ByName_ReturnsIt(t *testing.T) {
+// TestHandlePeer_Get_ByName_ReturnsIt verifies peer op=get resolves by name.
+func TestHandlePeer_Get_ByName_ReturnsIt(t *testing.T) {
 	s := store.NewTestStore()
 	ctx := context.Background()
 	_, err := s.InsertPeer(ctx, "ocs-01", []byte(`{"host":"10.0.0.1","port":3868}`))
 	require.NoError(t, err)
 
 	client := newMCPTestClient(t, s)
-	resp := client.callTool("get_peer", map[string]any{"name": "ocs-01"})
+	resp := client.callTool("peer", map[string]any{"op": "get", "name": "ocs-01"})
 
 	var result map[string]any
 	toolResult(t, resp, &result)
@@ -163,19 +165,19 @@ func TestHandleGetPeer_ByName_ReturnsIt(t *testing.T) {
 	assert.Equal(t, "10.0.0.1", result["host"])
 }
 
-// TestHandleGetPeer_MissingRequiredParam_ReturnsToolError verifies that
-// calling get_peer with neither id nor name returns a structured tool error.
-func TestHandleGetPeer_MissingRequiredParam_ReturnsToolError(t *testing.T) {
+// TestHandlePeer_Get_MissingRequiredParam_ReturnsToolError verifies that
+// peer op=get with neither id nor name returns a structured tool error.
+func TestHandlePeer_Get_MissingRequiredParam_ReturnsToolError(t *testing.T) {
 	client := newMCPTestClient(t, store.NewTestStore())
-	// Call without id or name parameter.
-	resp := client.callTool("get_peer", map[string]any{})
+	resp := client.callTool("peer", map[string]any{"op": "get"})
 	assert.True(t, isToolError(resp), "missing id and name must return isError: true")
 }
 
-// TestHandleCreatePeer_ValidInput_ReturnsPeer verifies create_peer creates a peer.
-func TestHandleCreatePeer_ValidInput_ReturnsPeer(t *testing.T) {
+// TestHandlePeer_Create_ValidInput_ReturnsPeer verifies peer op=create.
+func TestHandlePeer_Create_ValidInput_ReturnsPeer(t *testing.T) {
 	client := newMCPTestClient(t, store.NewTestStore())
-	resp := client.callTool("create_peer", map[string]any{
+	resp := client.callTool("peer", map[string]any{
+		"op":     "create",
 		"name":   "ocs-new",
 		"config": map[string]any{"host": "10.0.0.5", "port": float64(3868)},
 	})
@@ -185,24 +187,25 @@ func TestHandleCreatePeer_ValidInput_ReturnsPeer(t *testing.T) {
 	assert.NotEmpty(t, result["id"], "created peer must have an id")
 }
 
-// TestHandleCreatePeer_DuplicateName_ReturnsToolError verifies duplicate
+// TestHandlePeer_Create_DuplicateName_ReturnsToolError verifies duplicate
 // name returns a structured tool error.
-func TestHandleCreatePeer_DuplicateName_ReturnsToolError(t *testing.T) {
+func TestHandlePeer_Create_DuplicateName_ReturnsToolError(t *testing.T) {
 	s := store.NewTestStore()
 	ctx := context.Background()
 	_, err := s.InsertPeer(ctx, "ocs-01", []byte(`{}`))
 	require.NoError(t, err)
 
 	client := newMCPTestClient(t, s)
-	resp := client.callTool("create_peer", map[string]any{
+	resp := client.callTool("peer", map[string]any{
+		"op":     "create",
 		"name":   "ocs-01",
 		"config": map[string]any{},
 	})
 	assert.True(t, isToolError(resp), "duplicate name must return isError: true")
 }
 
-// TestHandleUpdatePeer_ValidInput_ReturnsPeer verifies update_peer updates a peer.
-func TestHandleUpdatePeer_ValidInput_ReturnsPeer(t *testing.T) {
+// TestHandlePeer_Update_ValidInput_ReturnsPeer verifies peer op=update.
+func TestHandlePeer_Update_ValidInput_ReturnsPeer(t *testing.T) {
 	s := store.NewTestStore()
 	ctx := context.Background()
 	peer, err := s.InsertPeer(ctx, "ocs-01", []byte(`{"host":"10.0.0.1"}`))
@@ -210,7 +213,8 @@ func TestHandleUpdatePeer_ValidInput_ReturnsPeer(t *testing.T) {
 	peerID := uuidToStr(peer.ID.Bytes)
 
 	client := newMCPTestClient(t, s)
-	resp := client.callTool("update_peer", map[string]any{
+	resp := client.callTool("peer", map[string]any{
+		"op":     "update",
 		"id":     peerID,
 		"name":   "ocs-01-updated",
 		"config": map[string]any{"host": "10.0.0.9"},
@@ -220,8 +224,8 @@ func TestHandleUpdatePeer_ValidInput_ReturnsPeer(t *testing.T) {
 	assert.Equal(t, "ocs-01-updated", result["name"])
 }
 
-// TestHandleDeletePeer_ExistingPeer_Deletes verifies delete_peer removes a peer.
-func TestHandleDeletePeer_ExistingPeer_Deletes(t *testing.T) {
+// TestHandlePeer_Delete_ExistingPeer_Deletes verifies peer op=delete.
+func TestHandlePeer_Delete_ExistingPeer_Deletes(t *testing.T) {
 	s := store.NewTestStore()
 	ctx := context.Background()
 	peer, err := s.InsertPeer(ctx, "ocs-del", []byte(`{}`))
@@ -229,28 +233,22 @@ func TestHandleDeletePeer_ExistingPeer_Deletes(t *testing.T) {
 	peerID := uuidToStr(peer.ID.Bytes)
 
 	client := newMCPTestClient(t, s)
-	resp := client.callTool("delete_peer", map[string]any{"id": peerID})
+	resp := client.callTool("peer", map[string]any{"op": "delete", "id": peerID})
 	var result map[string]string
 	toolResult(t, resp, &result)
 	assert.Equal(t, "deleted", result["status"])
 
-	// Verify it's gone.
 	_, err = s.GetPeer(ctx, peer.ID)
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }
 
-// TestHandleConnectPeer_NilManager_ReturnsToolError verifies connect_peer
+// TestHandlePeerConnection_NilManager_ReturnsToolError verifies peer_connection
 // with no PeerManager returns a tool error.
-func TestHandleConnectPeer_NilManager_ReturnsToolError(t *testing.T) {
+func TestHandlePeerConnection_NilManager_ReturnsToolError(t *testing.T) {
 	client := newMCPTestClient(t, store.NewTestStore())
-	resp := client.callTool("connect_peer", map[string]any{"name": "ocs-01"})
+	resp := client.callTool("peer_connection", map[string]any{"action": "connect", "name": "ocs-01"})
 	assert.True(t, isToolError(resp), "nil manager must return isError: true")
-}
 
-// TestHandleDisconnectPeer_NilManager_ReturnsToolError verifies disconnect_peer
-// with no PeerManager returns a tool error.
-func TestHandleDisconnectPeer_NilManager_ReturnsToolError(t *testing.T) {
-	client := newMCPTestClient(t, store.NewTestStore())
-	resp := client.callTool("disconnect_peer", map[string]any{"name": "ocs-01"})
+	resp = client.callTool("peer_connection", map[string]any{"action": "disconnect", "name": "ocs-01"})
 	assert.True(t, isToolError(resp), "nil manager must return isError: true")
 }

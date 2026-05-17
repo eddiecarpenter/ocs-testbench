@@ -12,119 +12,59 @@ import (
 	"github.com/eddiecarpenter/ocs-testbench/internal/store"
 )
 
-// registerScenarioTools registers all 6 scenario management tools.
+// registerScenarioTools registers the 2 scenario tools on the MCP server.
+//
+//	list_scenarios — list all scenarios (readonly)
+//	scenario       — CRUD + duplicate: get · create · update · delete · duplicate
 func registerScenarioTools(s *server.MCPServer, srv *Server) {
-	// list_scenarios — read-only
+	// list_scenarios — readonly, no parameters
 	s.AddTool(
 		mcp.NewTool("list_scenarios",
-			mcp.WithDescription("List all scenarios, including system starter scenarios. "+
-				"System starters (origin=system) serve as templates — use duplicate_scenario to create your own editable copy."),
+			mcp.WithDescription("List all scenarios including system starter templates (origin=system)."),
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),
 		),
 		srv.handleListScenarios,
 	)
 
-	// get_scenario — read-only
+	// scenario — CRUD + duplicate
 	s.AddTool(
-		mcp.NewTool("get_scenario",
-			mcp.WithDescription("Get a single scenario by ID, including its full AVP step definitions."),
-			mcp.WithReadOnlyHintAnnotation(true),
+		mcp.NewTool("scenario",
+			mcp.WithDescription(`Scenario management.
+op=get        id*                                          → full scenario with AVP steps
+op=create     name*, peer_id*, subscriber_id*, body?       → new scenario (prefer duplicate over create)
+op=update     id*, name*, peer_id*, subscriber_id*, body?  → update user scenario (not system starters)
+op=delete     id*                                          → remove (fails if active executions)
+op=duplicate  source_id*, new_name*                        → copy a scenario; use to start from a system starter`),
+			mcp.WithReadOnlyHintAnnotation(false),
 			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithString("op",
+				mcp.Required(),
+				mcp.Description("get | create | update | delete | duplicate"),
+			),
 			mcp.WithString("id",
-				mcp.Required(),
-				mcp.Description("UUID of the scenario to retrieve."),
+				mcp.Description("Scenario UUID — required for get, update, delete."),
 			),
-		),
-		srv.handleGetScenario,
-	)
-
-	// create_scenario — write, non-destructive
-	s.AddTool(
-		mcp.NewTool("create_scenario",
-			mcp.WithDescription("Create a new scenario. For most use-cases, prefer duplicate_scenario to start from a system starter."),
-			mcp.WithReadOnlyHintAnnotation(false),
-			mcp.WithDestructiveHintAnnotation(false),
-			mcp.WithString("name",
-				mcp.Required(),
-				mcp.Description("Name for the new scenario."),
-			),
-			mcp.WithString("peer_id",
-				mcp.Required(),
-				mcp.Description("UUID of the peer to associate with this scenario."),
-			),
-			mcp.WithString("subscriber_id",
-				mcp.Required(),
-				mcp.Description("UUID of the subscriber to associate with this scenario."),
-			),
-			mcp.WithObject("body",
-				mcp.Description("Scenario body (steps, variables, sessionMode, serviceModel, etc.). See OpenAPI spec for shape. Optional fields default to empty."),
-			),
-		),
-		srv.handleCreateScenario,
-	)
-
-	// update_scenario — write, non-destructive
-	s.AddTool(
-		mcp.NewTool("update_scenario",
-			mcp.WithDescription("Update an existing user scenario. Cannot update system starter scenarios."),
-			mcp.WithReadOnlyHintAnnotation(false),
-			mcp.WithDestructiveHintAnnotation(false),
-			mcp.WithString("id",
-				mcp.Required(),
-				mcp.Description("UUID of the scenario to update."),
-			),
-			mcp.WithString("name",
-				mcp.Required(),
-				mcp.Description("Updated scenario name."),
-			),
-			mcp.WithString("peer_id",
-				mcp.Required(),
-				mcp.Description("UUID of the peer to associate."),
-			),
-			mcp.WithString("subscriber_id",
-				mcp.Required(),
-				mcp.Description("UUID of the subscriber to associate."),
-			),
-			mcp.WithObject("body",
-				mcp.Description("Updated scenario body."),
-			),
-		),
-		srv.handleUpdateScenario,
-	)
-
-	// delete_scenario — destructive
-	s.AddTool(
-		mcp.NewTool("delete_scenario",
-			mcp.WithDescription("Delete a scenario by ID. Returns a tool error when the scenario has active executions."),
-			mcp.WithReadOnlyHintAnnotation(false),
-			mcp.WithDestructiveHintAnnotation(true),
-			mcp.WithString("id",
-				mcp.Required(),
-				mcp.Description("UUID of the scenario to delete."),
-			),
-		),
-		srv.handleDeleteScenario,
-	)
-
-	// duplicate_scenario — write, non-destructive
-	s.AddTool(
-		mcp.NewTool("duplicate_scenario",
-			mcp.WithDescription("Create a copy of an existing scenario as a new user-editable scenario. "+
-				"Recommended starting point: duplicate a system starter scenario (origin=system) to create your own "+
-				"editable copy. System starters cannot be modified directly."),
-			mcp.WithReadOnlyHintAnnotation(false),
-			mcp.WithDestructiveHintAnnotation(false),
 			mcp.WithString("source_id",
-				mcp.Required(),
-				mcp.Description("UUID of the scenario to duplicate (source)."),
+				mcp.Description("Source scenario UUID — required for duplicate."),
 			),
 			mcp.WithString("new_name",
-				mcp.Required(),
-				mcp.Description("Name for the new duplicate scenario."),
+				mcp.Description("Name for the duplicated scenario — required for duplicate."),
+			),
+			mcp.WithString("name",
+				mcp.Description("Scenario name — required for create and update."),
+			),
+			mcp.WithString("peer_id",
+				mcp.Description("Peer UUID — required for create and update."),
+			),
+			mcp.WithString("subscriber_id",
+				mcp.Description("Subscriber UUID — required for create and update."),
+			),
+			mcp.WithObject("body",
+				mcp.Description("Scenario body (steps, variables, sessionMode, serviceModel, etc.). Optional."),
 			),
 		),
-		srv.handleDuplicateScenario,
+		srv.handleScenario,
 	)
 }
 
@@ -244,6 +184,28 @@ func bodyFromMap(m map[string]any) ([]byte, error) {
 }
 
 // — handlers —
+
+// handleScenario dispatches CRUD + duplicate operations for the consolidated "scenario" tool.
+func (srv *Server) handleScenario(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	op, err := req.RequireString("op")
+	if err != nil {
+		return mcp.NewToolResultError("op is required (get | create | update | delete | duplicate)"), nil
+	}
+	switch op {
+	case "get":
+		return srv.handleGetScenario(ctx, req)
+	case "create":
+		return srv.handleCreateScenario(ctx, req)
+	case "update":
+		return srv.handleUpdateScenario(ctx, req)
+	case "delete":
+		return srv.handleDeleteScenario(ctx, req)
+	case "duplicate":
+		return srv.handleDuplicateScenario(ctx, req)
+	default:
+		return mcp.NewToolResultError(fmt.Sprintf("unknown op %q — use get | create | update | delete | duplicate", op)), nil
+	}
+}
 
 // handleListScenarios returns all scenarios.
 func (srv *Server) handleListScenarios(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
