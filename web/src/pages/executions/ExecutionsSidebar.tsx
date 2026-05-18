@@ -14,6 +14,7 @@
 import {
   Badge,
   Box,
+  Divider,
   Group,
   ScrollArea,
   Stack,
@@ -105,21 +106,21 @@ export function ExecutionsSidebar({
             </Text>
           ) : (
             <>
-              {SERVICE_TYPE_GROUP_ORDER.map((serviceType) => {
+              {SERVICE_TYPE_GROUP_ORDER.map((serviceType, idx) => {
                 const rows = grouped[serviceType];
                 if (!rows || rows.length === 0) return null;
                 return (
                   <Stack key={serviceType} gap={2}>
-                    <Text
-                      size="xs"
-                      fw={600}
-                      c="dimmed"
-                      tt="uppercase"
-                      px="sm"
-                      pt="xs"
-                    >
-                      {SERVICE_TYPE_LABELS[serviceType]}
-                    </Text>
+                    <Divider
+                      label={
+                        <Text size="xs" fw={700} c="dimmed" tt="uppercase" style={{ letterSpacing: '0.05em' }}>
+                          {SERVICE_TYPE_LABELS[serviceType]}
+                        </Text>
+                      }
+                      labelPosition="left"
+                      mt={idx === 0 ? 4 : 8}
+                      mb={2}
+                    />
                     {rows.map((s) => (
                       <SidebarRow
                         key={s.id}
