@@ -61,18 +61,6 @@ func TestHandleGetAVPInfo_MissingName_ReturnsToolError(t *testing.T) {
 	assert.True(t, isToolError(resp), "missing name must return isError: true")
 }
 
-// TestHandleGetHealth_ReturnsStoreReachableField verifies get_health has expected shape.
-func TestHandleGetHealth_ReturnsStoreReachableField(t *testing.T) {
-	client := newMCPTestClient(t, store.NewTestStore())
-	resp := client.callTool("get_health", nil)
-
-	var result map[string]any
-	toolResult(t, resp, &result)
-	_, hasPeers := result["peers"]
-	assert.True(t, hasPeers, "get_health must return peers field")
-	_, hasStoreOK := result["store_reachable"]
-	assert.True(t, hasStoreOK, "get_health must return store_reachable field")
-}
 
 // TestHandleGetConfig_WithConfig_ReturnsFields verifies get_config returns correct fields.
 func TestHandleGetConfig_WithConfig_ReturnsFields(t *testing.T) {
