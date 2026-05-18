@@ -61,7 +61,6 @@ func TestHandleGetAVPInfo_MissingName_ReturnsToolError(t *testing.T) {
 	assert.True(t, isToolError(resp), "missing name must return isError: true")
 }
 
-
 // TestHandleGetConfig_WithConfig_ReturnsFields verifies get_config returns correct fields.
 func TestHandleGetConfig_WithConfig_ReturnsFields(t *testing.T) {
 	cfg := &baseconfig.Config{

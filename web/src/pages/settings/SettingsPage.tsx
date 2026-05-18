@@ -700,7 +700,7 @@ function DictModal({ opened, onClose, title, existing }: DictModalProps) {
                 language="xml"
                 theme={colorScheme === 'dark' ? 'vs-dark' : 'light'}
                 value={form.values.xmlContent}
-                onChange={(v) => form.setFieldValue('xmlContent', v ?? '')}
+                onChange={(v: string | undefined) => form.setFieldValue('xmlContent', v ?? '')}
                 options={{
                   minimap: { enabled: false },
                   scrollBeyondLastLine: false,
