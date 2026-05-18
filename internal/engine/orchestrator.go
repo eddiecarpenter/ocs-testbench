@@ -153,6 +153,35 @@ func (o *Orchestrator) RunContinuous(
 			case ActionGotoTerminate:
 				lastIdx := len(steps) - 1
 				if i < lastIdx {
+					// Before jumping to the TERMINATE step, honour the current
+					// step's configured delay. This mirrors real Diameter Gy
+					// behaviour: when the OCS signals FUI=TERMINATE the last
+					// grant (Validity-Time) is still consumed before CCR-T is
+					// sent. Without this wait the CCR-T fires the instant the
+					// UPDATE CCA arrives, which is incorrect.
+					//
+					// For error-triggered GotoTerminate (4xxx result codes)
+					// computeStepDelay returns the step's delaySec; if that is
+					// 0 the select falls through immediately and CCR-T is sent
+					// right away — preserving the previous fast-fail behaviour.
+					delay := computeStepDelay(step, prevResult)
+					if delay > 0 {
+						if opts.OnDelay != nil {
+							opts.OnDelay(globalIdx, delay)
+						}
+						select {
+						case <-ctx.Done():
+							sc.State = StateError
+							return ctx.Err()
+						case <-stopCh(opts.StopCh):
+							sc.State = StateCompleted
+							return nil
+						case <-stopCh(opts.InterruptCh):
+							sc.State = StatePaused
+							return ErrExecutionInterrupted
+						case <-time.After(delay):
+						}
+					}
 					globalLast := opts.StepOffset + lastIdx
 					_, _, err := o.runStepLoop(ctx, sc, &prevResult, steps[lastIdx], globalLast, opts)
 					if err != nil {
@@ -284,8 +313,21 @@ func (o *Orchestrator) runStepLoop(
 	maxIter := stepMaxIterations(step)
 
 	for iter := 0; iter < maxIter; iter++ {
-		// Apply inter-iteration delay (skip on the first send of a step).
-		if iter > 0 {
+		// Apply delay before this iteration.
+		//
+		// iter == 0 with a non-nil prevResult means this is the first send
+		// of a step that follows a prior step (e.g. INITIAL → UPDATE).
+		// Applying the delay here makes the validity-time countdown fire
+		// correctly between INITIAL and the first UPDATE, not just between
+		// subsequent UPDATE iterations.
+		//
+		// Steps with no configured delay (delaySec=0, useValidityTime=false)
+		// return 0 from computeStepDelay and skip the block — so instant
+		// steps like TERMINATE are unaffected.
+		//
+		// The very first step of a fresh session (iter==0, prevResult==nil)
+		// is always skipped to avoid an unnecessary delay at session start.
+		if iter > 0 || *prevResult != nil {
 			delay := computeStepDelay(step, *prevResult)
 			if delay > 0 {
 				if opts.OnDelay != nil {

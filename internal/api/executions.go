@@ -245,6 +245,7 @@ type StepRecordJSON struct {
 	DurationMs       int64           `json:"durationMs,omitempty"`
 	ErrorDetail      string          `json:"errorDetail,omitempty"`
 	Request          map[string]any  `json:"request,omitempty"`
+	RequestSize      int             `json:"requestSize,omitempty"`
 	Response         map[string]any  `json:"response,omitempty"`
 	RequestText      string          `json:"requestText,omitempty"`
 	ResponseText     string          `json:"responseText,omitempty"`

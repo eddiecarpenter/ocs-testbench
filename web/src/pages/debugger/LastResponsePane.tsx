@@ -95,7 +95,7 @@ export function LastResponsePane() {
           RTT {formatRtt(record.durationMs)}
         </Text>
         <Text size="xs" c="dimmed">
-          Req {formatSize(approximateSize(record.request as Record<string, unknown>))}
+          Req {formatSize(record.requestSize ?? approximateSize(record.request as Record<string, unknown>))}
         </Text>
         <Text size="xs" c="dimmed">
           Res {formatSize(approximateSize(response))}
