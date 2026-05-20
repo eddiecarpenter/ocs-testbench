@@ -61,7 +61,23 @@ op=duplicate  source_id*, new_name*                        → copy a scenario; 
 				mcp.Description("Subscriber UUID — required for create and update."),
 			),
 			mcp.WithObject("body",
-				mcp.Description("Scenario body (steps, variables, sessionMode, serviceModel, etc.). Optional."),
+				mcp.Description(`Scenario body fields (all optional unless noted):
+  serviceType     — service classification (determines unit of measure and Service-Information AVP):
+                    VOICE        time-based voice call (IMS/IN-Information)
+                    DATA         volume-based data session (PS-Information)
+                    SMS          event-based SMS (SMS-Information)
+                    USSD1        UNIT-based USSD — charges by number of messages sent (DCD-Information); almost always sessionMode=event
+                    USSD2        TIME-based USSD — charges by session duration in seconds (DCD-Information); sessionMode=session or event
+  serviceProfile  — OCS vendor profile: 3GPP | HUAWEI
+  sessionMode     — event (single CCR-E) | session (CCR-I + CCR-U* + CCR-T)
+  serviceModel    — root (single MSCC) | multi-mscc (multiple rating groups)
+  serviceContextId — Service-Context-Id AVP value sent in CCR messages
+  description     — human-readable description
+  favourite       — boolean; pin to top of list
+  avpTree         — array of AVP nodes to include in each CCR step
+  services        — array of service/MSCC definitions (for multi-mscc model)
+  variables       — array of variable declarations (name, source, description)
+  steps           — array of scenario steps`),
 			),
 		),
 		srv.handleScenario,
@@ -170,8 +186,41 @@ func nullableRaw(raw json.RawMessage) json.RawMessage {
 	return raw
 }
 
+// validScenarioServiceTypes is the closed set of accepted serviceType values.
+// Keep in sync with the OpenAPI ServiceType enum and the API-layer validServiceTypes map.
+// validScenarioServiceTypes is the closed set of accepted serviceType values.
+// Keep in sync with the OpenAPI ServiceType enum and the API-layer validServiceTypes map.
+// USSD1 = unit-based (message count), typically event mode.
+// USSD2 = time-based (seconds), session or event — sessionMode is the orthogonal field.
+var validScenarioServiceTypes = map[string]bool{
+	"VOICE": true,
+	"DATA":  true,
+	"SMS":   true,
+	"USSD1": true,
+	"USSD2": true,
+}
+
+// validateScenarioServiceType returns an error string when the supplied value
+// is not a recognised ServiceType. An empty string is accepted (field optional).
+func validateScenarioServiceType(s string) string {
+	if s == "" {
+		return ""
+	}
+	if !validScenarioServiceTypes[s] {
+		return fmt.Sprintf("serviceType %q is not valid — must be one of: VOICE, DATA, SMS, USSD1, USSD2", s)
+	}
+	return ""
+}
+
 // bodyFromMap converts a map[string]any (from MCP tool args) into the JSONB
 // bytes to persist in the store.
+//
+// Normalisation applied before marshalling:
+//   - Array fields (avpTree, services, variables, steps) that are nil or JSON
+//     null are replaced with an empty slice so the frontend never sees null
+//     where it expects an array.
+//   - variable entries that have a non-map source or missing required fields
+//     are rejected (returning an error string via validateBodyVariables).
 func bodyFromMap(m map[string]any) ([]byte, error) {
 	if m == nil {
 		// Empty body: marshal an empty scenario body with sane defaults.
@@ -180,7 +229,62 @@ func bodyFromMap(m map[string]any) ([]byte, error) {
 			ServiceModel: "gy",
 		})
 	}
+	// Normalise array fields: nil → empty slice, so the frontend never gets null.
+	for _, field := range []string{"avpTree", "services", "variables", "steps"} {
+		if v, exists := m[field]; !exists || v == nil {
+			m[field] = []any{}
+		}
+	}
+	// Validate variables structure if present.
+	if vars, ok := m["variables"].([]any); ok {
+		if msg := validateBodyVariables(vars); msg != "" {
+			return nil, fmt.Errorf("%s", msg)
+		}
+	}
 	return json.Marshal(m)
+}
+
+// validateBodyVariables checks that every variable entry in the body has a
+// valid structure. Returns a human-readable error string or "" if all are valid.
+func validateBodyVariables(vars []any) string {
+	for i, v := range vars {
+		entry, ok := v.(map[string]any)
+		if !ok {
+			return fmt.Sprintf("variables[%d]: must be an object", i)
+		}
+		name, _ := entry["name"].(string)
+		if name == "" {
+			return fmt.Sprintf("variables[%d]: name is required and must be a non-empty string", i)
+		}
+		src, ok := entry["source"].(map[string]any)
+		if !ok || src == nil {
+			return fmt.Sprintf("variables[%d] (%q): source is required and must be an object", i, name)
+		}
+		kind, _ := src["kind"].(string)
+		switch kind {
+		case "generator":
+			if _, ok := src["strategy"].(string); !ok {
+				return fmt.Sprintf("variables[%d] (%q): source.strategy is required for kind=generator", i, name)
+			}
+			if _, ok := src["refresh"].(string); !ok {
+				return fmt.Sprintf("variables[%d] (%q): source.refresh is required for kind=generator (once | per-send)", i, name)
+			}
+		case "bound":
+			if _, ok := src["from"].(string); !ok {
+				return fmt.Sprintf("variables[%d] (%q): source.from is required for kind=bound (subscriber | peer | config | step)", i, name)
+			}
+			if _, ok := src["field"].(string); !ok {
+				return fmt.Sprintf("variables[%d] (%q): source.field is required for kind=bound", i, name)
+			}
+		case "extracted":
+			if _, ok := src["path"].(string); !ok {
+				return fmt.Sprintf("variables[%d] (%q): source.path is required for kind=extracted", i, name)
+			}
+		default:
+			return fmt.Sprintf("variables[%d] (%q): source.kind %q is invalid — must be generator | bound | extracted", i, name, kind)
+		}
+	}
+	return ""
 }
 
 // — handlers —
@@ -268,6 +372,13 @@ func (srv *Server) handleCreateScenario(ctx context.Context, req mcp.CallToolReq
 	if b, ok := args["body"].(map[string]any); ok {
 		bodyMap = b
 	}
+	if bodyMap != nil {
+		if st, _ := bodyMap["serviceType"].(string); st != "" {
+			if msg := validateScenarioServiceType(st); msg != "" {
+				return mcp.NewToolResultError(msg), nil
+			}
+		}
+	}
 	body, err := bodyFromMap(bodyMap)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("invalid body: %v", err)), nil
@@ -321,6 +432,13 @@ func (srv *Server) handleUpdateScenario(ctx context.Context, req mcp.CallToolReq
 	var bodyMap map[string]any
 	if b, ok := args["body"].(map[string]any); ok {
 		bodyMap = b
+	}
+	if bodyMap != nil {
+		if st, _ := bodyMap["serviceType"].(string); st != "" {
+			if msg := validateScenarioServiceType(st); msg != "" {
+				return mcp.NewToolResultError(msg), nil
+			}
+		}
 	}
 	body, err := bodyFromMap(bodyMap)
 	if err != nil {

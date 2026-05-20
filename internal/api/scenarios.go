@@ -137,10 +137,10 @@ func toFullResponse(sc store.Scenario, dict template.Dictionary) scenarioFullRes
 	_ = json.Unmarshal(sc.Body, &b)
 	return scenarioFullResponse{
 		scenarioSummaryResponse: toSummaryResponse(sc),
-		AvpTree:                 enrichAvpTree(nullableJSON(b.AvpTree), dict),
-		Services:                nullableJSON(b.Services),
-		Variables:               nullableJSON(b.Variables),
-		Steps:                   nullableJSON(b.Steps),
+		AvpTree:                 enrichAvpTree(coalesceArray(b.AvpTree), dict),
+		Services:                coalesceArray(b.Services),
+		Variables:               coalesceArray(b.Variables),
+		Steps:                   coalesceArray(b.Steps),
 	}
 }
 
@@ -191,8 +191,22 @@ func enrichNodes(nodes []avpRichNode, dict template.Dictionary) {
 	}
 }
 
+// emptyArrayJSON is a JSON empty array used as the default for nil/empty array fields.
+var emptyArrayJSON = json.RawMessage("[]")
+
+// coalesceArray returns raw if it is non-empty and not the JSON literal "null",
+// otherwise returns emptyArrayJSON so the frontend always receives an array.
+func coalesceArray(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 || string(raw) == "null" {
+		return emptyArrayJSON
+	}
+	return raw
+}
+
 // buildBody serialises the non-column ScenarioInput fields into the
-// JSONB body.
+// JSONB body. Array fields (avpTree, services, variables, steps) that
+// arrive as null or empty are normalised to [] so the frontend never
+// sees null where it expects an array.
 func buildBody(req scenarioRequest) ([]byte, error) {
 	b := scenarioBody{
 		Description:      req.Description,
@@ -202,10 +216,10 @@ func buildBody(req scenarioRequest) ([]byte, error) {
 		ServiceProfile:   req.ServiceProfile,
 		Favourite:        req.Favourite,
 		ServiceContextID: req.ServiceContextID,
-		AvpTree:          req.AvpTree,
-		Services:         req.Services,
-		Variables:        req.Variables,
-		Steps:            req.Steps,
+		AvpTree:          coalesceArray(req.AvpTree),
+		Services:         coalesceArray(req.Services),
+		Variables:        coalesceArray(req.Variables),
+		Steps:            coalesceArray(req.Steps),
 	}
 	return json.Marshal(b)
 }
@@ -237,6 +251,34 @@ func listScenarios(s store.Store) http.HandlerFunc {
 		}
 		respondJSON(w, http.StatusOK, out)
 	}
+}
+
+// validServiceTypes is the closed set of accepted serviceType values.
+// Keep in sync with the OpenAPI ServiceType enum and the frontend listSelectors.ts.
+// validServiceTypes is the closed set of accepted serviceType values.
+// Keep in sync with the OpenAPI ServiceType enum and the frontend listSelectors.ts.
+// validServiceTypes is the closed set of accepted serviceType values.
+// Keep in sync with the OpenAPI ServiceType enum and the frontend listSelectors.ts.
+// USSD1 = unit-based (message count), typically event mode.
+// USSD2 = time-based (seconds), session or event mode — sessionMode is the orthogonal field.
+var validServiceTypes = map[string]bool{
+	"VOICE": true,
+	"DATA":  true,
+	"SMS":   true,
+	"USSD1": true,
+	"USSD2": true,
+}
+
+// validateServiceType returns an error message when the supplied string is not
+// a recognised ServiceType. An empty string is accepted (field is optional).
+func validateServiceType(s string) string {
+	if s == "" {
+		return ""
+	}
+	if !validServiceTypes[s] {
+		return fmt.Sprintf("serviceType %q is not valid — must be one of: VOICE, DATA, SMS, USSD1, USSD2", s)
+	}
+	return ""
 }
 
 // validateScenarioExpressions parses the steps and variables from the raw JSON
@@ -313,6 +355,10 @@ func createScenario(s store.Store, dict template.Dictionary) http.HandlerFunc {
 			respondInvalidRequest(w, "name is required")
 			return
 		}
+		if msg := validateServiceType(req.ServiceType); msg != "" {
+			respondInvalidRequest(w, msg)
+			return
+		}
 		if msg := validateScenarioExpressions(req); msg != "" {
 			respondInvalidRequest(w, msg)
 			return
@@ -376,6 +422,10 @@ func updateScenario(s store.Store, dict template.Dictionary) http.HandlerFunc {
 		}
 		if req.Name == "" {
 			respondInvalidRequest(w, "name is required")
+			return
+		}
+		if msg := validateServiceType(req.ServiceType); msg != "" {
+			respondInvalidRequest(w, msg)
 			return
 		}
 		if msg := validateScenarioExpressions(req); msg != "" {
