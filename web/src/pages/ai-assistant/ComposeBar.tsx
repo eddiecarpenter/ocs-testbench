@@ -2,6 +2,8 @@ import { ActionIcon, Box, Text, Textarea } from '@mantine/core';
 import { IconPlayerStopFilled, IconSend } from '@tabler/icons-react';
 import { type KeyboardEvent, useRef, useState } from 'react';
 
+import { useChatStore } from './chatStore';
+
 import type { SlashCommand } from './slashCommands';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -38,7 +40,9 @@ export interface ComposeBarProps {
  * - Clears on submit.
  */
 export function ComposeBar({ disabled, awaitingPermission, streaming, onSubmit, onStop, commands = [] }: ComposeBarProps) {
-  const [value, setValue] = useState('');
+  const value = useChatStore((s) => s.draft);
+  const setDraft = useChatStore((s) => s.setDraft);
+  const setValue = setDraft;
   const [selectedIdx, setSelectedIdx] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -178,7 +182,7 @@ export function ComposeBar({ disabled, awaitingPermission, streaming, onSubmit, 
           onChange={(e) => handleChange(e.currentTarget.value)}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          disabled={disabled}
+          disabled={awaitingPermission}
           autosize
           minRows={1}
           maxRows={6}

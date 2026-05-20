@@ -78,7 +78,7 @@ export function ExecutionsSidebar({
   const noResults = visibleScenarios.length === 0 && search.trim().length > 0;
 
   return (
-    <Stack gap="sm" data-testid="executions-sidebar-stack">
+    <Stack gap="sm" style={{ flex: 1, minHeight: 0 }} data-testid="executions-sidebar-stack">
       <Title order={5}>Scenarios</Title>
 
       <TextInput
@@ -98,7 +98,7 @@ export function ExecutionsSidebar({
         testid="executions-sidebar-all"
       />
 
-      <ScrollArea.Autosize mah={520} type="hover">
+      <ScrollArea style={{ flex: 1 }} type="hover">
         <Stack gap={4}>
           {noResults ? (
             <Text c="dimmed" size="sm" ta="center" py="md">
@@ -149,7 +149,7 @@ export function ExecutionsSidebar({
             </>
           )}
         </Stack>
-      </ScrollArea.Autosize>
+      </ScrollArea>
     </Stack>
   );
 }

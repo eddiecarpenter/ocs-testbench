@@ -359,12 +359,19 @@ export function ExecutionsPage() {
     scenariosQuery.isLoading || allExecutionsQuery.isLoading;
 
   return (
-    <Group align="flex-start" gap="lg" wrap="nowrap" data-testid="executions-page">
+    <Group
+      align="flex-start"
+      gap="lg"
+      wrap="nowrap"
+      mih="calc(100dvh - var(--app-shell-header-height, 60px) - var(--mantine-spacing-md) * 2)"
+      data-testid="executions-page"
+    >
       <Card
         withBorder
         padding="md"
         w={320}
         miw={280}
+        style={{ alignSelf: 'stretch', display: 'flex', flexDirection: 'column' }}
         data-testid="executions-sidebar"
       >
         {sidebarLoading ? (

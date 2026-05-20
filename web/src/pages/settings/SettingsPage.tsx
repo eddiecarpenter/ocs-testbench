@@ -660,7 +660,7 @@ function DictModal({ opened, onClose, title, existing }: DictModalProps) {
       opened={opened}
       onClose={onClose}
       title={title}
-      size="xxl"
+      size="90vw"
     >
       <form onSubmit={handleSubmit}>
         <Stack gap="md">

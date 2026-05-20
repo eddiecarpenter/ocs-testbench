@@ -37,7 +37,7 @@ export function findUsages(scenario: Scenario, varName: string): UsageRef[] {
   const refs: UsageRef[] = [];
 
   // 1. AVP tree value refs
-  walkAvp(scenario.avpTree, [], (node, path) => {
+  walkAvp(scenario.avpTree ?? [], [], (node, path) => {
     if (node.valueRef === varName) {
       refs.push({
         location: { kind: 'avp', path, nodeName: node.name },
@@ -49,7 +49,7 @@ export function findUsages(scenario: Scenario, varName: string): UsageRef[] {
   });
 
   // 2. Service fields
-  scenario.services.forEach((svc, i) => {
+  (scenario.services ?? []).forEach((svc, i) => {
     (
       ['ratingGroup', 'serviceIdentifier', 'requestedUnits', 'usedUnits'] as const
     ).forEach((field) => {
@@ -66,7 +66,7 @@ export function findUsages(scenario: Scenario, varName: string): UsageRef[] {
   });
 
   // 3. Step overrides
-  scenario.steps.forEach((step, i) => {
+  (scenario.steps ?? []).forEach((step, i) => {
     if (
       (step.kind === 'request' || step.kind === 'consume') &&
       step.overrides &&
@@ -117,15 +117,15 @@ export function renameUsages(
 
   return {
     ...scenario,
-    avpTree: renameAvpTree(scenario.avpTree),
-    services: scenario.services.map((svc) => ({
+    avpTree: renameAvpTree(scenario.avpTree ?? []),
+    services: (scenario.services ?? []).map((svc) => ({
       ...svc,
       ratingGroup: renameField(svc.ratingGroup),
       serviceIdentifier: renameField(svc.serviceIdentifier),
       requestedUnits: svc.requestedUnits === oldName ? newName : svc.requestedUnits,
       usedUnits: renameField(svc.usedUnits),
     })),
-    steps: scenario.steps.map((step) => {
+    steps: (scenario.steps ?? []).map((step) => {
       if (
         (step.kind === 'request' || step.kind === 'consume') &&
         step.overrides &&
@@ -293,14 +293,15 @@ export function listSystemVariables(
 
   if (!context || context.serviceModel === 'root') return base;
 
+  const services = context.services ?? [];
   const perRg: SystemVariable[] = [];
   if (context.serviceModel === 'single-mscc') {
     // One MSCC, no number prefix.
-    perRg.push(...rgSystemVars('RG_', context.services[0]?.id ?? ''));
+    perRg.push(...rgSystemVars('RG_', services[0]?.id ?? ''));
   } else {
     // multi-mscc — one concrete set per service, keyed by 1-based position
     // (RG1 = first service, RG2 = second …) to match the engine's CCA indexing.
-    context.services.forEach((_, i) => {
+    services.forEach((_, i) => {
       perRg.push(...rgSystemVars(`RG${i + 1}_`, String(i + 1)));
     });
   }

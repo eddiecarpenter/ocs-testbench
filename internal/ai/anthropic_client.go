@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -14,10 +15,32 @@ import (
 
 // ── Anthropic wire types ──────────────────────────────────────────────────────
 
+// anthropicCacheControl marks a content block as a prompt-cache breakpoint.
+// Anthropic supports up to 4 breakpoints per request; we use two:
+//   - the system prompt (stable across all turns)
+//   - the last tool definition (stable as long as the tool list doesn't change)
+//
+// Both use type "ephemeral" — the only supported cache type at time of writing.
+type anthropicCacheControl struct {
+	Type string `json:"type"` // "ephemeral"
+}
+
+// ephemeralCache is the singleton cache-control value used on every breakpoint.
+var ephemeralCache = &anthropicCacheControl{Type: "ephemeral"}
+
+// anthropicSystemBlock is the extended system-prompt content format.
+// Using an array of blocks (instead of a plain string) is required to attach
+// cache_control to the system prompt.
+type anthropicSystemBlock struct {
+	Type         string                 `json:"type"` // always "text"
+	Text         string                 `json:"text"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+}
+
 type anthropicRequest struct {
 	Model     string             `json:"model"`
 	MaxTokens int                `json:"max_tokens"`
-	System    string             `json:"system,omitempty"`
+	System    any                `json:"system,omitempty"` // string or []anthropicSystemBlock
 	Messages  []anthropicMessage `json:"messages"`
 	Tools     []anthropicTool    `json:"tools,omitempty"`
 	Stream    bool               `json:"stream"`
@@ -29,19 +52,21 @@ type anthropicMessage struct {
 }
 
 type anthropicContent struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	ID        string          `json:"id,omitempty"`          // tool_use
-	Name      string          `json:"name,omitempty"`        // tool_use
-	Input     json.RawMessage `json:"input,omitempty"`       // tool_use
-	ToolUseID string          `json:"tool_use_id,omitempty"` // tool_result
-	Content   string          `json:"content,omitempty"`     // tool_result
+	Type         string                 `json:"type"`
+	Text         string                 `json:"text,omitempty"`
+	ID           string                 `json:"id,omitempty"`          // tool_use
+	Name         string                 `json:"name,omitempty"`        // tool_use
+	Input        json.RawMessage        `json:"input,omitempty"`       // tool_use
+	ToolUseID    string                 `json:"tool_use_id,omitempty"` // tool_result
+	Content      string                 `json:"content,omitempty"`     // tool_result
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
 }
 
 type anthropicTool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	InputSchema map[string]any `json:"input_schema"`
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description,omitempty"`
+	InputSchema  map[string]any         `json:"input_schema"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
 }
 
 // Non-streaming response.
@@ -129,6 +154,12 @@ func buildAnthropicRequest(req CompletionRequest, model string, stream bool) (an
 			InputSchema: params,
 		})
 	}
+	// Mark the last tool as a cache breakpoint. The tool list is stable across
+	// turns (same set of MCP tools), so this yields a high cache-hit rate and
+	// avoids re-processing the schema definitions on every call.
+	if len(ar.Tools) > 0 {
+		ar.Tools[len(ar.Tools)-1].CacheControl = ephemeralCache
+	}
 
 	// Convert messages. Tool result messages (role:"tool") must be grouped into
 	// user messages following the assistant turn that requested the tool calls.
@@ -146,7 +177,14 @@ func buildAnthropicRequest(req CompletionRequest, model string, stream bool) (an
 	for _, m := range req.Messages {
 		switch m.Role {
 		case "system":
-			ar.System = m.Content
+			// Use the extended block format so we can attach cache_control.
+			// The system prompt is completely stable — caching it avoids
+			// re-processing the large instruction text on every turn.
+			ar.System = []anthropicSystemBlock{{
+				Type:         "text",
+				Text:         m.Content,
+				CacheControl: ephemeralCache,
+			}}
 
 		case "user":
 			flushToolResults()
@@ -293,8 +331,16 @@ func (c *AnthropicLLMClient) CompleteStream(ctx context.Context, req CompletionR
 		return nil, fmt.Errorf("anthropic: marshal stream request: %w", err)
 	}
 
+	slog.Info("llm: sending request",
+		"model", ar.Model,
+		"messages", len(ar.Messages),
+		"tools", len(ar.Tools),
+		"stream", true,
+	)
+
 	resp, err := c.doRequest(ctx, body)
 	if err != nil {
+		slog.Error("llm: request failed", "err", err)
 		return nil, fmt.Errorf("anthropic: send stream request: %w", err)
 	}
 	defer resp.Body.Close() //nolint:errcheck
@@ -302,6 +348,7 @@ func (c *AnthropicLLMClient) CompleteStream(ctx context.Context, req CompletionR
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var buf bytes.Buffer
 		_, _ = buf.ReadFrom(resp.Body)
+		slog.Error("llm: non-2xx response", "status", resp.StatusCode, "body", buf.String())
 		return nil, &LLMError{StatusCode: resp.StatusCode, Body: buf.String()}
 	}
 
@@ -385,8 +432,16 @@ func (c *AnthropicLLMClient) CompleteStream(ctx context.Context, req CompletionR
 		}
 	}
 	if err := scanner.Err(); err != nil && ctx.Err() == nil {
+		slog.Error("llm: stream read error", "err", err)
 		return nil, fmt.Errorf("anthropic: read stream: %w", err)
 	}
+
+	slog.Info("llm: response received",
+		"model", ar.Model,
+		"finish_reason", finishReason,
+		"input_tokens", usage.InputTokens,
+		"output_tokens", usage.OutputTokens,
+	)
 
 	// Assemble tool calls in ascending index order. Collect only entries with
 	// a non-empty ID — Anthropic content-block indices include text blocks

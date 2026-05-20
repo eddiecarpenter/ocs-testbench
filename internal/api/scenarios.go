@@ -137,10 +137,10 @@ func toFullResponse(sc store.Scenario, dict template.Dictionary) scenarioFullRes
 	_ = json.Unmarshal(sc.Body, &b)
 	return scenarioFullResponse{
 		scenarioSummaryResponse: toSummaryResponse(sc),
-		AvpTree:                 enrichAvpTree(nullableJSON(b.AvpTree), dict),
-		Services:                nullableJSON(b.Services),
-		Variables:               nullableJSON(b.Variables),
-		Steps:                   nullableJSON(b.Steps),
+		AvpTree:                 enrichAvpTree(coalesceArray(b.AvpTree), dict),
+		Services:                coalesceArray(b.Services),
+		Variables:               coalesceArray(b.Variables),
+		Steps:                   coalesceArray(b.Steps),
 	}
 }
 
@@ -191,8 +191,22 @@ func enrichNodes(nodes []avpRichNode, dict template.Dictionary) {
 	}
 }
 
+// emptyArrayJSON is a JSON empty array used as the default for nil/empty array fields.
+var emptyArrayJSON = json.RawMessage("[]")
+
+// coalesceArray returns raw if it is non-empty and not the JSON literal "null",
+// otherwise returns emptyArrayJSON so the frontend always receives an array.
+func coalesceArray(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 || string(raw) == "null" {
+		return emptyArrayJSON
+	}
+	return raw
+}
+
 // buildBody serialises the non-column ScenarioInput fields into the
-// JSONB body.
+// JSONB body. Array fields (avpTree, services, variables, steps) that
+// arrive as null or empty are normalised to [] so the frontend never
+// sees null where it expects an array.
 func buildBody(req scenarioRequest) ([]byte, error) {
 	b := scenarioBody{
 		Description:      req.Description,
@@ -202,10 +216,10 @@ func buildBody(req scenarioRequest) ([]byte, error) {
 		ServiceProfile:   req.ServiceProfile,
 		Favourite:        req.Favourite,
 		ServiceContextID: req.ServiceContextID,
-		AvpTree:          req.AvpTree,
-		Services:         req.Services,
-		Variables:        req.Variables,
-		Steps:            req.Steps,
+		AvpTree:          coalesceArray(req.AvpTree),
+		Services:         coalesceArray(req.Services),
+		Variables:        coalesceArray(req.Variables),
+		Steps:            coalesceArray(req.Steps),
 	}
 	return json.Marshal(b)
 }
@@ -237,6 +251,83 @@ func listScenarios(s store.Store) http.HandlerFunc {
 		}
 		respondJSON(w, http.StatusOK, out)
 	}
+}
+
+// validServiceTypes is the closed set of accepted serviceType values.
+// Keep in sync with the OpenAPI ServiceType enum and the frontend listSelectors.ts.
+// validServiceTypes is the closed set of accepted serviceType values.
+// Keep in sync with the OpenAPI ServiceType enum and the frontend listSelectors.ts.
+// validServiceTypes is the closed set of accepted serviceType values.
+// Keep in sync with the OpenAPI ServiceType enum and the frontend listSelectors.ts.
+// USSD1 = unit-based (message count), typically event mode.
+// USSD2 = time-based (seconds), session or event mode — sessionMode is the orthogonal field.
+var validServiceTypes = map[string]bool{
+	"VOICE": true,
+	"DATA":  true,
+	"SMS":   true,
+	"USSD1": true,
+	"USSD2": true,
+}
+
+// validateServiceType returns an error message when the supplied string is not
+// a recognised ServiceType. An empty string is accepted (field is optional).
+func validateServiceType(s string) string {
+	if s == "" {
+		return ""
+	}
+	if !validServiceTypes[s] {
+		return fmt.Sprintf("serviceType %q is not valid — must be one of: VOICE, DATA, SMS, USSD1, USSD2", s)
+	}
+	return ""
+}
+
+// validateAvpTreeJSON parses the raw avpTree JSON and verifies that every leaf
+// AVP node has a non-empty valueRef. An empty valueRef causes
+// ENCODING_TYPE_MISMATCH at execution time — reject it here at save time so
+// the user gets a clear message immediately.
+//
+// A leaf node is one with no children (or an empty children array). Group AVPs
+// act as containers and do not need a valueRef themselves.
+func validateAvpTreeJSON(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" || string(raw) == "[]" {
+		return ""
+	}
+	var nodes []any
+	if err := json.Unmarshal(raw, &nodes); err != nil {
+		return fmt.Sprintf("avpTree: invalid JSON — %v", err)
+	}
+	return walkAvpNodes(nodes, "avpTree")
+}
+
+// walkAvpNodes recursively checks that every leaf AVP node in the tree has a
+// non-empty valueRef. Returns the first problem found, or "" when clean.
+func walkAvpNodes(nodes []any, path string) string {
+	for i, raw := range nodes {
+		node, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := node["name"].(string)
+		label := fmt.Sprintf("%s[%d]", path, i)
+		if name != "" {
+			label = fmt.Sprintf("%s[%d] (%q)", path, i, name)
+		}
+		children, _ := node["children"].([]any)
+		if len(children) > 0 {
+			if msg := walkAvpNodes(children, label+".children"); msg != "" {
+				return msg
+			}
+		} else {
+			valueRef, _ := node["valueRef"].(string)
+			if valueRef == "" {
+				return fmt.Sprintf(
+					`%s: leaf AVP node has no valueRef — every leaf must reference a variable or carry a literal value (e.g. "0")`,
+					label,
+				)
+			}
+		}
+	}
+	return ""
 }
 
 // validateScenarioExpressions parses the steps and variables from the raw JSON
@@ -313,7 +404,15 @@ func createScenario(s store.Store, dict template.Dictionary) http.HandlerFunc {
 			respondInvalidRequest(w, "name is required")
 			return
 		}
+		if msg := validateServiceType(req.ServiceType); msg != "" {
+			respondInvalidRequest(w, msg)
+			return
+		}
 		if msg := validateScenarioExpressions(req); msg != "" {
+			respondInvalidRequest(w, msg)
+			return
+		}
+		if msg := validateAvpTreeJSON(req.AvpTree); msg != "" {
 			respondInvalidRequest(w, msg)
 			return
 		}
@@ -378,7 +477,15 @@ func updateScenario(s store.Store, dict template.Dictionary) http.HandlerFunc {
 			respondInvalidRequest(w, "name is required")
 			return
 		}
+		if msg := validateServiceType(req.ServiceType); msg != "" {
+			respondInvalidRequest(w, msg)
+			return
+		}
 		if msg := validateScenarioExpressions(req); msg != "" {
+			respondInvalidRequest(w, msg)
+			return
+		}
+		if msg := validateAvpTreeJSON(req.AvpTree); msg != "" {
 			respondInvalidRequest(w, msg)
 			return
 		}
