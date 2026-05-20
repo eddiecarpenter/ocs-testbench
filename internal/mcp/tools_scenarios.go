@@ -74,7 +74,22 @@ op=duplicate  source_id*, new_name*                        → copy a scenario; 
   serviceContextId — Service-Context-Id AVP value sent in CCR messages
   description     — human-readable description
   favourite       — boolean; pin to top of list
-  avpTree         — array of AVP nodes to include in each CCR step
+  avpTree         — array of AVP nodes to include in each CCR step.
+                    RULES (violations are rejected at save time):
+                    • Every LEAF node (no children) MUST have a non-empty "valueRef".
+                      An empty valueRef causes ENCODING_TYPE_MISMATCH at runtime.
+                    • valueRef semantics:
+                        UPPER_SNAKE_CASE  → variable reference (must exist in variables[]
+                                           or be a system variable — see below)
+                        any other string  → literal value  (e.g. "0", "-3", "true")
+                    • Group/container AVPs have a non-empty "children" array and do
+                      NOT need a valueRef themselves.
+                    • System variables always available (no declaration needed):
+                        SUB_ID_TYPE, MSISDN, SESSION_ID, CHARGING_ID,
+                        CC_REQUEST_NUMBER, ORIGIN_HOST, ORIGIN_REALM, DEST_REALM,
+                        SERVICE_CONTEXT_ID, AUTH_APP_ID, TOTAL_USU, RESULT_CODE,
+                        FUI_ACTION, RG_<n>_GRANTED_UNITS, RG_<n>_USED_UNITS,
+                        RG_<n>_QUOTA_THRESHOLD (where <n> is the rating group index)
   services        — array of service/MSCC definitions (for multi-mscc model)
   variables       — array of variable declarations (name, source, description)
   steps           — array of scenario steps`),
@@ -241,6 +256,12 @@ func bodyFromMap(m map[string]any) ([]byte, error) {
 			return nil, fmt.Errorf("%s", msg)
 		}
 	}
+	// Validate avpTree: every leaf node must have a non-empty valueRef.
+	if tree, ok := m["avpTree"].([]any); ok && len(tree) > 0 {
+		if msg := walkAvpNodes(tree, "avpTree"); msg != "" {
+			return nil, fmt.Errorf("%s", msg)
+		}
+	}
 	return json.Marshal(m)
 }
 
@@ -282,6 +303,45 @@ func validateBodyVariables(vars []any) string {
 			}
 		default:
 			return fmt.Sprintf("variables[%d] (%q): source.kind %q is invalid — must be generator | bound | extracted", i, name, kind)
+		}
+	}
+	return ""
+}
+
+// walkAvpNodes recursively checks that every leaf AVP node in the tree has a
+// non-empty valueRef. A leaf is a node with no children. Returns the first
+// problem found, or "" when the tree is valid.
+//
+// valueRef semantics (mirrors smConvertAvpNode in session_manager.go):
+//   - UPPER_SNAKE_CASE  → treated as a variable reference (must be declared or a
+//     well-known system variable such as MSISDN, SESSION_ID, CC_REQUEST_NUMBER…)
+//   - any other non-empty string (e.g. "0", "-3", "true") → passed as a literal
+//
+// An empty valueRef always causes ENCODING_TYPE_MISMATCH at execution time.
+func walkAvpNodes(nodes []any, path string) string {
+	for i, raw := range nodes {
+		node, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := node["name"].(string)
+		label := fmt.Sprintf("%s[%d]", path, i)
+		if name != "" {
+			label = fmt.Sprintf("%s[%d] (%q)", path, i, name)
+		}
+		children, _ := node["children"].([]any)
+		if len(children) > 0 {
+			if msg := walkAvpNodes(children, label+".children"); msg != "" {
+				return msg
+			}
+		} else {
+			valueRef, _ := node["valueRef"].(string)
+			if valueRef == "" {
+				return fmt.Sprintf(
+					`%s: leaf AVP node has no valueRef — every leaf must reference a variable or carry a literal value (e.g. "0")`,
+					label,
+				)
+			}
 		}
 	}
 	return ""
