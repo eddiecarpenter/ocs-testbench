@@ -54,11 +54,11 @@ type anthropicMessage struct {
 type anthropicContent struct {
 	Type         string                 `json:"type"`
 	Text         string                 `json:"text,omitempty"`
-	ID           string                 `json:"id,omitempty"`           // tool_use
-	Name         string                 `json:"name,omitempty"`         // tool_use
-	Input        json.RawMessage        `json:"input,omitempty"`        // tool_use
-	ToolUseID    string                 `json:"tool_use_id,omitempty"`  // tool_result
-	Content      string                 `json:"content,omitempty"`      // tool_result
+	ID           string                 `json:"id,omitempty"`          // tool_use
+	Name         string                 `json:"name,omitempty"`        // tool_use
+	Input        json.RawMessage        `json:"input,omitempty"`       // tool_use
+	ToolUseID    string                 `json:"tool_use_id,omitempty"` // tool_result
+	Content      string                 `json:"content,omitempty"`     // tool_result
 	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
 }
 
