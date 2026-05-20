@@ -12,16 +12,6 @@ import (
 
 // registerSystemTools registers the 3 system tools.
 func registerSystemTools(s *server.MCPServer, srv *Server) {
-	// get_health — read-only
-	s.AddTool(
-		mcp.NewTool("get_health",
-			mcp.WithDescription("Get the health status of the testbench: store reachability and per-peer connection states."),
-			mcp.WithReadOnlyHintAnnotation(true),
-			mcp.WithDestructiveHintAnnotation(false),
-		),
-		srv.handleGetHealth,
-	)
-
 	// get_config — read-only
 	s.AddTool(
 		mcp.NewTool("get_config",

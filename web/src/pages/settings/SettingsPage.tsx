@@ -5,7 +5,6 @@ import {
   Box,
   Button,
   Card,
-  Collapse,
   Divider,
   Group,
   Modal,
@@ -19,8 +18,8 @@ import {
   Stack,
   Switch,
   Table,
+  Collapse,
   Text,
-  Textarea,
   TextInput,
   useMantineColorScheme,
 } from '@mantine/core';
@@ -31,11 +30,13 @@ import {
   IconCheck,
   IconDeviceLaptop,
   IconMoon,
+  IconPencil,
   IconPlus,
   IconRefresh,
   IconSun,
   IconTrash,
 } from '@tabler/icons-react';
+import Editor from '@monaco-editor/react';
 import { useEffect, useState } from 'react';
 
 import {
@@ -87,28 +88,13 @@ function SectionLabel({ children }: { children: string }) {
   );
 }
 
-/**
- * Settings page — three sections as per docs/design/screens/06-settings.png:
- *
- *  - **General**: colour scheme (reuses Mantine's store), auto-open browser,
- *    log level.
- *  - **Diameter defaults**: values used when creating a new peer.
- *  - **AVP Dictionaries**: the built-in dictionary catalogue plus any
- *    custom uploads. Read-only stand-in until the backend exposes the
- *    endpoint.
- *
- * All persisted values live in `src/settings/settings.ts` (localStorage).
- * Save writes all sections at once; the Reset button reverts the form to
- * the stored state so a user can discard in-progress edits without
- * reloading the page.
- */
-// ─── Nav items ───────────────────────────────────────────────────────────────
+// ─── Nav ─────────────────────────────────────────────────────────────────────
 
 const NAV_ITEMS = [
-  { id: 'general',     label: 'General' },
-  { id: 'diameter',    label: 'Diameter' },
-  { id: 'ai',          label: 'AI Assistant' },
-  { id: 'permissions', label: 'AI Permissions' },
+  { id: 'general',      label: 'General' },
+  { id: 'diameter',     label: 'Diameter' },
+  { id: 'ai',           label: 'AI Assistant' },
+  { id: 'permissions',  label: 'AI Permissions' },
   { id: 'dictionaries', label: 'Dictionaries' },
 ] as const;
 
@@ -166,11 +152,7 @@ export function SettingsPage() {
       originRealm: values.originRealm.trim(),
     });
     form.resetDirty();
-    notifications.show({
-      color: 'teal',
-      title: 'Settings saved',
-      message: 'Your preferences were updated.',
-    });
+    notifications.show({ color: 'teal', title: 'Settings saved', message: 'Your preferences were updated.' });
   });
 
   const handleReset = () => {
@@ -208,147 +190,109 @@ export function SettingsPage() {
       {/* ─── Content area ────────────────────────────────────── */}
       <ScrollArea style={{ flex: 1, height: '100%' }}>
         <Box p="lg" maw={720}>
+          <form onSubmit={handleSubmit}>
 
-      <form onSubmit={handleSubmit}>
-        {/* ─── General ─────────────────────────────────────────── */}
-        {activeSection === 'general' && (
-          <Stack gap="md">
-          <Card padding="lg" withBorder shadow="xs">
-            <Stack gap="md">
-              <SectionLabel>General</SectionLabel>
+            {/* ─── General ───────────────────────────────────── */}
+            {activeSection === 'general' && (
+              <Stack gap="md">
+                <Card padding="lg" withBorder shadow="xs">
+                  <Stack gap="md">
+                    <SectionLabel>General</SectionLabel>
 
-              <Group justify="space-between" align="center" wrap="nowrap">
-                <Text size="sm" fw={500}>
-                  Theme
-                </Text>
-                <SegmentedControl
-                  value={colorScheme}
-                  onChange={(v) =>
-                    setColorScheme(v as 'light' | 'dark' | 'auto')
-                  }
-                  data={[
-                    {
-                      value: 'light',
-                      label: (
-                        <Group gap={6} justify="center">
-                          <IconSun size={14} />
-                          <Text size="xs">Light</Text>
-                        </Group>
-                      ),
-                    },
-                    {
-                      value: 'dark',
-                      label: (
-                        <Group gap={6} justify="center">
-                          <IconMoon size={14} />
-                          <Text size="xs">Dark</Text>
-                        </Group>
-                      ),
-                    },
-                    {
-                      value: 'auto',
-                      label: (
-                        <Group gap={6} justify="center">
-                          <IconDeviceLaptop size={14} />
-                          <Text size="xs">System</Text>
-                        </Group>
-                      ),
-                    },
-                  ]}
-                />
-              </Group>
+                    <Group justify="space-between" align="center" wrap="nowrap">
+                      <Text size="sm" fw={500}>Theme</Text>
+                      <SegmentedControl
+                        value={colorScheme}
+                        onChange={(v) => setColorScheme(v as 'light' | 'dark' | 'auto')}
+                        data={[
+                          { value: 'light', label: (<Group gap={6} justify="center"><IconSun size={14} /><Text size="xs">Light</Text></Group>) },
+                          { value: 'dark',  label: (<Group gap={6} justify="center"><IconMoon size={14} /><Text size="xs">Dark</Text></Group>) },
+                          { value: 'auto',  label: (<Group gap={6} justify="center"><IconDeviceLaptop size={14} /><Text size="xs">System</Text></Group>) },
+                        ]}
+                      />
+                    </Group>
 
-              <Group justify="space-between" align="center" wrap="nowrap">
-                <Text size="sm" fw={500}>Auto-open browser</Text>
-                <Switch
-                  key={form.key('autoOpenBrowser')}
-                  {...form.getInputProps('autoOpenBrowser', { type: 'checkbox' })}
-                />
-              </Group>
+                    <Group justify="space-between" align="center" wrap="nowrap">
+                      <Text size="sm" fw={500}>Auto-open browser</Text>
+                      <Switch key={form.key('autoOpenBrowser')} {...form.getInputProps('autoOpenBrowser', { type: 'checkbox' })} />
+                    </Group>
 
-              <Group justify="space-between" align="center" wrap="nowrap">
-                <Text size="sm" fw={500}>Log level</Text>
-                <Select
-                  data={LOG_LEVELS}
-                  allowDeselect={false}
-                  w={160}
-                  checkIconPosition="right"
-                  key={form.key('logLevel')}
-                  {...form.getInputProps('logLevel')}
-                />
-              </Group>
-            </Stack>
-          </Card>
+                    <Group justify="space-between" align="center" wrap="nowrap">
+                      <Text size="sm" fw={500}>Log level</Text>
+                      <Select data={LOG_LEVELS} allowDeselect={false} w={160} checkIconPosition="right"
+                        key={form.key('logLevel')} {...form.getInputProps('logLevel')} />
+                    </Group>
+                  </Stack>
+                </Card>
 
-          <Divider />
-          <Group justify="flex-end">
-            <Anchor component="button" type="button" size="sm" c="dimmed" onClick={handleReset}
-              style={{ visibility: form.isDirty() ? 'visible' : 'hidden' }}>
-              Reset changes
-            </Anchor>
-            <Button type="submit" disabled={!form.isDirty() || !form.isValid()}>Save</Button>
-          </Group>
-        </Stack>
-        )}
-
-        {/* ─── Diameter ──────────────────────────────────────────── */}
-        {activeSection === 'diameter' && (
-          <Stack gap="md">
-          <Card padding="lg" withBorder shadow="xs">
-            <Stack gap="md">
-              <Stack gap={4}>
-                <SectionLabel>Diameter defaults</SectionLabel>
-                <Text size="xs" c="dimmed">Used when creating new peers</Text>
+                <Divider />
+                <Group justify="flex-end">
+                  <Anchor component="button" type="button" size="sm" c="dimmed" onClick={handleReset}
+                    style={{ visibility: form.isDirty() ? 'visible' : 'hidden' }}>
+                    Reset changes
+                  </Anchor>
+                  <Button type="submit" disabled={!form.isDirty() || !form.isValid()}>Save</Button>
+                </Group>
               </Stack>
-              <TextInput label="Origin-Host suffix" placeholder=".test.local" required
-                key={form.key('originHostSuffix')} {...form.getInputProps('originHostSuffix')} />
-              <TextInput label="Origin-Realm" placeholder="test.local" required
-                key={form.key('originRealm')} {...form.getInputProps('originRealm')} />
-              <NumberInput label="Watchdog interval" suffix=" seconds" min={5} max={3600}
-                clampBehavior="strict" required key={form.key('watchdogIntervalSeconds')}
-                {...form.getInputProps('watchdogIntervalSeconds')} />
-              <Select label="Default transport" data={DIAMETER_TRANSPORTS} allowDeselect={false}
-                checkIconPosition="right" key={form.key('defaultTransport')}
-                {...form.getInputProps('defaultTransport')} />
-            </Stack>
-          </Card>
+            )}
 
-          <Card padding="lg" withBorder shadow="xs">
-            <Stack gap="md">
-              <Stack gap={4}>
-                <SectionLabel>SIM provisioning</SectionLabel>
-                <Text size="xs" c="dimmed">
-                  Operator prefix used when generating an ICCID. First three digits are the MCC; the
-                  remainder is the MNC.
-                </Text>
+            {/* ─── Diameter ──────────────────────────────────── */}
+            {activeSection === 'diameter' && (
+              <Stack gap="md">
+                <Card padding="lg" withBorder shadow="xs">
+                  <Stack gap="md">
+                    <Stack gap={4}>
+                      <SectionLabel>Diameter defaults</SectionLabel>
+                      <Text size="xs" c="dimmed">Used when creating new peers</Text>
+                    </Stack>
+                    <TextInput label="Origin-Host suffix" placeholder=".test.local" required
+                      key={form.key('originHostSuffix')} {...form.getInputProps('originHostSuffix')} />
+                    <TextInput label="Origin-Realm" placeholder="test.local" required
+                      key={form.key('originRealm')} {...form.getInputProps('originRealm')} />
+                    <NumberInput label="Watchdog interval" suffix=" seconds" min={5} max={3600}
+                      clampBehavior="strict" required key={form.key('watchdogIntervalSeconds')}
+                      {...form.getInputProps('watchdogIntervalSeconds')} />
+                    <Select label="Default transport" data={DIAMETER_TRANSPORTS} allowDeselect={false}
+                      checkIconPosition="right" key={form.key('defaultTransport')}
+                      {...form.getInputProps('defaultTransport')} />
+                  </Stack>
+                </Card>
+
+                <Card padding="lg" withBorder shadow="xs">
+                  <Stack gap="md">
+                    <Stack gap={4}>
+                      <SectionLabel>SIM provisioning</SectionLabel>
+                      <Text size="xs" c="dimmed">
+                        Operator prefix used when generating an ICCID. First three digits are the MCC; the remainder is the MNC.
+                      </Text>
+                    </Stack>
+                    <TextInput label="MCCMNC" placeholder="65510"
+                      description="5 or 6 digits (e.g. 65510 = MTN South Africa)" required
+                      key={form.key('mccmnc')} {...form.getInputProps('mccmnc')} />
+                  </Stack>
+                </Card>
+
+                <Divider />
+                <Group justify="flex-end">
+                  <Anchor component="button" type="button" size="sm" c="dimmed" onClick={handleReset}
+                    style={{ visibility: form.isDirty() ? 'visible' : 'hidden' }}>
+                    Reset changes
+                  </Anchor>
+                  <Button type="submit" disabled={!form.isDirty() || !form.isValid()}>Save</Button>
+                </Group>
               </Stack>
-              <TextInput label="MCCMNC" placeholder="65510"
-                description="5 or 6 digits (e.g. 65510 = MTN South Africa)" required
-                key={form.key('mccmnc')} {...form.getInputProps('mccmnc')} />
-            </Stack>
-          </Card>
+            )}
 
-          <Divider />
-          <Group justify="flex-end">
-            <Anchor component="button" type="button" size="sm" c="dimmed" onClick={handleReset}
-              style={{ visibility: form.isDirty() ? 'visible' : 'hidden' }}>
-              Reset changes
-            </Anchor>
-            <Button type="submit" disabled={!form.isDirty() || !form.isValid()}>Save</Button>
-          </Group>
-        </Stack>
-        )}
+            {/* ─── AI Assistant ──────────────────────────────── */}
+            {activeSection === 'ai' && <AiAssistantCard />}
 
-        {/* ─── AI Assistant ──────────────────────────────────────── */}
-        {activeSection === 'ai' && <AiAssistantCard />}
+            {/* ─── AI Permissions ────────────────────────────── */}
+            {activeSection === 'permissions' && <AIPermissionsCard />}
 
-        {/* ─── AI Permissions ────────────────────────────────────── */}
-        {activeSection === 'permissions' && <AIPermissionsCard />}
+            {/* ─── Dictionaries ──────────────────────────────── */}
+            {activeSection === 'dictionaries' && <DictionariesCard />}
 
-        {/* ─── Dictionaries ──────────────────────────────────────── */}
-        {activeSection === 'dictionaries' && <DictionariesCard />}
-
-      </form>
+          </form>
         </Box>
       </ScrollArea>
     </Group>
@@ -431,7 +375,8 @@ const PERMISSION_GROUPS: { label: string; match: (name: string) => boolean }[] =
   { label: 'Executions',  match: (n) => n.includes('execution') || n.includes('step') || n.includes('resume') || n.includes('start_') || n.includes('stop_') || n.includes('wait_') },
   { label: 'Peers',       match: (n) => n.includes('peer') },
   { label: 'Subscribers', match: (n) => n.includes('subscriber') },
-  { label: 'System',      match: () => true }, // catch-all
+  { label: 'AVPs',        match: (n) => n.includes('avp') },
+  { label: 'System',      match: () => true },
 ];
 
 function groupPermissions(perms: AIToolPermission[]): { label: string; items: AIToolPermission[] }[] {
@@ -483,10 +428,6 @@ function PermissionGroup({ label, items }: { label: string; items: AIToolPermiss
   );
 }
 
-/**
- * AI Tool Permissions card — tools grouped by domain, each group collapsible.
- * Changes are saved inline — each SegmentedControl fires a PATCH immediately.
- */
 function AIPermissionsCard() {
   const { data: permissions, isLoading } = useAIPermissions();
   const groups = permissions ? groupPermissions(permissions) : [];
@@ -638,7 +579,7 @@ function DictRow({
             {isActive ? 'Active' : 'Inactive'}
           </Badge>
           <ActionIcon variant="subtle" size="sm" onClick={onEdit} aria-label="Edit">
-            <IconRefresh size={14} />
+            <IconPencil size={14} />
           </ActionIcon>
         </Group>
       )}
@@ -658,6 +599,7 @@ function DictModal({ opened, onClose, title, existing }: DictModalProps) {
   const updateMut = useUpdateDictionary();
   const deleteMut = useDeleteDictionary();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const { colorScheme } = useMantineColorScheme();
 
   const form = useForm<CustomDictionaryInput>({
     initialValues: {
@@ -718,7 +660,7 @@ function DictModal({ opened, onClose, title, existing }: DictModalProps) {
       opened={opened}
       onClose={onClose}
       title={title}
-      size="xl"
+      size="xxl"
     >
       <form onSubmit={handleSubmit}>
         <Stack gap="md">
@@ -741,17 +683,38 @@ function DictModal({ opened, onClose, title, existing }: DictModalProps) {
             {...form.getInputProps('isActive', { type: 'checkbox' })}
           />
 
-          <Textarea
-            label="XML content"
-            description="Diameter dictionary XML in go-diameter format"
-            placeholder={'<?xml version="1.0" encoding="UTF-8"?>\n<diameter>\n  <application id="4" …>\n    …\n  </application>\n</diameter>'}
-            required
-            autosize
-            minRows={14}
-            maxRows={28}
-            styles={{ input: { fontFamily: 'monospace', fontSize: 12 } }}
-            {...form.getInputProps('xmlContent')}
-          />
+          <Stack gap={4}>
+            <Text size="sm" fw={500}>
+              XML content <Text span c="red" aria-hidden>*</Text>
+            </Text>
+            <Text size="xs" c="dimmed">Diameter dictionary XML in go-diameter format</Text>
+            <Box
+              style={(theme) => ({
+                border: `1px solid ${theme.colors.dark[4]}`,
+                borderRadius: theme.radius.sm,
+                overflow: 'hidden',
+              })}
+            >
+              <Editor
+                height={400}
+                language="xml"
+                theme={colorScheme === 'dark' ? 'vs-dark' : 'light'}
+                value={form.values.xmlContent}
+                onChange={(v: string | undefined) => form.setFieldValue('xmlContent', v ?? '')}
+                options={{
+                  minimap: { enabled: false },
+                  scrollBeyondLastLine: false,
+                  fontSize: 13,
+                  tabSize: 2,
+                  wordWrap: 'on',
+                  lineNumbersMinChars: 3,
+                }}
+              />
+            </Box>
+            {form.errors.xmlContent && (
+              <Text size="xs" c="red">{form.errors.xmlContent}</Text>
+            )}
+          </Stack>
 
           <Group justify="space-between">
             {existing ? (

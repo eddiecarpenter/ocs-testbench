@@ -636,6 +636,38 @@ func TestEngine_Render_ZeroGrant_NoRatingGroup_SuppressesUSU(t *testing.T) {
 		"USU must be absent when OCS granted 0 units (no explicit RG)")
 }
 
+// TestEngine_Render_EventRequest_EmitsUSU_DespiteZeroGrant verifies that an
+// EVENT CCR always emits USU even when RG1_GRANTED is pre-seeded to 0.
+// This is the regression test for the Voice MT Event scenario: session_manager
+// pre-seeds RG1_GRANTED=0 for every service slot, but EVENT has no prior
+// session grant — the cap/suppress logic must be bypassed for EVENT requests.
+func TestEngine_Render_EventRequest_EmitsUSU_DespiteZeroGrant(t *testing.T) {
+	d := newEngineDict2(map[string]AVPMetadata{})
+	// Root service model — mirrors the Voice MT Event scenario structure.
+	mscc := []MSCCTemplateBlock{
+		{Requested: "{{RSU}}", Used: "{{USED}}"},
+	}
+	values := map[string]any{
+		"CC_REQUEST_TYPE": uint32(4), // EVENT
+		"RSU":             "10",
+		"USED":            "10",
+		"RG1_GRANTED":     int64(0), // pre-seeded by session_manager — must NOT suppress USU
+	}
+
+	e := NewEngine()
+	avps, err := e.Render(context.Background(), EngineInput{
+		MSCC: mscc, Values: values, Dictionary: d,
+		ServiceModel: ServiceModelRoot, UnitType: UnitTypeTime,
+	})
+	require.NoError(t, err)
+
+	// Root model places RSU/USU directly at CCR level, not in an MSCC group.
+	rsu := findAVP(avps, avp.RequestedServiceUnit)
+	usu := findAVP(avps, avp.UsedServiceUnit)
+	assert.NotNil(t, rsu, "RSU must be present for EVENT")
+	assert.NotNil(t, usu, "USU must be present for EVENT even when RG1_GRANTED=0")
+}
+
 // TestEngine_Render_NonZeroGrant_CapsUSU verifies that when the OCS granted
 // fewer units than the reported USU, the USU is capped to the grant value.
 func TestEngine_Render_NonZeroGrant_CapsUSU(t *testing.T) {

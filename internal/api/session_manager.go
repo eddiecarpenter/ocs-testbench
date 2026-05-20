@@ -91,6 +91,7 @@ type stepHistoryRecord struct {
 	durationMs       int64
 	errorDetail      string
 	request          map[string]any
+	requestSize      int
 	response         map[string]any
 	requestText      string
 	responseText     string
@@ -761,6 +762,8 @@ func (m *SessionManager) Detail(_ context.Context, sessionID string) (ExecutionD
 			FinishedAt:       h.finishedAt,
 			DurationMs:       h.durationMs,
 			ErrorDetail:      h.errorDetail,
+			Request:          h.request,
+			RequestSize:      h.requestSize,
 			Response:         h.response,
 			RequestText:      h.requestText,
 			ResponseText:     h.responseText,
@@ -1416,6 +1419,11 @@ func smRecordStep(rec *sessionRecord, stepIdx int, iteration int, step engine.Sc
 	}
 
 	cca := result.SendResult.CCA
+	sentMsg := smSentMessage(cca)
+	reqSize := 0
+	if sentMsg != nil {
+		reqSize = int(sentMsg.Header.MessageLength)
+	}
 	rec.mu.Lock()
 	rec.stepHistory = append(rec.stepHistory, stepHistoryRecord{
 		n:                len(rec.stepHistory) + 1,
@@ -1427,8 +1435,9 @@ func smRecordStep(rec *sessionRecord, stepIdx int, iteration int, step engine.Sc
 		finishedAt:       finishedAt.Format(time.RFC3339),
 		durationMs:       durationMs,
 		errorDetail:      errDetail,
+		requestSize:      reqSize,
 		response:         smCCAToMap(cca),
-		requestText:      messaging.FormatDiameterMessage(smSentMessage(cca)),
+		requestText:      messaging.FormatDiameterMessage(sentMsg),
 		responseText:     messaging.FormatDiameterMessage(smRawMessage(cca)),
 		assertionResults: assertions,
 	})

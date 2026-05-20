@@ -1607,6 +1607,12 @@ export interface components {
                 [key: string]: unknown;
             };
             /**
+             * @description Exact Diameter wire size of the outgoing CCR in bytes, taken
+             *     from the message-length header field. Present for `request`
+             *     steps once the step has completed.
+             */
+            requestSize?: number;
+            /**
              * @description Pre-formatted Diameter wire text of the CCR (human-readable,
              *     one AVP per line). Use this for display; use `request` for
              *     structured access.

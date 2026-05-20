@@ -2496,6 +2496,13 @@ components:
             Wire-level CCR snapshot after variable resolution. Present
             for `request` steps and for each round of `consume` steps.
           additionalProperties: true
+        requestSize:
+          type: integer
+          minimum: 0
+          description: |
+            Exact Diameter wire size of the outgoing CCR in bytes, taken
+            from the message-length header field. Present for `request`
+            steps once the step has completed.
         requestText:
           type: string
           description: |

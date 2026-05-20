@@ -114,7 +114,8 @@ func TestNewServer_ToolListReturns34Tools(t *testing.T) {
 	// Peers: 7 → 3 (list_peers, peer, peer_connection).
 	// Subscribers: 5 → 2 (list_subscribers, subscriber).
 	// Scenarios: 6 → 2 (list_scenarios, scenario).
-	assert.Len(t, tools, 23, "exactly 23 tools must be registered")
+	// get_health removed.
+	assert.Len(t, tools, 22, "exactly 22 tools must be registered")
 
 	// Build a name→annotations map for spot-check assertions.
 	type toolAnnotations struct {
@@ -143,7 +144,7 @@ func TestNewServer_ToolListReturns34Tools(t *testing.T) {
 		"list_scenarios",
 		"list_executions", "get_execution", "get_execution_detail",
 		"list_avps", "get_avp_info",
-		"get_health", "get_config",
+		"get_config",
 	}
 	for _, name := range readOnlyTools {
 		ta, exists := toolMap[name]

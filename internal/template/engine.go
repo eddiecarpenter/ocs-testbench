@@ -353,7 +353,10 @@ func (e *Engine) buildServiceUnitPair(
 	//
 	// For root service model (blockIdx == -1) look up the root-level
 	// RESULT_CODE: a non-2xxx code means no quota was granted at all.
-	if emitUSU {
+	// Cap/suppress USU based on the prior OCS grant.
+	// EVENT requests are exempt: they carry no prior session grant, so USU is
+	// a standalone observation and must always be emitted as configured.
+	if emitUSU && reqType != ccReqTypeEvent {
 		if blockIdx >= 0 {
 			pos := blockIdx + 1 // 1-based position, matches RG1_*, RG2_*, …
 			var key string

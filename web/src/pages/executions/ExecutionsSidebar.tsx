@@ -14,6 +14,7 @@
 import {
   Badge,
   Box,
+  Divider,
   Group,
   ScrollArea,
   Stack,
@@ -26,6 +27,11 @@ import { IconSearch } from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
 
 import type { ExecutionSummary } from '../../api/resources/executions';
+import {
+  SERVICE_TYPE_GROUP_ORDER,
+  SERVICE_TYPE_LABELS,
+  groupByServiceType,
+} from '../scenarios/listSelectors';
 import type { ScenarioSummary } from '../scenarios/types';
 
 import { formatLastRun } from './formatLastRun';
@@ -63,8 +69,13 @@ export function ExecutionsSidebar({
     () => filterScenariosByName(scenarios, search),
     [scenarios, search],
   );
+  const grouped = useMemo(
+    () => groupByServiceType(visibleScenarios),
+    [visibleScenarios],
+  );
 
   const totalRuns = executions.length;
+  const noResults = visibleScenarios.length === 0 && search.trim().length > 0;
 
   return (
     <Stack gap="sm" data-testid="executions-sidebar-stack">
@@ -89,22 +100,53 @@ export function ExecutionsSidebar({
 
       <ScrollArea.Autosize mah={520} type="hover">
         <Stack gap={4}>
-          {visibleScenarios.length === 0 && search.trim().length > 0 ? (
+          {noResults ? (
             <Text c="dimmed" size="sm" ta="center" py="md">
               No scenarios match "{search}".
             </Text>
           ) : (
-            visibleScenarios.map((s) => (
-              <SidebarRow
-                key={s.id}
-                label={s.name}
-                sub={formatLastRun(lastRun.get(s.id))}
-                count={counts.get(s.id) ?? 0}
-                active={selectedScenarioId === s.id}
-                onClick={() => onSelect(s.id)}
-                testid={`executions-sidebar-row-${s.id}`}
-              />
-            ))
+            <>
+              {SERVICE_TYPE_GROUP_ORDER.map((serviceType, idx) => {
+                const rows = grouped[serviceType];
+                if (!rows || rows.length === 0) return null;
+                return (
+                  <Stack key={serviceType} gap={2}>
+                    <Divider
+                      label={
+                        <Text size="xs" fw={700} c="dimmed" tt="uppercase" style={{ letterSpacing: '0.05em' }}>
+                          {SERVICE_TYPE_LABELS[serviceType]}
+                        </Text>
+                      }
+                      labelPosition="left"
+                      mt={idx === 0 ? 4 : 8}
+                      mb={2}
+                    />
+                    {rows.map((s) => (
+                      <SidebarRow
+                        key={s.id}
+                        label={s.name}
+                        sub={formatLastRun(lastRun.get(s.id))}
+                        count={counts.get(s.id) ?? 0}
+                        active={selectedScenarioId === s.id}
+                        onClick={() => onSelect(s.id)}
+                        testid={`executions-sidebar-row-${s.id}`}
+                      />
+                    ))}
+                  </Stack>
+                );
+              })}
+              {grouped['__ungrouped__']?.map((s) => (
+                <SidebarRow
+                  key={s.id}
+                  label={s.name}
+                  sub={formatLastRun(lastRun.get(s.id))}
+                  count={counts.get(s.id) ?? 0}
+                  active={selectedScenarioId === s.id}
+                  onClick={() => onSelect(s.id)}
+                  testid={`executions-sidebar-row-${s.id}`}
+                />
+              ))}
+            </>
           )}
         </Stack>
       </ScrollArea.Autosize>
