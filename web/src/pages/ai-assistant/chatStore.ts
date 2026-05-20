@@ -44,6 +44,8 @@ export interface ChatState {
   sessionPermissions: SessionPermissions;
   /** Monotonically-increasing counter for generating stable IDs. */
   _idSeq: number;
+  /** Persisted compose-bar draft — survives page navigation. */
+  draft: string;
 }
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
@@ -57,6 +59,9 @@ export interface ChatActions {
 
   /** Called when the user submits a message. */
   pushUserMessage: (content: string) => void;
+
+  /** Update the compose-bar draft. */
+  setDraft: (draft: string) => void;
 
   /** Toggle the collapsed state of a planning block. */
   togglePlanning: (id: string) => void;
@@ -116,6 +121,7 @@ const initialState: ChatState = {
   pendingPrompt: null,
   sessionPermissions: {},
   _idSeq: 0,
+  draft: '',
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -295,6 +301,10 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
       thread: [...state.thread, { kind: 'user', id, content }],
       _idSeq: next._idSeq,
     });
+  },
+
+  setDraft(draft: string) {
+    set({ draft });
   },
 
   togglePlanning(id: string) {

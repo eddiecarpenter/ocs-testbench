@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 
@@ -111,7 +112,7 @@ func (a *Agent) Reconfigure(cfg baseconfig.AIConfig) error {
 	if saveFn != nil {
 		if err := saveFn(cfg); err != nil {
 			// Log but don't fail the reconfigure — in-memory update succeeded.
-			fmt.Printf("ai: persist config: %v\n", err)
+			slog.Error("ai: persist config", "err", err)
 		}
 	}
 	return nil
@@ -288,6 +289,7 @@ func (a *Agent) Run(
 			},
 		)
 		if err != nil {
+			slog.Error("ai: LLM error", "err", err)
 			_ = emit("error", map[string]string{"message": "LLM error: " + err.Error()})
 			return updatedHistory, nil
 		}
@@ -350,6 +352,7 @@ func (a *Agent) Run(
 					continue
 				}
 			}
+			slog.Info("ai: calling tool", "tool", tc.Function.Name, "tier", tier)
 			toolResult, toolErr := caller.CallTool(ctx, mcp.CallToolRequest{
 				Params: mcp.CallToolParams{
 					Name:      tc.Function.Name,
@@ -359,8 +362,10 @@ func (a *Agent) Run(
 
 			var resultContent string
 			if toolErr != nil {
+				slog.Error("ai: tool call failed", "tool", tc.Function.Name, "err", toolErr)
 				resultContent = fmt.Sprintf(`{"error": %q}`, toolErr.Error())
 			} else {
+				slog.Info("ai: tool call succeeded", "tool", tc.Function.Name)
 				resultContent = mcpResultToString(toolResult)
 			}
 
