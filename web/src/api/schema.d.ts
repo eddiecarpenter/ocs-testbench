@@ -1035,17 +1035,20 @@ export interface components {
          *     mode, and the Service-Information child AVP injected by the engine.
          *     Combined with `serviceProfile` for the AVP code mapping.
          *
-         *     | Value         | Unit type | Session mode | Service-Info child              |
-         *     |---------------|-----------|--------------|----------------------------------|
-         *     | VOICE         | TIME      | session      | IMS-Information / IN_INFORMATION |
-         *     | DATA          | VOLUME    | session      | PS-Information (both profiles)   |
-         *     | SMS           | EVENT     | session      | SMS-Information / SMS_INFORMATION|
-         *     | USSD1_EVENT   | EVENT     | event        | USSD-Information / DCD_INFORMATION|
-         *     | USSD1_SESSION | EVENT     | session      | USSD-Information / DCD_INFORMATION|
-         *     | USSD2_SESSION | TIME      | session      | USSD-Information / DCD_INFORMATION|
+         *     | Value | Unit type | Session mode         | Service-Info child              |
+         *     |-------|-----------|----------------------|----------------------------------|
+         *     | VOICE | TIME      | session              | IMS-Information / IN_INFORMATION |
+         *     | DATA  | VOLUME    | session              | PS-Information (both profiles)   |
+         *     | SMS   | EVENT     | session              | SMS-Information / SMS_INFORMATION|
+         *     | USSD1 | EVENT     | event (almost always)| USSD-Information / DCD_INFORMATION|
+         *     | USSD2 | TIME      | session or event     | USSD-Information / DCD_INFORMATION|
+         *
+         *     USSD1 charges by number of messages sent (unit-based).
+         *     USSD2 charges by session duration in seconds (time-based).
+         *     Session mode is controlled separately via `sessionMode`.
          * @enum {string}
          */
-        ServiceType: "VOICE" | "DATA" | "SMS" | "USSD1_EVENT" | "USSD1_SESSION" | "USSD2_SESSION";
+        ServiceType: "VOICE" | "DATA" | "SMS" | "USSD1" | "USSD2";
         /**
          * @description OCS vendor profile. Selects the AVP code mapping for the
          *     `serviceType` → `Service-Information` child AVP.
@@ -1054,13 +1057,13 @@ export interface components {
          *     - VOICE         → IMS-Information (876)
          *     - DATA          → PS-Information (874)
          *     - SMS           → SMS-Information (2000)
-         *     - USSD1_EVENT, USSD1_SESSION, USSD2_SESSION → USSD-Information (885)
+         *     - USSD1, USSD2  → USSD-Information (885)
          *
          *     **HUAWEI** (Huawei-specific AVPs use vendor-id 2011):
          *     - VOICE         → IN_INFORMATION (20300)
          *     - DATA          → PS-Information (874, vendor 10415)
          *     - SMS           → SMS_INFORMATION (20400)
-         *     - USSD1_EVENT, USSD1_SESSION, USSD2_SESSION → DCD_INFORMATION (2115)
+         *     - USSD1, USSD2  → DCD_INFORMATION (2115)
          * @default 3GPP
          * @enum {string}
          */

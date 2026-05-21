@@ -16,7 +16,7 @@ import type {
 
 /** Default session mode implied by each service type. */
 export function defaultSessionMode(serviceType: ServiceType | undefined): SessionMode {
-  return serviceType === 'USSD1_EVENT' ? 'event' : 'session';
+  return serviceType === 'USSD1' ? 'event' : 'session';
 }
 
 /** Default steps for a given session mode. */
@@ -73,9 +73,8 @@ function build3GPPChildren(serviceType: ServiceType): AvpNode[] {
       return [{ name: 'PS-Information',   code: 874,  vendorId: 10415, locked: true }];
     case 'SMS':
       return [{ name: 'SMS-Information',  code: 2000, vendorId: 10415, locked: true }];
-    case 'USSD1_EVENT':
-    case 'USSD1_SESSION':
-    case 'USSD2_SESSION':
+    case 'USSD1':
+    case 'USSD2':
       return [{ name: 'USSD-Information', code: 885,  vendorId: 10415, locked: true }];
     default:
       return [];
@@ -109,9 +108,8 @@ function buildHuaweiChildren(serviceType: ServiceType): AvpNode[] {
       return [{ name: 'PS-Information',  code: 874,   vendorId: 10415, locked: true }];
     case 'SMS':
       return [{ name: 'SMS-Information', code: 20327, vendorId: 2011, locked: true }];
-    case 'USSD1_EVENT':
-    case 'USSD1_SESSION':
-    case 'USSD2_SESSION':
+    case 'USSD1':
+    case 'USSD2':
       return [{ name: 'DCD-Information', code: 20337, vendorId: 2011, locked: true }];
     default:
       return [];

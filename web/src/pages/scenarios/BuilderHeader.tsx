@@ -48,9 +48,8 @@ const SERVICE_TYPE_OPTIONS: { value: ServiceType; label: string }[] = [
   { value: 'VOICE', label: 'Voice' },
   { value: 'DATA', label: 'Data' },
   { value: 'SMS', label: 'SMS' },
-  { value: 'USSD1_EVENT', label: 'USSD1 Event' },
-  { value: 'USSD1_SESSION', label: 'USSD1 Session' },
-  { value: 'USSD2_SESSION', label: 'USSD2 Session' },
+  { value: 'USSD1', label: 'USSD1 (Unit)' },
+  { value: 'USSD2', label: 'USSD2 (Time)' },
 ];
 
 const SESSION_OPTIONS: { value: SessionMode; label: string }[] = [
