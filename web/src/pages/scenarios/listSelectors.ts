@@ -6,16 +6,15 @@
 import type { ScenarioSummary, ServiceType } from './types';
 
 export const SERVICE_TYPE_GROUP_ORDER: ServiceType[] = [
-  'VOICE', 'DATA', 'SMS', 'USSD1_EVENT', 'USSD1_SESSION', 'USSD2_SESSION',
+  'VOICE', 'DATA', 'SMS', 'USSD1', 'USSD2',
 ];
 
 export const SERVICE_TYPE_LABELS: Record<ServiceType, string> = {
   VOICE: 'Voice',
   DATA: 'Data',
   SMS: 'SMS',
-  USSD1_EVENT: 'USSD1 Event',
-  USSD1_SESSION: 'USSD1 Session',
-  USSD2_SESSION: 'USSD2 Session',
+  USSD1: 'USSD1 (Unit)',
+  USSD2: 'USSD2 (Time)',
 };
 
 const UNGROUPED = '__ungrouped__' as const;

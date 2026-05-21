@@ -23,7 +23,7 @@ export interface MatrixCell {
 export function deriveUnitType(serviceType: ServiceType | undefined): UnitType {
   switch (serviceType) {
     case 'VOICE':
-    case 'USSD2_SESSION':
+    case 'USSD2':
       return 'TIME';
     case 'DATA':
       return 'VOLUME';
