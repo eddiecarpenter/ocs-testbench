@@ -36,6 +36,10 @@ import {
   IconChevronDown,
   IconChevronRight,
   IconCircleDot,
+  IconIndentDecrease,
+  IconIndentIncrease,
+  IconArrowUp,
+  IconArrowDown,
   IconLock,
   IconPlus,
   IconTrash,
@@ -51,9 +55,16 @@ import type { AvpNode } from '../types';
 import {
   addChildAt,
   type AvpPath,
+  canIndent,
+  canMoveDown,
+  canMoveUp,
+  canOutdent,
   getNodeAt,
+  indent,
   isLockedAvp,
-  isLockedGroup,
+  moveDown,
+  moveUp,
+  outdent,
   removeNodeAt,
   setNodeAt,
 } from './avpTree';
@@ -111,14 +122,13 @@ function AvpRow({
 }: AvpRowProps) {
   const key = pathKey(path);
   const locked = isLockedAvp(node);
-  const lockedGroup = isLockedGroup(node);
   const isGrouped = Array.isArray(node.children);
   const isOpen = expanded.has(key);
   const isSelected = selectedKey === key;
 
-  // Locked groups are expand/collapse only — not selectable for editing.
-  const selectable = !lockedGroup;
-
+  // Every node in the tree is selectable — including grouped and locked-group
+  // nodes — so its properties (name/code/vendor-id) are viewable (disabled when
+  // locked). The chevron below handles expand/collapse independently.
   return (
     <Stack gap={2} pl={path.length * 12}>
       <Group
@@ -128,15 +138,9 @@ function AvpRow({
           backgroundColor: isSelected ? 'var(--mantine-color-blue-light)' : undefined,
           padding: '4px 6px',
           borderRadius: 4,
-          cursor: selectable ? 'pointer' : 'default',
+          cursor: 'pointer',
         }}
-        onClick={() => {
-          if (isGrouped) {
-            onToggle(key);
-          } else if (selectable) {
-            onSelect(path);
-          }
-        }}
+        onClick={() => onSelect(path)}
         data-testid={`avp-row-${key}`}
       >
         {isGrouped ? (
@@ -213,11 +217,23 @@ function AvpRow({
   );
 }
 
+interface MoveControls {
+  canUp: boolean;
+  canDown: boolean;
+  canIndent: boolean;
+  canOutdent: boolean;
+  onUp: () => void;
+  onDown: () => void;
+  onIndent: () => void;
+  onOutdent: () => void;
+}
+
 interface PropertiesPaneProps {
   node: AvpNode;
   variableOptions: VariableOptionGroup[];
   onChange: (replacement: AvpNode) => void;
   onAddChild: () => void;
+  move: MoveControls;
 }
 
 function PropertiesPane({
@@ -225,6 +241,7 @@ function PropertiesPane({
   variableOptions,
   onChange,
   onAddChild,
+  move,
 }: PropertiesPaneProps) {
   const locked = isLockedAvp(node);
   const isGrouped = Array.isArray(node.children);
@@ -236,6 +253,57 @@ function PropertiesPane({
 
   return (
     <Stack gap="md">
+      <Stack gap={4}>
+        <Text size="sm" fw={500}>
+          Position
+        </Text>
+        <Group gap="xs">
+          <Tooltip label="Move up">
+            <ActionIcon
+              variant="default"
+              aria-label="Move up"
+              disabled={!move.canUp}
+              onClick={move.onUp}
+              data-testid="avp-move-up"
+            >
+              <IconArrowUp size={16} />
+            </ActionIcon>
+          </Tooltip>
+          <Tooltip label="Move down">
+            <ActionIcon
+              variant="default"
+              aria-label="Move down"
+              disabled={!move.canDown}
+              onClick={move.onDown}
+              data-testid="avp-move-down"
+            >
+              <IconArrowDown size={16} />
+            </ActionIcon>
+          </Tooltip>
+          <Tooltip label="Nest under previous AVP">
+            <ActionIcon
+              variant="default"
+              aria-label="Indent"
+              disabled={!move.canIndent}
+              onClick={move.onIndent}
+              data-testid="avp-indent"
+            >
+              <IconIndentIncrease size={16} />
+            </ActionIcon>
+          </Tooltip>
+          <Tooltip label="Move out to parent's level">
+            <ActionIcon
+              variant="default"
+              aria-label="Outdent"
+              disabled={!move.canOutdent}
+              onClick={move.onOutdent}
+              data-testid="avp-outdent"
+            >
+              <IconIndentDecrease size={16} />
+            </ActionIcon>
+          </Tooltip>
+        </Group>
+      </Stack>
       <TextInput
         label="Name"
         value={node.name}
@@ -370,6 +438,16 @@ export function FrameTab() {
     setExpanded((prev) => new Set(prev).add(selectedKey));
   }
 
+  // Apply a move helper and keep the selection on the node that moved.
+  function handleMove(
+    fn: (t: AvpNode[], p: AvpPath) => { tree: AvpNode[]; path: AvpPath },
+  ) {
+    if (!selected) return;
+    const result = fn(tree, selected);
+    setAvpTree(result.tree);
+    setSelected(result.path);
+  }
+
   function requestRemove(path: AvpPath) {
     setPendingRemove(path);
   }
@@ -386,8 +464,10 @@ export function FrameTab() {
   const pendingNode = pendingRemove ? getNodeAt(tree, pendingRemove) : null;
   const pendingDescendantCount = pendingNode ? countNodes(pendingNode) - 1 : 0;
 
-  // A locked-group node is not selectable; a locked-leaf IS selectable.
-  const canShowProperties = selectedNode !== null && !isLockedGroup(selectedNode);
+  // Every selected node shows its properties pane. Locked nodes render their
+  // fields disabled (read-only) rather than being hidden.
+  const canShowProperties = selectedNode !== null;
+  const movableNodeLocked = selectedNode !== null && isLockedAvp(selectedNode);
 
   return (
     <>
@@ -437,13 +517,20 @@ export function FrameTab() {
               variableOptions={variableOptions}
               onChange={handleChange}
               onAddChild={handleAddChild}
+              move={{
+                // Locked engine AVPs may never be repositioned.
+                canUp: !movableNodeLocked && canMoveUp(tree, selected!),
+                canDown: !movableNodeLocked && canMoveDown(tree, selected!),
+                canIndent: !movableNodeLocked && canIndent(tree, selected!),
+                canOutdent: !movableNodeLocked && canOutdent(tree, selected!),
+                onUp: () => handleMove(moveUp),
+                onDown: () => handleMove(moveDown),
+                onIndent: () => handleMove(indent),
+                onOutdent: () => handleMove(outdent),
+              }}
             />
           ) : (
-            <Text c="dimmed">
-              {selectedNode && isLockedGroup(selectedNode)
-                ? 'This is a mandatory grouped AVP. Select a child leaf AVP to edit its value reference.'
-                : 'Select an AVP to edit its properties.'}
-            </Text>
+            <Text c="dimmed">Select an AVP to edit its properties.</Text>
           )}
         </Card>
       </Group>

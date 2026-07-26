@@ -113,6 +113,55 @@ func TestHandleScenario_Create_ValidInput_ReturnsScenario(t *testing.T) {
 	assert.NotEmpty(t, result["id"])
 }
 
+// TestHandleScenario_Create_EmptyGroupedAvp_Succeeds verifies that a grouped
+// AVP with an empty children array is accepted — it must not be rejected as a
+// leaf missing its valueRef.
+func TestHandleScenario_Create_EmptyGroupedAvp_Succeeds(t *testing.T) {
+	f := newScenarioFixture(t)
+
+	client := newMCPTestClient(t, f.s)
+	resp := client.callTool("scenario", map[string]any{
+		"op":            "create",
+		"name":          "empty-group-scenario",
+		"peer_id":       uuidToStr(f.peerID.Bytes),
+		"subscriber_id": uuidToStr(f.subID.Bytes),
+		"body": map[string]any{
+			"sessionMode":  "event",
+			"serviceModel": "root",
+			"avpTree": []any{
+				map[string]any{"name": "Service-Information", "code": 873, "children": []any{}},
+				map[string]any{"name": "USSD-Detail", "code": 20654, "valueRef": "USSD_DETAIL"},
+			},
+		},
+	})
+	assert.False(t, isToolError(resp), "empty grouped AVP should be accepted")
+	var result map[string]any
+	toolResult(t, resp, &result)
+	assert.Equal(t, "empty-group-scenario", result["name"])
+}
+
+// TestHandleScenario_Create_LeafWithoutValueRef_ReturnsToolError verifies that a
+// true leaf (no children key) still requires a valueRef.
+func TestHandleScenario_Create_LeafWithoutValueRef_ReturnsToolError(t *testing.T) {
+	f := newScenarioFixture(t)
+
+	client := newMCPTestClient(t, f.s)
+	resp := client.callTool("scenario", map[string]any{
+		"op":            "create",
+		"name":          "bad-leaf-scenario",
+		"peer_id":       uuidToStr(f.peerID.Bytes),
+		"subscriber_id": uuidToStr(f.subID.Bytes),
+		"body": map[string]any{
+			"sessionMode":  "event",
+			"serviceModel": "root",
+			"avpTree": []any{
+				map[string]any{"name": "USSD-Detail", "code": 20654},
+			},
+		},
+	})
+	assert.True(t, isToolError(resp), "leaf without valueRef must return isError: true")
+}
+
 // TestHandleScenario_Create_MissingName_ReturnsToolError verifies missing required param.
 func TestHandleScenario_Create_MissingName_ReturnsToolError(t *testing.T) {
 	f := newScenarioFixture(t)

@@ -185,6 +185,86 @@ func TestScenario_DeleteScenario_Returns204(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, rr.Code)
 }
 
+// createScenarioWithAvpTree POSTs a scenario carrying the given avpTree and
+// returns the recorder for the caller to assert on.
+func (f *scenarioFixture) createScenarioWithAvpTree(t *testing.T, name string, avpTree []any) *httptest.ResponseRecorder {
+	t.Helper()
+	body := minimalScenarioBody(name, f.peerID, f.subscriberID)
+	body["avpTree"] = avpTree
+	reqBody, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/scenarios", bytes.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	f.r.ServeHTTP(rr, req)
+	return rr
+}
+
+// TestScenario_CreateScenario_EmptyGroupedAvp_Returns201 proves that a grouped
+// AVP with an empty children array (a legal empty Diameter group) is accepted —
+// it must NOT be treated as a leaf that requires a valueRef.
+func TestScenario_CreateScenario_EmptyGroupedAvp_Returns201(t *testing.T) {
+	f := newScenarioFixture(t)
+	avpTree := []any{
+		map[string]any{
+			"name":     "Service-Information",
+			"code":     873,
+			"children": []any{}, // empty group — legal, no valueRef needed
+		},
+		map[string]any{
+			"name":     "USSD-Detail",
+			"code":     20654,
+			"valueRef": "USSD_DETAIL",
+		},
+	}
+	rr := f.createScenarioWithAvpTree(t, "scen-empty-group", avpTree)
+	assert.Equal(t, http.StatusCreated, rr.Code,
+		"empty grouped AVP should be accepted: %s", rr.Body.String())
+}
+
+// TestScenario_CreateScenario_LeafWithoutValueRef_Returns400 proves that a true
+// leaf (no children key at all) still requires a valueRef.
+func TestScenario_CreateScenario_LeafWithoutValueRef_Returns400(t *testing.T) {
+	f := newScenarioFixture(t)
+	avpTree := []any{
+		map[string]any{
+			"name": "USSD-Detail",
+			"code": 20654,
+			// no children key and no valueRef → invalid leaf
+		},
+	}
+	rr := f.createScenarioWithAvpTree(t, "scen-bad-leaf", avpTree)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	assertErrorCode(t, rr.Body, "INVALID_REQUEST")
+}
+
+// TestScenario_CreateScenario_EmptyGroupRoundTrips proves that an empty grouped
+// AVP survives create → GET as children:[] rather than collapsing to a leaf.
+func TestScenario_CreateScenario_EmptyGroupRoundTrips(t *testing.T) {
+	f := newScenarioFixture(t)
+	avpTree := []any{
+		map[string]any{"name": "Service-Information", "code": 873, "children": []any{}},
+	}
+	rr := f.createScenarioWithAvpTree(t, "scen-rt", avpTree)
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+	var created map[string]any
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &created))
+
+	getReq := httptest.NewRequest(http.MethodGet, "/v1/scenarios/"+created["id"].(string), nil)
+	getRR := httptest.NewRecorder()
+	f.r.ServeHTTP(getRR, getReq)
+	require.Equal(t, http.StatusOK, getRR.Code)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(getRR.Body.Bytes(), &got))
+	tree, ok := got["avpTree"].([]any)
+	require.True(t, ok && len(tree) == 1, "expected one root AVP: %v", got["avpTree"])
+	node := tree[0].(map[string]any)
+	children, hasChildren := node["children"]
+	assert.True(t, hasChildren, "empty group must retain its children key after round-trip")
+	arr, _ := children.([]any)
+	assert.Empty(t, arr, "children should be an empty array")
+}
+
 // TestScenario_DeletePeer_WithScenarioFK_Returns409 verifies that
 // deleting a peer referenced by a scenario returns 409.
 func TestScenario_DeletePeer_WithScenarioFK_Returns409(t *testing.T) {

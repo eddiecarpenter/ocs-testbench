@@ -1215,7 +1215,10 @@ func smConvertAvpNode(n avpNodeJSON) template.AVPNode {
 		Code:     n.Code,
 		VendorID: n.VendorID,
 	}
-	if len(n.Children) > 0 {
+	// Grouped iff a "children" key is present (a non-nil slice, even if empty)
+	// — an empty grouped AVP is legal and must not be misread as a leaf. JSON
+	// decode gives nil for an absent key and a non-nil empty slice for [].
+	if n.Children != nil {
 		node.AVPs = smConvertAvpTree(n.Children)
 	} else if n.ValueRef != "" {
 		// Variable references are UPPER_SNAKE_CASE identifiers — uppercase
