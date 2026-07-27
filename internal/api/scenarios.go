@@ -148,12 +148,17 @@ func toFullResponse(sc store.Scenario, dict template.Dictionary) scenarioFullRes
 // frontend. It mirrors AvpNode in the OpenAPI schema and carries code +
 // vendorId resolved from the Diameter dictionary.
 type avpRichNode struct {
-	Name     string        `json:"name"`
-	Code     uint32        `json:"code"`
-	VendorID uint32        `json:"vendorId,omitempty"`
-	ValueRef string        `json:"valueRef,omitempty"`
-	Locked   bool          `json:"locked,omitempty"`
-	Children []avpRichNode `json:"children,omitempty"`
+	Name     string `json:"name"`
+	Code     uint32 `json:"code"`
+	VendorID uint32 `json:"vendorId,omitempty"`
+	ValueRef string `json:"valueRef,omitempty"`
+	Locked   bool   `json:"locked,omitempty"`
+	// Children is a pointer slice so the "grouped iff children present"
+	// distinction survives JSON round-trips: a leaf node marshals with no
+	// children key (nil pointer), while a grouped AVP — including an empty
+	// group — marshals as "children":[] (non-nil pointer). A plain slice with
+	// omitempty would erase an empty group back into a leaf on reload.
+	Children *[]avpRichNode `json:"children,omitempty"`
 }
 
 // enrichAvpTree walks raw avpTree JSON and fills in missing code / vendorId
@@ -185,8 +190,8 @@ func enrichNodes(nodes []avpRichNode, dict template.Dictionary) {
 				}
 			}
 		}
-		if len(nodes[i].Children) > 0 {
-			enrichNodes(nodes[i].Children, dict)
+		if nodes[i].Children != nil {
+			enrichNodes(*nodes[i].Children, dict)
 		}
 	}
 }
@@ -286,8 +291,9 @@ func validateServiceType(s string) string {
 // ENCODING_TYPE_MISMATCH at execution time — reject it here at save time so
 // the user gets a clear message immediately.
 //
-// A leaf node is one with no children (or an empty children array). Group AVPs
-// act as containers and do not need a valueRef themselves.
+// A leaf node is one with no "children" key at all. Group AVPs — including
+// empty ones (children present but []) — act as containers and do not need a
+// valueRef themselves.
 func validateAvpTreeJSON(raw json.RawMessage) string {
 	if len(raw) == 0 || string(raw) == "null" || string(raw) == "[]" {
 		return ""
@@ -312,8 +318,14 @@ func walkAvpNodes(nodes []any, path string) string {
 		if name != "" {
 			label = fmt.Sprintf("%s[%d] (%q)", path, i, name)
 		}
-		children, _ := node["children"].([]any)
-		if len(children) > 0 {
+		// A node is grouped iff it carries a "children" key (an array, even if
+		// empty) — mirroring the frontend's Array.isArray(node.children) and the
+		// OpenAPI schema ("grouped iff children present"). Empty grouped AVPs are
+		// legal in Diameter and encode fine, so they need no valueRef. Only a
+		// true leaf (no children key at all) must carry a value.
+		childrenRaw, hasChildren := node["children"]
+		if hasChildren {
+			children, _ := childrenRaw.([]any)
 			if msg := walkAvpNodes(children, label+".children"); msg != "" {
 				return msg
 			}

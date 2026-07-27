@@ -329,8 +329,14 @@ func walkAvpNodes(nodes []any, path string) string {
 		if name != "" {
 			label = fmt.Sprintf("%s[%d] (%q)", path, i, name)
 		}
-		children, _ := node["children"].([]any)
-		if len(children) > 0 {
+		// A node is grouped iff it carries a "children" key (an array, even if
+		// empty) — mirroring the frontend's Array.isArray(node.children) and the
+		// OpenAPI schema. Empty grouped AVPs are legal in Diameter and encode
+		// fine, so they need no valueRef. Only a true leaf (no children key at
+		// all) must carry a value.
+		childrenRaw, hasChildren := node["children"]
+		if hasChildren {
+			children, _ := childrenRaw.([]any)
 			if msg := walkAvpNodes(children, label+".children"); msg != "" {
 				return msg
 			}
