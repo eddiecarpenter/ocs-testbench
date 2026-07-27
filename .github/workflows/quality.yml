@@ -1,6 +1,8 @@
 # Quality scan — SonarCloud analysis on every PR + every push to main.
 # Generates coverage from both lanes (Go native, web lcov), then runs
-# the Sonar scanner with the config in sonar-project.properties.
+# the Sonar scanner (SonarSource/sonarqube-scan-action, pointed at
+# SonarCloud via SONAR_HOST_URL) with the config in
+# sonar-project.properties.
 #
 # Repo-side prerequisites (see sonar-project.properties for context):
 #   - SonarCloud project created with the keys in that file.
@@ -75,8 +77,14 @@ jobs:
           # web/coverage/lcov.info per sonar-project.properties.
           npm test -- --run --coverage --coverage.reporter=lcov
 
-      - name: SonarCloud scan
-        uses: SonarSource/sonarcloud-github-action@master
+      - name: SonarQube scan
+        # Migrated from the deprecated SonarSource/sonarcloud-github-action.
+        # The replacement uses sonar-scanner-CLI 7.x, which provisions its
+        # JRE by querying the server — so SONAR_HOST_URL must be set
+        # explicitly (https://sonarcloud.io for SonarCloud), otherwise the
+        # scan fails with "Failed to query JRE metadata".
+        uses: SonarSource/sonarqube-scan-action@v5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: https://sonarcloud.io
