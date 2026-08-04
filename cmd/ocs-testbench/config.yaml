@@ -20,13 +20,13 @@ logging:
 # Prometheus metrics server. When enabled the lifecycle layer starts
 # a separate HTTP server on metrics.addr exposing metrics.path.
 metrics:
-  enabled: true
+  enabled: false
   addr: ":9090"
   path: /metrics
 
 # Application HTTP server (REST + SSE + embedded SPA). Mandatory.
 server:
-  addr: ":8080"
+  addr: ":8888"
   read_timeout: 10s
   # write_timeout: 0 (no timeout) — required for long-lived SSE streams.
   # Setting this to a non-zero value will kill AI chat streams.

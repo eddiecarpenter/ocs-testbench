@@ -1,12 +1,12 @@
 # ocs-testbench
 
-[![Status](https://img.shields.io/badge/status-heavy%20development-orange)](#)
+[![Status](https://img.shields.io/badge/status-active-brightgreen)](#)
 [![Latest Release](https://img.shields.io/github/v/release/eddiecarpenter/ocs-testbench?include_prereleases)](https://github.com/eddiecarpenter/ocs-testbench/releases)
 [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=eddiecarpenter_ocs-testbench&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=eddiecarpenter_ocs-testbench)
 [![Built with gh-agentic](https://img.shields.io/badge/built%20with-gh--agentic-blueviolet)](https://github.com/eddiecarpenter/gh-agentic)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-> ⚠️ **Heavy development — not ready for use.** This project is being built in the open as a real-world dogfood of the [`gh-agentic`](https://github.com/eddiecarpenter/gh-agentic) delivery framework. APIs, schemas, scenario formats, persistence layout, and the UI are all in flux. Do not depend on it. Do not deploy it. Star it, watch it, read the PRs — but don't ship it.
+> 🚀 **v1.0.0 released.** This project is built in the open as a real-world dogfood of the [`gh-agentic`](https://github.com/eddiecarpenter/gh-agentic) delivery framework — every feature lands through its agentic pipeline. It's ready to use; ongoing work continues in the open, so watch the releases and read the PRs to follow along.
 
 > 📘 **For project context → [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md)**
 > 📐 **For the architectural baseline → [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**
@@ -32,7 +32,9 @@ Scenarios are self-contained AVP trees with placeholder substitution, ordered st
 
 ### Built with `gh-agentic`
 
-This repo is a **downstream consumer of [`gh-agentic`](https://github.com/eddiecarpenter/gh-agentic)** — every Feature in the OCS Testbench is captured as a Requirement, scoped into Features, designed into ordered Tasks, implemented commit-per-task, and merged via the same label-driven pipeline the framework prescribes. The framework is mounted at [`.ai/`](.ai/) as a tracked submodule pinned to a version tag.
+This repo is a **downstream consumer of [`gh-agentic`](https://github.com/eddiecarpenter/gh-agentic)** — every Feature in the OCS Testbench is captured as a Requirement, scoped into Features, designed into ordered Tasks, implemented commit-per-task, and merged via the same label-driven pipeline the framework prescribes. The framework is mounted at [`.agents/`](.agents/) as a tracked submodule pinned to a version tag.
+
+This repo is listed in [`gh-agentic`](https://github.com/eddiecarpenter/gh-agentic) as a reference example of the framework driving a real project — so the link runs both ways: gh-agentic points here as its worked example, and this README points back to gh-agentic as its delivery pipeline.
 
 ```mermaid
 flowchart LR
@@ -70,7 +72,7 @@ The framework's universal rules — reuse audits, contract discipline, AC-tracea
 | Persistence | PostgreSQL + `sqlc` |
 | Real-time streaming | Server-Sent Events (SSE) |
 | Packaging | Single binary (Go backend + embedded UI via `go:embed`) |
-| Delivery | [`gh-agentic`](https://github.com/eddiecarpenter/gh-agentic) — agentic pipeline mounted at `.ai/` |
+| Delivery | [`gh-agentic`](https://github.com/eddiecarpenter/gh-agentic) — agentic pipeline mounted at `.agents/` |
 
 ---
 
@@ -85,7 +87,7 @@ The application follows an API-first design — the core library (Diameter stack
 | **SSE stream** | Real-time delivery of responses, session state, connection status |
 | **Web UI** | Scenario authoring, step-through, continuous-run control, dark mode |
 | **Persistence** | PostgreSQL via `sqlc`-generated query interfaces |
-| **Framework mount** (`.ai/`) | `gh-agentic` framework pinned to a version tag — skills, recipes, standards, RULEBOOK |
+| **Framework mount** (`.agents/`) | `gh-agentic` framework pinned to a version tag — skills, recipes, standards, RULEBOOK |
 
 Full design context is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -100,7 +102,48 @@ Full design context is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ---
 
+## Installation
+
+### Prerequisites
+
+- **PostgreSQL** — the only runtime dependency. Point the testbench at a database via `database_url`; schema migrations are applied automatically on startup, so an empty database is all you need.
+
+A throwaway local instance is enough to get going:
+
+```bash
+docker run -d --name ocs-pg \
+  -e POSTGRES_USER=test -e POSTGRES_PASSWORD=test -e POSTGRES_DB=ocstestbench \
+  -p 5432:5432 postgres:16
+```
+
+### Download a release
+
+Grab the latest build for your platform from the [Releases](https://github.com/eddiecarpenter/ocs-testbench/releases) page:
+
+| Platform | Artifact | Notes |
+|---|---|---|
+| macOS (Apple Silicon) | `ocs-testbench-darwin-arm64.zip` | `.app` bundle with a default `config.yaml` inside. Gatekeeper may prompt on first launch — right-click → **Open** to bypass. |
+| Windows (x64) | `ocs-testbench-windows-amd64.zip` | `.exe` desktop app (WebView2). |
+| Linux (x64) | `ocs-testbench-linux-amd64.tar.gz` | Headless server binary — REST/SSE API only, no embedded browser. |
+
+The desktop builds auto-open the UI on launch. The Linux binary runs headless and serves the SPA over HTTP.
+
+### Configure and run
+
+Copy [`cmd/ocs-testbench/config.yaml`](cmd/ocs-testbench/config.yaml), set `database_url` to your PostgreSQL instance, then start the binary pointed at it:
+
+```bash
+./ocs-testbench -config /path/to/config.yaml
+# or:  CONFIG_FILE=/path/to/config.yaml ./ocs-testbench
+```
+
+Every field is documented inline in the sample config. With the defaults, the UI (and REST/SSE API) is served on `http://localhost:8888`.
+
+---
+
 ## Development
+
+Build from source (Go `1.25` and Node `24` required for the embedded SPA):
 
 ```bash
 git clone --recurse-submodules git@github.com:eddiecarpenter/ocs-testbench.git
@@ -115,7 +158,7 @@ If you cloned without `--recurse-submodules`, populate the framework mount with:
 git submodule update --init --recursive
 ```
 
-For agent-driven development workflows, see [`AGENTS.md`](AGENTS.md) and the framework playbooks under [`.ai/skills/`](.ai/skills/).
+For agent-driven development workflows, see [`AGENTS.md`](AGENTS.md) and the framework playbooks under [`.agents/skills/`](.agents/skills/).
 
 ---
 
