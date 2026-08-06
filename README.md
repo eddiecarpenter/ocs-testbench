@@ -141,6 +141,44 @@ Every field is documented inline in the sample config. With the defaults, the UI
 
 ---
 
+## Using with Claude Desktop (MCP)
+
+The testbench exposes a [Model Context Protocol](https://modelcontextprotocol.io) server over Streamable HTTP at **`/mcp`** — so MCP-capable clients such as Claude Desktop and Goose can drive it directly with natural language ("connect peer *ocs-01*, run the *voice-session* scenario, show me the CCA"). It surfaces the same operations as the REST API as ~22 discoverable tools: peer and subscriber management, scenario CRUD, execution control (start / step / resume / stop), AVP lookup, and config.
+
+With the default config the endpoint is `http://localhost:8888/mcp`. **The testbench must be running for the connection to work** — start it before (or restart the client after) launching Claude Desktop.
+
+### Option A — custom connector (native, Claude paid plans)
+
+1. In Claude Desktop, open **Settings → Connectors → Add custom connector**.
+2. Name it `ocs-testbench` and set the URL to `http://localhost:8888/mcp`.
+3. Save, then enable the connector in a new chat.
+
+### Option B — config file with `mcp-remote` (works on all versions)
+
+Claude Desktop's config natively speaks stdio, so a small bridge ([`mcp-remote`](https://www.npmjs.com/package/mcp-remote), fetched on demand via `npx`) forwards it to the HTTP endpoint. Requires [Node.js](https://nodejs.org).
+
+Edit `claude_desktop_config.json`:
+
+- **macOS** — `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows** — `%APPDATA%\Claude\claude_desktop_config.json`
+
+Add an entry under `mcpServers` (create the object if it isn't there):
+
+```json
+{
+  "mcpServers": {
+    "ocs-testbench": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://localhost:8888/mcp"]
+    }
+  }
+}
+```
+
+Fully **quit and reopen** Claude Desktop (a window reload isn't enough). The `ocs-testbench` tools then appear in the chat's tool menu. If the server port differs from `8888`, update the URL to match `server.addr`.
+
+---
+
 ## Development
 
 Build from source (Go `1.25` and Node `24` required for the embedded SPA):
